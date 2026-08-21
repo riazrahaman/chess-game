@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess UI</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f0f0;
+        }
+        #game-container {
+            margin-top: 20px;
+        }
+        #board {
+            display: grid;
+            grid-template-columns: repeat(8, 50px);
+            grid-template-rows: repeat(8, 50px);
+            border: 2px solid #333;
+        }
+        .square {
+            width: 50px;
+            height: 50px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 35px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .white-sq { background-color: #eeeed2; }
+        .black-sq { background-color: #769656; }
+        .highlight { background-color: #f7f769 !important; }
+        #status-panel {
+            margin-top: 20px;
+            text-align: center;
+        }
+        #info {
+            font-size: 1.2em;
+            margin-bottom: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 1em;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>Chess UI</h1>
+    <div id="game-container">
+        <div id="board"></div>
+    </div>
+    <div id="status-panel">
+        <div id="info">Turn: White</div>
+        <div id="status">Status: Ongoing</div>
+        <br>
+        <button id="new-game">New Game</button>
+    </div>
+    <script type="module" src="ui.js"></script>
+</body>
+</html>
