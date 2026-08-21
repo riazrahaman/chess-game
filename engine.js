@@ -1,6 +1,6 @@
 /**
  * Chess Engine Game Logic
- * Dependency-free vanilla JavaScript ES module
+ * Dual-format module: works as classic browser script (globals) & CommonJS (Node.js)
  *
  * Board State Representation:
  * An object representing the chess game state:
@@ -82,7 +82,7 @@ function cloneBoard(board) {
  * Returns the starting chess board state.
  * @returns {Object} initial board state
  */
-export function createInitialBoard() {
+function createInitialBoard() {
   const pieces = {};
   for (const sq of SQUARES) {
     pieces[sq] = null;
@@ -413,7 +413,7 @@ function getPseudoLegalMoves(board, square, color) {
  * @param {'white'|'black'} [turn]
  * @returns {boolean}
  */
-export function isCheck(board, turn) {
+function isCheck(board, turn) {
   const currentTurn = turn || board?.turn || 'white';
   const opponent = currentTurn === 'white' ? 'black' : 'white';
   const kingSquare = findKing(board, currentTurn);
@@ -430,7 +430,7 @@ export function isCheck(board, turn) {
  * @param {'q'|'r'|'b'|'n'} [promotion='q']
  * @returns {Object} new board state
  */
-export function makeMove(board, from, to, promotion = 'q') {
+function makeMove(board, from, to, promotion = 'q') {
   const newBoard = cloneBoard(board);
   const piece = newBoard.pieces[from];
   if (!piece) return newBoard;
@@ -536,7 +536,7 @@ export function makeMove(board, from, to, promotion = 'q') {
  * @param {'white'|'black'} [turn] - e.g. 'white'
  * @returns {string[]} array of destination squares (e.g. ['e3', 'e4'])
  */
-export function getLegalMoves(board, square, turn) {
+function getLegalMoves(board, square, turn) {
   const currentTurn = turn || board?.turn || (board?.pieces?.[square]?.color) || 'white';
   const piece = board.pieces?.[square];
   if (!piece || piece.color !== currentTurn) return [];
@@ -571,7 +571,7 @@ function hasAnyLegalMoves(board, turn) {
  * @param {'white'|'black'} [turn]
  * @returns {boolean}
  */
-export function isCheckmate(board, turn) {
+function isCheckmate(board, turn) {
   const currentTurn = turn || board?.turn || 'white';
   if (!isCheck(board, currentTurn)) return false;
   return !hasAnyLegalMoves(board, currentTurn);
@@ -583,7 +583,7 @@ export function isCheckmate(board, turn) {
  * @param {'white'|'black'} [turn]
  * @returns {boolean}
  */
-export function isStalemate(board, turn) {
+function isStalemate(board, turn) {
   const currentTurn = turn || board?.turn || 'white';
   if (isCheck(board, currentTurn)) return false;
   return !hasAnyLegalMoves(board, currentTurn);
@@ -595,10 +595,14 @@ export function isStalemate(board, turn) {
  * @param {'white'|'black'} [turn]
  * @returns {'ongoing'|'check'|'checkmate'|'stalemate'}
  */
-export function getGameStatus(board, turn) {
+function getGameStatus(board, turn) {
   const currentTurn = turn || board?.turn || 'white';
   if (isCheckmate(board, currentTurn)) return 'checkmate';
   if (isStalemate(board, currentTurn)) return 'stalemate';
   if (isCheck(board, currentTurn)) return 'check';
   return 'ongoing';
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { createInitialBoard, getLegalMoves, makeMove, isCheck, isCheckmate, isStalemate, getGameStatus };
 }

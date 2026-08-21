@@ -1,21 +1,10 @@
-import {
-  createInitialBoard,
-  getLegalMoves,
-  makeMove,
-  isCheck,
-  isCheckmate,
-  isStalemate,
-  getGameStatus
-} from './engine.js';
-
 let board = null;
 let turn = 'white';
 let selectedSquare = null;
 let legalMoves = [];
 
 const boardElement = document.getElementById('board');
-const infoElement = 'info'; // Wait, I need to select the element
-const infoElem = document.getElementById('info');
+const infoElement = document.getElementById('info');
 const statusElement = document.getElementById('status');
 const newGameButton = document.getElementById('new-game');
 
@@ -37,6 +26,7 @@ const pieceGlyphs = {
     'p': '\u265F'
   }
 };
+
 
 function renderBoard() {
   if (!board) return;

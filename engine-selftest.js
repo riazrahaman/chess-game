@@ -1,4 +1,4 @@
-import {
+const {
   createInitialBoard,
   getLegalMoves,
   makeMove,
@@ -6,7 +6,7 @@ import {
   isCheckmate,
   isStalemate,
   getGameStatus
-} from './engine.js';
+} = require('./engine.js');
 
 let passed = 0;
 let failed = 0;
