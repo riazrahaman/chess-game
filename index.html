@@ -38,9 +38,39 @@
             margin-top: 20px;
             text-align: center;
         }
-        #info {
-            font-size: 1.2em;
+        #timers {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
             margin-bottom: 10px;
+        }
+        .timer-badge {
+            padding: 5px 10px;
+            border: 2px solid #333;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .active-timer {
+            background-color: #f7f769;
+            border-color: #ffcc00;
+        }
+        #history-container {
+            margin-top: 20px;
+            max-height: 200px;
+            overflow-y: auto;
+            width: 300px;
+            border: 1px solid #ccc;
+            background: white;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 5px;
+            text-align: center;
+            border-bottom: 1px solid #ddd;
+            font-size: 0.9em;
         }
         button {
             padding: 10px 20px;
@@ -53,12 +83,28 @@
     <h1>Chess UI</h1>
     <div id="game-container">
         <div id="board"></div>
+        <div id="timers">
+            <div id="timer-white" class="timer-badge">White: 10:00</div>
+            <div id="timer-black" class="timer-badge">Black: 10:00</div>
+        </div>
     </div>
     <div id="status-panel">
         <div id="info">Turn: White</div>
         <div id="status">Status: Ongoing</div>
         <br>
         <button id="new-game">New Game</button>
+    </div>
+    <div id="history-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>White Move</th>
+                    <th>Black Move</th>
+                </tr>
+            </thead>
+            <tbody id="history-body"></tbody>
+        </table>
     </div>
     <script src="engine.js"></script>
     <script src="ui.js"></script>
