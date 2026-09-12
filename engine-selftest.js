@@ -5,7 +5,18 @@ const {
   isCheck,
   isCheckmate,
   isStalemate,
-  getGameStatus
+  getGameStatus,
+  getKingStatus,
+  computeCaptured,
+  historyToSan,
+  buildPgn,
+  getBoardRenderOrder,
+  getRankLabels,
+  getFileLabels,
+  gameEndPresentation,
+  classifySound,
+  serializeRefereeState,
+  deserializeRefereeState
 } = require('./engine.js');
 
 let passed = 0;
@@ -57,8 +68,43 @@ function cloneBoardHelper(board) {
 
 console.log('--- Running Chess Engine Self-Tests ---\n');
 
+// E5. SAN and PGN conversion stays hermetic and replays only the supplied
+// coordinate history; it does not depend on a server or browser state.
+const knownSanMoves = historyToSan(['e2e4', 'e7e5', 'g1f3', 'b8c6', 'f1b5', 'a7a6']);
+assert(JSON.stringify(knownSanMoves) === JSON.stringify(['e4', 'e5', 'Nf3', 'Nc6', 'Bb5', 'a6']),
+  'E5: known opening coordinate sequence converts to SAN');
+const knownPgn = buildPgn(knownSanMoves);
+assert(knownPgn.includes('[Event "Casual Game"]') &&
+  knownPgn.includes('1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 *'),
+  'E5: SAN moves assemble into minimal PGN with headers and result token');
+
+const checkPosition = createInitialBoard();
+let checkBoard = makeMove(checkPosition, 'f2', 'f3');
+checkBoard = makeMove(checkBoard, 'e7', 'e5');
+checkBoard = makeMove(checkBoard, 'g2', 'g4');
+checkBoard = makeMove(checkBoard, 'd8', 'h4');
+const checkState = getKingStatus(checkBoard, 'white');
+assert(checkState.check === true && checkState.mate === true && checkState.kingSquare === 'e1',
+  'E6: checked king status identifies the white king and checkmate');
+const safeState = getKingStatus(createInitialBoard(), 'white');
+assert(safeState.check === false && safeState.mate === false && safeState.kingSquare === 'e1',
+  'E6: non-check position has no check or mate indicator');
+
 // 1. Initial Board Verification
 const initialBoard = createInitialBoard();
+const freshMaterial = computeCaptured(initialBoard);
+assert(freshMaterial.capturedBy.white.length === 0 && freshMaterial.capturedBy.black.length === 0 &&
+  freshMaterial.advantage.points === 0,
+  'E7: fresh starting board has empty captured trays and zero advantage');
+let captureBoard = makeMove(initialBoard, 'e2', 'e4');
+captureBoard = makeMove(captureBoard, 'd7', 'd5');
+captureBoard = makeMove(captureBoard, 'e4', 'd5');
+const captureMaterial = computeCaptured(captureBoard);
+assert(captureMaterial.capturedBy.white.length === 1 &&
+  captureMaterial.capturedBy.white[0].type === 'p' && captureMaterial.capturedValue.white === 1 &&
+  captureMaterial.capturedBy.black.length === 0 && captureMaterial.advantage.side === 'white' &&
+  captureMaterial.advantage.points === 1,
+  'E7: after exd5, white tray contains one captured pawn and white leads by +1');
 let whitePieces = 0;
 let blackPieces = 0;
 let emptySquares = 0;
@@ -285,13 +331,308 @@ pinBoard.pieces['e8'] = { type: 'r', color: 'black' };
 const pinnedKnightMoves = getLegalMoves(pinBoard, 'e2', 'white');
 assertArrayEquals(pinnedKnightMoves, [], 'Knight pinned to King along e-file has 0 legal moves');
 
-console.log('\n--- Self-Test Summary ---');
-console.log(`Passed: ${passed}`);
-console.log(`Failed: ${failed}`);
+// 12. C1 Clock Reconciliation — referee file is single source of truth
+const { execSync } = require('child_process');
+const stateFile = require('path').join(__dirname, '.referee-state.json');
+const CLOCK_START = 600, CLOCK_INC = 15;
 
-if (failed > 0) {
-  console.error(`\nSelf-test FAILED with ${failed} failure(s).`);
-  process.exit(1);
-} else {
-  console.log('\nAll self-tests PASSED successfully!');
+function refereeCli(...args) {
+  const out = execSync(`node referee-helper.cjs ${args.join(' ')}`, { cwd: __dirname }).toString();
+  return JSON.parse(out);
 }
+
+function refereeCliWithEnv(env, ...args) {
+  try {
+    return JSON.parse(execSync(`node referee-helper.cjs ${args.join(' ')}`, {
+      cwd: __dirname, env: { ...process.env, ...env }
+    }).toString());
+  } catch (error) {
+    return JSON.parse(error.stdout.toString());
+  }
+}
+
+refereeCli('reset');
+let st = JSON.parse(require('fs').readFileSync(stateFile, 'utf8'));
+assert(st.clocks && st.clocks.white === CLOCK_START && st.clocks.black === CLOCK_START,
+  `C1: fresh referee game starts both clocks at ${CLOCK_START}s (got ${JSON.stringify(st.clocks)})`);
+
+const before = JSON.parse(JSON.stringify(st.clocks));
+const mv = refereeCli('move', 'e2e4');
+assert(mv.ok === true, 'C1: referee accepts a legal move');
+st = JSON.parse(require('fs').readFileSync(stateFile, 'utf8'));
+assert(st.clocks.white === Math.min(CLOCK_START, before.white + CLOCK_INC),
+  `C1: mover (white) receives +${CLOCK_INC}s increment, capped at ${CLOCK_START} (got ${st.clocks.white})`);
+assert(st.clocks.black === CLOCK_START, `C1: non-mover (black) clock unchanged at ${CLOCK_START} (got ${st.clocks.black})`);
+assert(mv.clocks && mv.clocks.white === st.clocks.white, 'C1: move output echoes referee clocks');
+
+const statusOut = refereeCli('status');
+assert(statusOut.clocks && statusOut.clocks.black === st.clocks.black, 'C1: status output carries referee clocks');
+
+// Legacy backfill: state without clocks gets defaults
+require('fs').writeFileSync(stateFile, JSON.stringify({ board: st.board, history: st.history }));
+const backfillStatus = refereeCli('status');
+assert(backfillStatus.clocks && backfillStatus.clocks.white === CLOCK_START,
+  'C1: legacy state file without clocks is backfilled to start values');
+
+refereeCli('reset');
+st = JSON.parse(require('fs').readFileSync(stateFile, 'utf8'));
+assert(st.clocks.white === CLOCK_START && st.clocks.black === CLOCK_START,
+  'C1: reset restores both clocks to start');
+
+// 13. C2 Promotion — referee plumbs promo choice through to the board
+function seedPromotionBoard(color) {
+  // Minimal board: two kings + one pawn one step from promotion.
+  const pieces = {};
+  for (const f of 'abcdefgh') for (const r of '12345678') pieces[f + r] = null;
+  pieces['e1'] = { type: 'k', color: 'white' };
+  pieces['e8'] = { type: 'k', color: 'black' };
+  if (color === 'black') pieces['h2'] = { type: 'p', color: 'black' };
+  else pieces['h7'] = { type: 'p', color: 'white' };
+  return {
+    pieces,
+    castling: {
+      white: { kingSide: false, queenSide: false },
+      black: { kingSide: false, queenSide: false }
+    },
+    enPassant: null,
+    turn: color,
+    halfmoveClock: 0,
+    fullmoveNumber: 1
+  };
+}
+
+function seedReferee(board) {
+  require('fs').writeFileSync(stateFile, JSON.stringify({
+    board, history: [], clocks: { white: CLOCK_START, black: CLOCK_START }
+  }));
+}
+
+// Engine-level: explicit underpromotion to rook (regression for the C2 bug
+// where every UI promotion silently became a queen).
+let promoEng = seedPromotionBoard('black');
+promoEng = makeMove(promoEng, 'h2', 'h1', 'r');
+assert(promoEng.pieces['h1']?.type === 'r' && promoEng.pieces['h1']?.color === 'black',
+  'C2: engine underpromotion h2h1r yields a black ROOK on h1 (not queen)');
+promoEng = seedPromotionBoard('black');
+promoEng = makeMove(promoEng, 'h2', 'h1', 'n');
+assert(promoEng.pieces['h1']?.type === 'n', 'C2: engine underpromotion h2h1n yields a knight');
+
+// Referee-level: the move command accepts and applies every promo choice.
+for (const [piece, name] of [['q', 'queen'], ['r', 'rook'], ['b', 'bishop'], ['n', 'knight']]) {
+  seedReferee(seedPromotionBoard('black'));
+  const res = refereeCli('move', 'h2h1' + piece);
+  const landed = JSON.parse(require('fs').readFileSync(stateFile, 'utf8'));
+  assert(res.ok === true && landed.board.pieces['h1']?.type === piece,
+    `C2: referee applies promotion choice h2h1${piece} — ${name} on h1`);
+  assert(landed.history[landed.history.length - 1] === 'h2h1' + piece,
+    `C2: referee history records the promo suffix h2h1${piece}`);
+}
+
+// Referee-level: white promotion also validated (symmetry check).
+seedReferee(seedPromotionBoard('white'));
+const whitePromo = refereeCli('move', 'h7h8n');
+const whiteLanded = JSON.parse(require('fs').readFileSync(stateFile, 'utf8'));
+assert(whitePromo.ok === true && whiteLanded.board.pieces['h8']?.type === 'n',
+  'C2: referee applies white underpromotion h7h8n — knight on h8');
+
+// Backward compat: bare coordinate with no suffix still defaults to queen.
+seedReferee(seedPromotionBoard('black'));
+const bare = refereeCli('move', 'h2h1');
+const bareLanded = JSON.parse(require('fs').readFileSync(stateFile, 'utf8'));
+assert(bare.ok === true && bareLanded.board.pieces['h1']?.type === 'q',
+  'C2: bare coordinate h2h1 (no promo arg) still defaults to queen');
+
+// Referee rejects an illegal promo (piece not on a promotion square).
+refereeCli('reset');
+const badPromo = execSync(`node referee-helper.cjs move e2e4q 2>/dev/null || true`, { cwd: __dirname }).toString();
+assert(JSON.parse(badPromo).ok === false, 'C2: referee rejects promo suffix on non-promotion move e2e4q');
+const afterBad = refereeCli('status');
+assert(afterBad.plyCount === 0, 'C2: rejected promo move does not touch referee history');
+
+refereeCli('reset');
+
+// 14. C3 Referee-authoritative UI transport — exercise the same HTTP endpoint
+// used by ui.js, then read a fresh state snapshot as pollReferee() does.
+const uiSource = require('fs').readFileSync(require('path').join(__dirname, 'ui.js'), 'utf8');
+assert(!/makeMove\s*\(/.test(uiSource),
+  'C3: UI has no local makeMove authority');
+assert(!/createInitialBoard\s*\(/.test(uiSource),
+  'C3: UI does not render a locally-created initial board');
+assert(/fetch\(['"]\/api\/move['"]/.test(uiSource),
+  'C3: UI submits human moves through the referee endpoint');
+
+function httpMoveOverServer(server, move) {
+  const payload = JSON.stringify({ move });
+  return new Promise((resolve, reject) => {
+    const req = require('http').request({
+      host: '127.0.0.1',
+      port: server.address().port,
+      method: 'POST',
+      path: '/api/move',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+    }, (res) => {
+      let body = '';
+      res.on('data', c => { body += c; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(body)); } catch (e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+    });
+}
+
+async function runC3Transport() {
+  const { createServer } = require('./server.js');
+  const server = createServer();
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  try {
+    refereeCli('reset');
+    const endpointMove = await httpMoveOverServer(server, 'e2e4');
+    const endpointState = JSON.parse(require('fs').readFileSync(stateFile, 'utf8'));
+    assert(endpointMove.ok === true && endpointMove.applied === 'e2e4',
+    'C3: HTTP move endpoint accepts a legal move through the referee');
+    assert(endpointState.history[0] === 'e2e4' && endpointState.board.pieces.e2 === null &&
+      endpointState.board.pieces.e4?.type === 'p' && endpointState.board.pieces.e4?.color === 'white',
+    'C3: fresh referee state snapshot contains the endpoint move for UI rendering');
+    assert(endpointState.board.turn === 'black',
+    'C3: fresh referee state snapshot supplies the next turn to the UI');
+    refereeCli('reset');
+    } finally {
+    await new Promise(r => server.close(r));
+    }
+}
+
+runC3Transport().then(() => {
+  // 15. C4 Referee timing and flagging — hermetic CLI tests with no network.
+  refereeCli('reset');
+  const timedStart = JSON.parse(require('fs').readFileSync(stateFile, 'utf8'));
+  timedStart.clocks.white = 30;
+  require('fs').writeFileSync(stateFile, JSON.stringify(timedStart));
+  const timedMove = refereeCliWithEnv({ CHESS_MOVE_TIME_COST: '20' }, 'move', 'e2e4');
+  const timedState = JSON.parse(require('fs').readFileSync(stateFile, 'utf8'));
+  assert(timedMove.ok === true && timedState.clocks.white === 25 && timedState.clocks.white < 30,
+    'C4: referee deducts active-side move time before applying a move');
+
+  refereeCli('reset');
+  const flagStart = JSON.parse(require('fs').readFileSync(stateFile, 'utf8'));
+  flagStart.clocks.white = 1;
+  require('fs').writeFileSync(stateFile, JSON.stringify(flagStart));
+  const flaggedMove = refereeCliWithEnv({ CHESS_MOVE_TIME_COST: '1' }, 'move', 'e2e4');
+  const flaggedState = JSON.parse(require('fs').readFileSync(stateFile, 'utf8'));
+  assert(flaggedMove.ok === false && flaggedMove.error === 'flagged' &&
+    flaggedState.gameOver === true && flaggedState.status === 'timeout' &&
+    flaggedState.flagged === 'white' && flaggedState.result === '0-1 on time' &&
+    flaggedState.clocks.white === 0,
+    'C4: clock reaching zero flags white and records a 0-1 on time result');
+  const postFlagMove = refereeCliWithEnv({ CHESS_MOVE_TIME_COST: '1' }, 'move', 'e2e4');
+  const postFlagState = JSON.parse(require('fs').readFileSync(stateFile, 'utf8'));
+  assert(postFlagMove.ok === false && postFlagMove.error === 'game over' &&
+    postFlagState.history.length === 0 && postFlagState.board.pieces.e2?.type === 'p',
+    'C4: referee rejects moves after flag and leaves the board unchanged');
+  refereeCli('reset');
+
+  // 17. E12 snapshot persistence and referee-owned undo.
+  const persistenceSource = { board: createInitialBoard(), history: [], clocks: { white: 600, black: 600 } };
+  const persisted = deserializeRefereeState(serializeRefereeState(persistenceSource));
+  assert(persisted && persisted.board.pieces.e1?.type === 'k' && persisted.history.length === 0,
+    'E12: referee snapshot serializes and deserializes losslessly');
+  assert(deserializeRefereeState('{corrupt json') === null && deserializeRefereeState(null) === null,
+    'E12: corrupt or empty persisted snapshot is rejected without throwing');
+  refereeCli('move', 'e2e4');
+  refereeCli('move', 'e7e5');
+  const undoResult = refereeCli('undo');
+  const undoState = JSON.parse(require('fs').readFileSync(stateFile, 'utf8'));
+  assert(undoResult.ok === true && undoResult.undone === true && undoState.history.length === 1 &&
+    undoState.history[0] === 'e2e4' && undoState.board.pieces.e4?.type === 'p' &&
+    undoState.board.turn === 'black', 'E12: referee undo pops the last move and restores the prior board');
+  refereeCli('reset');
+  const emptyUndo = refereeCli('undo');
+  assert(emptyUndo.ok === true && emptyUndo.noOp === true && emptyUndo.plyCount === 0,
+    'E12: undo on empty history is a no-op');
+
+  // 16. E8 referee-owned resignation/draw and UI-only board orientation.
+  const e8UiSource = require('fs').readFileSync(require('path').join(__dirname, 'ui.js'), 'utf8');
+  assert(e8UiSource.includes('boardFlipped') && e8UiSource.includes('flip-board') &&
+    e8UiSource.includes('/api/resign') && e8UiSource.includes('/api/draw'),
+    'E8: UI exposes flip, resign, and draw actions without local game-state mutation');
+  const stateBeforeOrientation = JSON.parse(require('fs').readFileSync(stateFile, 'utf8'));
+  const normalOrder = getBoardRenderOrder(false);
+  const flippedOrder = getBoardRenderOrder(true);
+  const stateAfterOrientation = JSON.parse(require('fs').readFileSync(stateFile, 'utf8'));
+  assert(normalOrder.length === 64 && normalOrder[0] === 'a8' && normalOrder[63] === 'h1' &&
+    flippedOrder[0] === 'h1' && flippedOrder[63] === 'a8' &&
+    JSON.stringify(stateBeforeOrientation) === JSON.stringify(stateAfterOrientation),
+    'E8: flipped render order reverses rows/files without mutating referee state');
+  assert(JSON.stringify(getRankLabels(false)) === JSON.stringify(['8', '7', '6', '5', '4', '3', '2', '1']) &&
+    JSON.stringify(getRankLabels(true)) === JSON.stringify(['1', '2', '3', '4', '5', '6', '7', '8']),
+    'E9: rank labels follow normal and flipped orientation');
+  assert(JSON.stringify(getFileLabels(false)) === JSON.stringify(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']) &&
+    JSON.stringify(getFileLabels(true)) === JSON.stringify(['h', 'g', 'f', 'e', 'd', 'c', 'b', 'a']),
+    'E9: file labels follow normal and flipped orientation');
+  const endCases = [
+    [{ gameOver: true, status: 'checkmate', result: '1-0' }, 'White wins by checkmate', 'checkmate'],
+    [{ gameOver: true, status: 'stalemate', result: '½-½' }, 'Draw by stalemate', 'stalemate'],
+    [{ gameOver: true, status: 'resigned', resigned: 'white', result: '0-1' }, 'Black wins by resignation', 'resignation'],
+    [{ gameOver: true, status: 'timeout', flagged: 'white', result: '0-1 on time' }, 'Black wins on time', 'timeout'],
+    [{ gameOver: true, status: 'draw', result: '½-½' }, 'Draw by agreement', 'draw']
+  ];
+  assert(endCases.every(([state, banner, reason]) => {
+    const presentation = gameEndPresentation(state);
+    return presentation.banner === banner && presentation.reason === reason;
+  }), 'E10: referee game-over states map to the correct overlay banner and reason');
+  const soundInitial = { board: createInitialBoard(), history: [], gameOver: false };
+  const soundMoveBoard = makeMove(soundInitial.board, 'e2', 'e4');
+  const soundMove = { board: soundMoveBoard, history: ['e2e4'], gameOver: false };
+  assert(classifySound(soundInitial, soundMove) === 'move', 'E11: ordinary referee move classifies as move sound');
+  const soundCaptureBoard = makeMove(soundMoveBoard, 'd7', 'd5');
+  const soundCaptureNextBoard = makeMove(soundCaptureBoard, 'e4', 'd5');
+  const soundCapture = { board: soundCaptureNextBoard, history: ['e2e4', 'd7d5', 'e4d5'], gameOver: false };
+  assert(classifySound(soundCaptureBoard && { board: soundCaptureBoard, history: ['e2e4', 'd7d5'], gameOver: false }, soundCapture) === 'capture',
+    'E11: removed piece classifies as capture sound');
+  const soundCheckBoard = makeMove(createInitialBoard(), 'f2', 'f3');
+  const soundCheckBoard2 = makeMove(soundCheckBoard, 'e7', 'e5');
+  const soundCheckBoard3 = makeMove(soundCheckBoard2, 'g2', 'g4');
+  const soundCheckBoard4 = makeMove(soundCheckBoard3, 'd8', 'h4');
+  assert(classifySound(
+    { board: soundCheckBoard3, history: ['f2f3', 'e7e5', 'g2g4'], gameOver: false },
+    { board: soundCheckBoard4, history: ['f2f3', 'e7e5', 'g2g4', 'd8h4'], gameOver: false }
+  ) === 'check', 'E11: new check classifies as check sound');
+  assert(classifySound(soundInitial, { ...soundInitial, gameOver: true, status: 'draw', result: '½-½' }) === 'gameEnd',
+    'E11: new referee game-over classifies as gameEnd sound');
+  assert(classifySound(soundInitial, soundInitial) === null,
+    'E11: unchanged referee poll produces no sound');
+
+  const resigned = refereeCliWithEnv({}, 'resign', 'white');
+  const resignedState = JSON.parse(require('fs').readFileSync(stateFile, 'utf8'));
+  assert(resigned.ok === true && resignedState.gameOver === true && resignedState.resigned === 'white' &&
+    resignedState.result === '0-1', 'E8: referee records white resignation and black win');
+  const moveAfterResign = refereeCliWithEnv({}, 'move', 'e2e4');
+  assert(moveAfterResign.ok === false && moveAfterResign.error === 'game over',
+    'E8: post-resignation moves are rejected');
+
+  refereeCli('reset');
+  const drawn = refereeCliWithEnv({}, 'draw');
+  const drawnState = JSON.parse(require('fs').readFileSync(stateFile, 'utf8'));
+  assert(drawn.ok === true && drawnState.gameOver === true && drawnState.draw === true &&
+    drawnState.result === '½-½', 'E8: referee records accepted draw as ½-½');
+  const moveAfterDraw = refereeCliWithEnv({}, 'move', 'e2e4');
+  assert(moveAfterDraw.ok === false && moveAfterDraw.error === 'game over',
+    'E8: post-draw moves are rejected');
+  refereeCli('reset');
+
+  console.log('\n--- Self-Test Summary ---');
+  console.log(`Passed: ${passed}`);
+  console.log(`Failed: ${failed}`);
+
+  if (failed > 0) {
+    console.error(`\nSelf-test FAILED with ${failed} failure(s).`);
+    process.exit(1);
+   } else {
+    console.log('\nAll self-tests PASSED successfully!');
+   }
+  }).catch((err) => {
+    console.error('C3 transport test error:', err);
+    process.exit(1);
+  });

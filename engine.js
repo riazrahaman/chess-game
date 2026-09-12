@@ -37,6 +37,23 @@ for (let r = 0; r < 8; r++) {
   }
 }
 
+function getBoardRenderOrder(flipped = false) {
+  const ranks = getRankLabels(flipped);
+  const files = getFileLabels(flipped);
+  return ranks.flatMap(rank => files.map(file => `${file}${rank}`));
+}
+
+function getRankLabels(flipped = false) {
+  return flipped ? [...RANKS] : [...RANKS].reverse();
+}
+
+function getFileLabels(flipped = false) {
+  return flipped ? [...FILES].reverse() : [...FILES];
+}
+
+const STARTING_COUNTS = { p: 8, n: 2, b: 2, r: 2, q: 1, k: 1 };
+const MATERIAL_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+
 function fileOf(sq) {
   return sq.charCodeAt(0) - 97; // 0..7 for 'a'..'h'
 }
@@ -603,6 +620,206 @@ function getGameStatus(board, turn) {
   return 'ongoing';
 }
 
+function getKingStatus(board, turn) {
+  const currentTurn = turn || board?.turn || 'white';
+  let kingSquare = null;
+  for (const square of SQUARES) {
+    const piece = board.pieces?.[square];
+    if (piece && piece.type === 'k' && piece.color === currentTurn) {
+      kingSquare = square;
+      break;
+    }
+  }
+  const check = isCheck(board, currentTurn);
+  return { kingSquare, check, mate: check && isCheckmate(board, currentTurn) };
+}
+
+function computeCaptured(board) {
+  const remaining = {
+    white: { p: 0, n: 0, b: 0, r: 0, q: 0, k: 0 },
+    black: { p: 0, n: 0, b: 0, r: 0, q: 0, k: 0 }
+  };
+  for (const square of SQUARES) {
+    const piece = board.pieces?.[square];
+    if (piece && remaining[piece.color]?.[piece.type] !== undefined) {
+      remaining[piece.color][piece.type]++;
+    }
+  }
+
+  const capturedBy = { white: [], black: [] };
+  const capturedValue = { white: 0, black: 0 };
+  for (const color of ['white', 'black']) {
+    const capturer = color === 'white' ? 'black' : 'white';
+    for (const type of ['q', 'r', 'b', 'n', 'p']) {
+      const missing = Math.max(0, STARTING_COUNTS[type] - remaining[color][type]);
+      for (let i = 0; i < missing; i++) {
+        capturedBy[capturer].push({ type, color });
+        capturedValue[capturer] += MATERIAL_VALUES[type];
+      }
+    }
+  }
+  const balance = capturedValue.white - capturedValue.black;
+  return {
+    capturedBy,
+    capturedValue,
+    advantage: balance === 0
+      ? { side: null, points: 0 }
+      : { side: balance > 0 ? 'white' : 'black', points: Math.abs(balance) }
+  };
+}
+
+// Convert one coordinate move to Standard Algebraic Notation. This is kept in
+// the engine so the browser renderer and hermetic Node tests share the same
+// legal-move and check logic.
+function moveToSan(board, moveStr) {
+  const from = moveStr.slice(0, 2);
+  const to = moveStr.slice(2, 4);
+  const promotion = moveStr[4];
+  const piece = board.pieces[from];
+  if (!piece) return moveStr;
+
+  if (piece.type === 'k' && from[0] === 'e' && (to[0] === 'g' || to[0] === 'c')) {
+    const castling = to[0] === 'g' ? 'O-O' : 'O-O-O';
+    const next = makeMove(board, from, to, promotion);
+    const nextStatus = getGameStatus(next, next.turn);
+    return castling + (nextStatus === 'checkmate' ? '#' : nextStatus === 'check' ? '+' : '');
+  }
+
+  const destinationPiece = board.pieces[to];
+  const capture = Boolean(destinationPiece) ||
+    (piece.type === 'p' && board.enPassant === to && !destinationPiece);
+  const letters = { k: 'K', q: 'Q', r: 'R', b: 'B', n: 'N' };
+  let san = piece.type === 'p' ? '' : letters[piece.type];
+
+  if (piece.type === 'p') {
+    if (capture) san += from[0];
+  } else {
+    const ambiguous = [];
+    for (const square of SQUARES) {
+      const candidate = board.pieces[square];
+      if (square !== from && candidate && candidate.color === piece.color && candidate.type === piece.type &&
+          getLegalMoves(board, square, board.turn).includes(to)) {
+        ambiguous.push(square);
+      }
+    }
+    if (ambiguous.length) {
+      const sameFile = ambiguous.some(square => square[0] === from[0]);
+      const sameRank = ambiguous.some(square => square[1] === from[1]);
+      san += sameFile ? from[1] : sameRank ? from[0] : from;
+    }
+  }
+
+  san += capture ? 'x' : '';
+  san += to;
+  if (promotion) san += `=${promotion.toUpperCase()}`;
+
+  const next = makeMove(board, from, to, promotion);
+  const nextStatus = getGameStatus(next, next.turn);
+  return san + (nextStatus === 'checkmate' ? '#' : nextStatus === 'check' ? '+' : '');
+}
+
+function historyToSan(history) {
+  let board = createInitialBoard();
+  return history.map(move => {
+    const san = moveToSan(board, move);
+    const from = move.slice(0, 2);
+    const to = move.slice(2, 4);
+    board = makeMove(board, from, to, move[4]);
+    return san;
+  });
+}
+
+function buildPgn(sanMoves, result = '*') {
+  const headers = [
+    '[Event "Casual Game"]',
+    '[Site "Local"]',
+    '[Round "-"]',
+    '[White "White"]',
+    '[Black "Black"]',
+    `[Result "${result}"]`
+  ];
+  const movetext = [];
+  for (let i = 0; i < sanMoves.length; i += 2) {
+    movetext.push(`${Math.floor(i / 2) + 1}. ${sanMoves[i]}${sanMoves[i + 1] ? ` ${sanMoves[i + 1]}` : ''}`);
+  }
+  return `${headers.join('\n')}\n\n${movetext.join(' ')}${movetext.length ? ' ' : ''}${result}`;
+}
+
+function gameEndPresentation(state) {
+  if (!state?.gameOver) return null;
+  const status = state.status;
+  if (status === 'checkmate') {
+    const winner = state.result === '0-1' ? 'Black' : 'White';
+    return { banner: `${winner} wins by checkmate`, reason: 'checkmate' };
+  }
+  if (status === 'stalemate') return { banner: 'Draw by stalemate', reason: 'stalemate' };
+  if (status === 'resigned') {
+    const winner = state.resigned === 'white' ? 'Black' : 'White';
+    return { banner: `${winner} wins by resignation`, reason: 'resignation' };
+  }
+  if (status === 'timeout') {
+    const winner = state.flagged === 'white' ? 'Black' : 'White';
+    return { banner: `${winner} wins on time`, reason: 'timeout' };
+  }
+  if (status === 'draw') return { banner: 'Draw by agreement', reason: 'draw' };
+  return { banner: state.result || 'Game over', reason: status || 'game over' };
+}
+
+function pieceCounts(board) {
+  const counts = {};
+  for (const square of SQUARES) {
+    const piece = board?.pieces?.[square];
+    if (piece) {
+      const key = `${piece.color}:${piece.type}`;
+      counts[key] = (counts[key] || 0) + 1;
+    }
+  }
+  return counts;
+}
+
+function classifySound(prevRefState, nextRefState) {
+  if (!prevRefState || !nextRefState) return null;
+  if (nextRefState.gameOver && !prevRefState.gameOver) return 'gameEnd';
+
+  const previousHistory = prevRefState.history || [];
+  const nextHistory = nextRefState.history || [];
+  if (nextHistory.length <= previousHistory.length) return null;
+
+  const previousCounts = pieceCounts(prevRefState.board);
+  const nextCounts = pieceCounts(nextRefState.board);
+  const captured = Object.keys(previousCounts).some(key =>
+    (nextCounts[key] || 0) < previousCounts[key]
+  );
+  if (captured) return 'capture';
+  if (getKingStatus(nextRefState.board, nextRefState.board.turn).check) return 'check';
+  return 'move';
+}
+
+function serializeRefereeState(refereeState) {
+  try {
+    return JSON.stringify(refereeState);
+  } catch (e) {
+    return null;
+  }
+}
+
+function deserializeRefereeState(serialized) {
+  try {
+    const state = typeof serialized === 'string' ? JSON.parse(serialized) : serialized;
+    if (!state || typeof state !== 'object' || !state.board || !state.board.pieces || !Array.isArray(state.history)) {
+      return null;
+    }
+    return JSON.parse(JSON.stringify(state));
+  } catch (e) {
+    return null;
+  }
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { createInitialBoard, getLegalMoves, makeMove, isCheck, isCheckmate, isStalemate, getGameStatus };
+  module.exports = {
+    createInitialBoard, getLegalMoves, makeMove, isCheck, isCheckmate,
+    isStalemate, getGameStatus, getKingStatus, moveToSan, historyToSan,
+    buildPgn, computeCaptured, getBoardRenderOrder, getRankLabels, getFileLabels,
+    gameEndPresentation, classifySound, serializeRefereeState, deserializeRefereeState
+  };
 }
