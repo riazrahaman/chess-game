@@ -1,0 +1,4 @@
+.tier-worktrees/
+.referee-state.json
+.referee-state.json.lock
+opencode.json
