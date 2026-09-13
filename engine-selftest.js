@@ -470,12 +470,129 @@ refereeCli('reset');
 // 14. C3 Referee-authoritative UI transport — exercise the same HTTP endpoint
 // used by ui.js, then read a fresh state snapshot as pollReferee() does.
 const uiSource = require('fs').readFileSync(require('path').join(__dirname, 'ui.js'), 'utf8');
-assert(!/makeMove\s*\(/.test(uiSource),
-  'C3: UI has no local makeMove authority');
-assert(!/createInitialBoard\s*\(/.test(uiSource),
-  'C3: UI does not render a locally-created initial board');
-assert(/fetch\(['"]\/api\/move['"]/.test(uiSource),
-  'C3: UI submits human moves through the referee endpoint');
+assert(!/makeMove\s*\(/.test(uiSource) && !/createInitialBoard\s*\(/.test(uiSource) &&
+  /fetch\(['"]\/api\/move['"]/.test(uiSource),
+  'C3: UI has no local board authority and submits moves through the referee endpoint');
+
+// D2. Execute the actual ui.js reconcile functions against an in-memory DOM.
+// Reading the source keeps this hermetic: no browser or live server is used.
+function createReconcileHarness(initial) {
+  const vm = require('vm');
+  const writes = [];
+  const elements = new Map();
+
+  class MockElement {
+    constructor(tagName) {
+      this.tagName = tagName;
+      this.children = [];
+      this.parentElement = null;
+      this.dataset = {};
+      this._id = '';
+      this._className = '';
+      this._textContent = '';
+      this.removed = false;
+    }
+    set id(value) { this._id = value; elements.set(value, this); }
+    get id() { return this._id; }
+    set className(value) {
+      this._className = value;
+      if (this.parentElement) writes.push({ op: 'className', square: this.id, node: this });
+    }
+    get className() { return this._className; }
+    set textContent(value) {
+      this._textContent = value;
+      if (this.parentElement) writes.push({ op: 'textContent', square: this.parentElement.id, node: this });
+    }
+    get textContent() { return this._textContent; }
+    get firstElementChild() { return this.children[0] || null; }
+    appendChild(child) {
+      if (child.parentElement) {
+        const oldParent = child.parentElement;
+        oldParent.children.splice(oldParent.children.indexOf(child), 1);
+        writes.push({ op: 'detach', square: oldParent.id, node: child });
+      }
+      this.children.push(child);
+      child.parentElement = this;
+      writes.push({ op: 'append', square: this.id, node: child });
+      return child;
+    }
+    remove() {
+      if (!this.parentElement) return;
+      const oldParent = this.parentElement;
+      oldParent.children.splice(oldParent.children.indexOf(this), 1);
+      this.parentElement = null;
+      this.removed = true;
+      writes.push({ op: 'remove', square: oldParent.id, node: this });
+    }
+  }
+
+  const boardElement = new MockElement('div');
+  boardElement.id = 'board';
+  const document = {
+    createElement: tagName => new MockElement(tagName),
+    getElementById: id => elements.get(id) || null
+  };
+  const start = uiSource.indexOf('function cloneBoardSnapshot');
+  const end = uiSource.indexOf('// C2: promotion modal flow');
+  if (start < 0 || end < 0) throw new Error('D2 reconcile source block not found');
+  const reconcileSource = uiSource.slice(start, end);
+  const context = {
+    document,
+    boardElement,
+    board: initial,
+    turn: initial.turn,
+    boardFlipped: false,
+    previousBoard: null,
+    renderedBoardFlipped: null,
+    selectedSquare: null,
+    legalMoves: [],
+    kingStatus: { kingSquare: null, check: false, mate: false },
+    pieceGlyphs: {
+      white: { k: 'K', q: 'Q', r: 'R', b: 'B', n: 'N', p: 'P' },
+      black: { k: 'k', q: 'q', r: 'r', b: 'b', n: 'n', p: 'p' }
+    },
+    getKingStatus,
+    getBoardRenderOrder,
+    renderCoordinates() {},
+    handleSquareClick() {}
+  };
+  vm.createContext(context);
+  vm.runInContext(reconcileSource, context);
+  context.renderBoard(null, null);
+  context.previousBoard = context.cloneBoardSnapshot(initial);
+  writes.length = 0;
+  return { context, writes, elements };
+}
+
+const identicalHarness = createReconcileHarness(createInitialBoard());
+identicalHarness.context.board = cloneBoardHelper(createInitialBoard());
+identicalHarness.context.renderBoard(null, identicalHarness.context.previousBoard);
+assert(identicalHarness.writes.length === 0,
+  'D2: consecutive identical referee boards produce no board DOM writes');
+
+const moveStart = createInitialBoard();
+const moveHarness = createReconcileHarness(moveStart);
+const movingPawn = moveHarness.elements.get('e2').firstElementChild;
+moveHarness.context.board = makeMove(moveStart, 'e2', 'e4');
+moveHarness.context.turn = 'black';
+moveHarness.context.renderBoard({ from: 'e2', to: 'e4' }, moveHarness.context.previousBoard);
+const moveTouched = [...new Set(moveHarness.writes.map(write => write.square))].sort();
+assert(JSON.stringify(moveTouched) === JSON.stringify(['e2', 'e4']) &&
+  moveHarness.elements.get('e4').firstElementChild === movingPawn,
+  'D2: a single-move diff touches only from/to squares and preserves piece identity');
+
+let beforeCapture = makeMove(createInitialBoard(), 'e2', 'e4');
+beforeCapture = makeMove(beforeCapture, 'd7', 'd5');
+const captureHarness = createReconcileHarness(beforeCapture);
+const capturingPawn = captureHarness.elements.get('e4').firstElementChild;
+const capturedPawn = captureHarness.elements.get('d5').firstElementChild;
+captureHarness.context.board = makeMove(beforeCapture, 'e4', 'd5');
+captureHarness.context.turn = 'black';
+captureHarness.context.renderBoard({ from: 'e4', to: 'd5' }, captureHarness.context.previousBoard);
+const removedPieces = captureHarness.writes.filter(write => write.op === 'remove').map(write => write.node);
+assert(removedPieces.length === 1 && removedPieces[0] === capturedPawn && capturedPawn.removed === true &&
+  captureHarness.elements.get('d5').firstElementChild === capturingPawn,
+  'D2: capture removes only the captured destination piece');
 
 function httpMoveOverServer(server, move) {
   const payload = JSON.stringify({ move });
@@ -582,11 +699,10 @@ runC3Transport().then(() => {
     JSON.stringify(stateBeforeOrientation) === JSON.stringify(stateAfterOrientation),
     'E8: flipped render order reverses rows/files without mutating referee state');
   assert(JSON.stringify(getRankLabels(false)) === JSON.stringify(['8', '7', '6', '5', '4', '3', '2', '1']) &&
-    JSON.stringify(getRankLabels(true)) === JSON.stringify(['1', '2', '3', '4', '5', '6', '7', '8']),
-    'E9: rank labels follow normal and flipped orientation');
-  assert(JSON.stringify(getFileLabels(false)) === JSON.stringify(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']) &&
+    JSON.stringify(getRankLabels(true)) === JSON.stringify(['1', '2', '3', '4', '5', '6', '7', '8']) &&
+    JSON.stringify(getFileLabels(false)) === JSON.stringify(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']) &&
     JSON.stringify(getFileLabels(true)) === JSON.stringify(['h', 'g', 'f', 'e', 'd', 'c', 'b', 'a']),
-    'E9: file labels follow normal and flipped orientation');
+    'E9: rank/file labels follow normal and flipped orientation');
   const endCases = [
     [{ gameOver: true, status: 'checkmate', result: '1-0' }, 'White wins by checkmate', 'checkmate'],
     [{ gameOver: true, status: 'stalemate', result: '½-½' }, 'Draw by stalemate', 'stalemate'],
