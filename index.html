@@ -548,6 +548,26 @@
             opacity: 0.35;
             cursor: not-allowed;
         }
+        #multipv-container {
+            background: #f8fafc;
+            border: 1px solid var(--board-border, #ccc);
+            border-radius: 6px;
+            padding: 6px 10px;
+            margin-top: 8px;
+        }
+        .multipv-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 3px 6px;
+            border-radius: 4px;
+            font-size: 0.82rem;
+            margin-bottom: 2px;
+            background: rgba(0, 0, 0, 0.03);
+        }
+        .multipv-rank-1 { border-left: 3px solid #2563eb; }
+        .multipv-rank-2 { border-left: 3px solid #10b981; }
+        .multipv-rank-3 { border-left: 3px solid #f59e0b; }
     </style>
 </head>
 <body>
@@ -592,6 +612,17 @@
             </div>
         </div>
         <div id="material-advantage">Material even</div>
+        <div id="multipv-container">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-weight: bold; font-size: 0.85rem;">Engine Analysis</span>
+                <select id="multipv-select" aria-label="Engine lines count" style="font-size: 0.8rem; padding: 2px 4px; border-radius: 4px;">
+                    <option value="1">1 Line</option>
+                    <option value="2">2 Lines</option>
+                    <option value="3" selected>3 Lines</option>
+                </select>
+            </div>
+            <div id="multipv-lines" style="font-size: 0.82rem;"></div>
+        </div>
     </div>
     <div id="status-panel">
         <p id="board-instructions" class="visually-hidden">Use the arrow keys to move between squares. Press Enter or Space to select a piece or move it.</p>

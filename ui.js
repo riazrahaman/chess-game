@@ -1145,6 +1145,8 @@ function applyRefereeState(state) {
 }
 
 let evalWorker = null;
+let currentMultiPvCount = 3;
+let engineMultiPvLines = [];
 
 function updateEvalUI(data) {
   if (!data) return;
@@ -1159,7 +1161,25 @@ function updateEvalUI(data) {
   if (fill && fill.style) fill.style.width = `${percent}%`;
   if (scoreText) scoreText.textContent = cp >= 0 ? `+${cp.toFixed(1)}` : `${cp.toFixed(1)}`;
 
-  if (svg && data.bestMove && typeof data.bestMove === 'string' && data.bestMove.length >= 4) {
+  if (data.multipv && Array.isArray(data.multipv) && data.multipv.length > 0) {
+    engineMultiPvLines = data.multipv.map((item, idx) => {
+      const move = item.bestMove || (item.pv && item.pv[0]) || '';
+      return {
+        pvIndex: item.pvIndex || idx + 1,
+        from: move.slice(0, 2),
+        to: move.slice(2, 4),
+        scoreCp: typeof item.scoreCp === 'number' ? item.scoreCp : (item.scoreRaw ? item.scoreRaw / 100 : 0),
+        depth: item.depth || 0,
+        pv: item.pv || [move]
+      };
+    }).filter(line => line.from && line.to);
+
+    if (engineMultiPvLines.length > 0) {
+      engineAnalysisArrow = { from: engineMultiPvLines[0].from, to: engineMultiPvLines[0].to };
+    }
+    renderAnnotations(svg);
+    renderMultiPvBreakdown();
+  } else if (svg && data.bestMove && typeof data.bestMove === 'string' && data.bestMove.length >= 4) {
     drawAnalysisArrow(svg, data.bestMove.slice(0, 2), data.bestMove.slice(2, 4));
   }
 }
@@ -1170,7 +1190,9 @@ const ANNOTATION_COLORS = {
   red: { stroke: 'rgba(239, 68, 68, 0.85)', fill: 'rgba(239, 68, 68, 0.85)' },
   blue: { stroke: 'rgba(14, 165, 233, 0.85)', fill: 'rgba(14, 165, 233, 0.85)' },
   yellow: { stroke: 'rgba(234, 179, 8, 0.85)', fill: 'rgba(234, 179, 8, 0.85)' },
-  engine: { stroke: 'rgba(37, 99, 235, 0.75)', fill: 'rgba(37, 99, 235, 0.75)' }
+  engine: { stroke: 'rgba(37, 99, 235, 0.85)', fill: 'rgba(37, 99, 235, 0.85)' },
+  engine2: { stroke: 'rgba(16, 185, 129, 0.75)', fill: 'rgba(16, 185, 129, 0.75)' },
+  engine3: { stroke: 'rgba(245, 158, 11, 0.70)', fill: 'rgba(245, 158, 11, 0.70)' }
 };
 
 let userAnnotations = {
@@ -1246,7 +1268,23 @@ function renderAnnotations(targetSvg) {
     });
   }
 
-  if (engineAnalysisArrow) {
+  if (engineMultiPvLines && engineMultiPvLines.length > 0) {
+    engineMultiPvLines.forEach((line) => {
+      const p1 = getSquareCenterCoordinates(line.from);
+      const p2 = getSquareCenterCoordinates(line.to);
+      if (!p1 || !p2) return;
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const endMargin = dist > 0 ? Math.min(2.5, dist * 0.2) : 0;
+      const x2 = p2.x - (dist > 0 ? (dx / dist) * endMargin : 0);
+      const y2 = p2.y - (dist > 0 ? (dy / dist) * endMargin : 0);
+      const colorKey = line.pvIndex === 1 ? 'engine' : line.pvIndex === 2 ? 'engine2' : 'engine3';
+      const colorObj = ANNOTATION_COLORS[colorKey] || ANNOTATION_COLORS.engine;
+      const strokeW = line.pvIndex === 1 ? '4.5' : line.pvIndex === 2 ? '3.5' : '3';
+      elementsHtml += `<line class="engine-multipv-arrow engine-pv-${line.pvIndex}" data-pv="${line.pvIndex}" x1="${p1.x}%" y1="${p1.y}%" x2="${x2}%" y2="${y2}%" stroke="${colorObj.stroke}" stroke-width="${strokeW}" stroke-linecap="round" marker-end="url(#arrowhead-${colorKey})" opacity="0.85" />`;
+    });
+  } else if (engineAnalysisArrow) {
     const p1 = getSquareCenterCoordinates(engineAnalysisArrow.from);
     const p2 = getSquareCenterCoordinates(engineAnalysisArrow.to);
     if (p1 && p2) {
@@ -1271,7 +1309,9 @@ function drawAnalysisArrow(svg, fromSq, toSq) {
 
 function clearAnalysisArrow() {
   engineAnalysisArrow = null;
+  engineMultiPvLines = [];
   renderAnnotations();
+  renderMultiPvBreakdown();
 }
 
 function toggleUserCircle(square, color = 'green') {
@@ -1346,7 +1386,57 @@ function handleSquareMouseUp(event, squareId) {
   }
 }
 
+function renderMultiPvBreakdown() {
+  const container = document.getElementById('multipv-lines');
+  if (!container) return;
+  container.innerHTML = '';
+  engineMultiPvLines.forEach(line => {
+    const row = document.createElement('div');
+    row.className = `multipv-row multipv-rank-${line.pvIndex}`;
+    const colorBadge = line.pvIndex === 1 ? '#2563eb' : line.pvIndex === 2 ? '#10b981' : '#f59e0b';
+    const scoreFormatted = line.scoreCp >= 0 ? `+${line.scoreCp.toFixed(1)}` : line.scoreCp.toFixed(1);
+    row.innerHTML = `
+      <span style="color: ${colorBadge}; font-weight: bold;">#${line.pvIndex} ${line.from}${line.to}</span>
+      <span style="font-family: monospace;">${scoreFormatted} (d=${line.depth})</span>
+    `;
+    container.appendChild(row);
+  });
+}
+
+function getEngineMultiPvLines() {
+  return [...engineMultiPvLines];
+}
+
+function clearEngineMultiPvLines() {
+  engineMultiPvLines = [];
+  engineAnalysisArrow = null;
+  renderAnnotations();
+  renderMultiPvBreakdown();
+}
+
+function setMultiPvCount(count) {
+  currentMultiPvCount = Math.max(1, Math.min(3, count));
+  const select = document.getElementById('multipv-select');
+  if (select) select.value = String(currentMultiPvCount);
+  if (evalWorker) {
+    try {
+      evalWorker.postMessage({ type: 'uci', command: `setoption name MultiPV value ${currentMultiPvCount}` });
+      if (board) {
+        evalWorker.postMessage({ type: 'position', fen: boardToFen(board) });
+      }
+    } catch (e) {}
+  }
+}
+
 function initEvalWorker() {
+  const select = document.getElementById('multipv-select');
+  if (select) {
+    select.onchange = (e) => {
+      const val = parseInt(e.target.value, 10) || 1;
+      setMultiPvCount(val);
+    };
+  }
+
   if (typeof Worker !== 'undefined') {
     try {
       evalWorker = new Worker('stockfish-worker.js');
@@ -1354,6 +1444,7 @@ function initEvalWorker() {
         if (!event.data || event.data.type !== 'eval') return;
         updateEvalUI(event.data);
       };
+      evalWorker.postMessage({ type: 'uci', command: `setoption name MultiPV value ${currentMultiPvCount}` });
     } catch (e) {}
   }
 }
@@ -1789,6 +1880,10 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.getViewedPly = getViewedPly;
   window.getLivePly = getLivePly;
   window.isViewingHistory = isViewingHistory;
+  window.getEngineMultiPvLines = getEngineMultiPvLines;
+  window.setMultiPvCount = setMultiPvCount;
+  window.clearEngineMultiPvLines = clearEngineMultiPvLines;
+  window.renderMultiPvBreakdown = renderMultiPvBreakdown;
 }
 
 initGame();
