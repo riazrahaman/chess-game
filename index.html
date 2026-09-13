@@ -29,6 +29,13 @@
             --active-timer-border: #ffcc00;
             --drop-hint-bg: #bcd4ff;
             --overlay-bg: rgba(17, 24, 39, 0.7);
+            /* A7: subtle depth tokens (theme-overridable) */
+            --sq-white-grad: linear-gradient(145deg, rgba(255,255,255,0.18), rgba(0,0,0,0.06));
+            --sq-black-grad: linear-gradient(145deg, rgba(255,255,255,0.12), rgba(0,0,0,0.10));
+            --piece-shadow: drop-shadow(0 2px 1.5px rgba(0,0,0,0.35));
+            --board-bevel: inset 0 0 0 1px rgba(255,255,255,0.12),
+                           inset 0 1px 2px rgba(255,255,255,0.18),
+                           inset 0 -2px 4px rgba(0,0,0,0.25);
         }
 
         /* ---- Dark mode ---- */
@@ -46,6 +53,13 @@
             --text-color: #e0e0e0;
             --timer-border: #456;
             --overlay-bg: rgba(5, 5, 15, 0.85);
+            /* A7: subtler depth on dark backgrounds */
+            --sq-white-grad: linear-gradient(145deg, rgba(255,255,255,0.10), rgba(0,0,0,0.18));
+            --sq-black-grad: linear-gradient(145deg, rgba(255,255,255,0.07), rgba(0,0,0,0.22));
+            --piece-shadow: drop-shadow(0 2px 2px rgba(0,0,0,0.55));
+            --board-bevel: inset 0 0 0 1px rgba(255,255,255,0.06),
+                           inset 0 1px 2px rgba(255,255,255,0.10),
+                           inset 0 -2px 5px rgba(0,0,0,0.45);
         }
 
         /* ---- Board theme: classic-dark (lichess green, dark page pairing) ---- */
@@ -67,6 +81,9 @@
             --sq-white: #e8d5b7;
             --sq-black: #8b5e3c;
             --highlight: #f0d77a;
+            /* A7: warm depth for walnut */
+            --sq-white-grad: linear-gradient(145deg, rgba(255,255,255,0.20), rgba(120,80,40,0.08));
+            --sq-black-grad: linear-gradient(145deg, rgba(255,220,180,0.14), rgba(60,30,10,0.16));
         }
 
         /* ---- Colorblind-safe palette (light) ---- */
@@ -83,6 +100,9 @@
             --sq-black: #555555;
             --highlight: #ff8c00;
             --board-border: #444;
+            /* A7: subtle depth for grayscale squares */
+            --sq-white-grad: linear-gradient(145deg, rgba(255,255,255,0.08), rgba(0,0,0,0.20));
+            --sq-black-grad: linear-gradient(145deg, rgba(255,255,255,0.06), rgba(0,0,0,0.16));
         }
 
         body {
@@ -103,6 +123,7 @@
             grid-template-columns: repeat(8, minmax(0, 1fr));
             grid-template-rows: repeat(8, minmax(0, 1fr));
             border: 2px solid var(--board-border);
+            box-shadow: var(--board-bevel);
         }
         .square {
             width: 100%;
@@ -119,6 +140,7 @@
             width: 86%;
             height: 86%;
             pointer-events: none;
+            filter: var(--piece-shadow);
         }
         .piece-animating {
             transition: transform 200ms ease-out;
@@ -134,10 +156,12 @@
         @media (prefers-reduced-motion: reduce) {
             .piece-animating { transition: none !important; }
             .piece-captured { transition: none !important; }
+            /* A7: keep shadow static (no transition) under reduced motion */
+            .chess-piece { filter: var(--piece-shadow); }
         }
-        .white-sq { background-color: var(--sq-white); }
-        .black-sq { background-color: var(--sq-black); }
-        .highlight { background-color: var(--highlight) !important; }
+        .white-sq { background-color: var(--sq-white); background-image: var(--sq-white-grad); }
+        .black-sq { background-color: var(--sq-black); background-image: var(--sq-black-grad); }
+        .highlight { background-color: var(--highlight) !important; background-image: none !important; }
         /* A3: chess-standard legal-move indicators. Quiet moves show a small
            centered dot via ::after; captures show a ring around the piece. */
         .legal-move::after {
