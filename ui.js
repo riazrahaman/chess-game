@@ -706,6 +706,19 @@ function setRovingSquare(squareId, moveFocus = true) {
   });
   const target = document.getElementById(squareId);
   if (moveFocus && target && target.focus) target.focus();
+
+  if (accessibilityController && (accessibilityController.blindModeEnabled || accessibilityController.voiceEnabled)) {
+    const p = board && board.pieces ? board.pieces[squareId] : null;
+    const label = squareAccessibilityLabel(squareId, p, {
+      selected: selectedSquare === squareId,
+      legal: legalMoves.includes(squareId),
+      check: kingStatus.kingSquare === squareId && kingStatus.check,
+      mate: kingStatus.mate,
+      gameOver,
+      turn
+    });
+    accessibilityController.announceLive(label);
+  }
 }
 
 function keyboardDestination(squareId, key) {
@@ -974,6 +987,44 @@ function handleGlobalScrubberKeydown(event) {
     return;
   }
 
+  if (!event.altKey && !event.ctrlKey && !event.metaKey && typeof event.key === 'string') {
+    const k = event.key.toLowerCase();
+    if (k === 'v') {
+      if (event.preventDefault) event.preventDefault();
+      const btn = document.getElementById('voice-toggle');
+      if (btn) btn.click();
+      return;
+    }
+    if (k === 'b') {
+      if (event.preventDefault) event.preventDefault();
+      const btn = document.getElementById('blind-mode-toggle');
+      if (btn) btn.click();
+      return;
+    }
+    if (k === 'm') {
+      if (event.preventDefault) event.preventDefault();
+      const btn = document.getElementById('mic-move-btn');
+      if (btn) btn.click();
+      return;
+    }
+    if (k === 'c') {
+      if (event.preventDefault) event.preventDefault();
+      if (accessibilityController) {
+        accessibilityController.announceClocks(whiteTime, blackTime);
+      }
+      return;
+    }
+    if (k === 's') {
+      if (event.preventDefault) event.preventDefault();
+      if (accessibilityController && board) {
+        const turnText = `${turn} to move`;
+        const checkText = kingStatus.mate ? 'checkmate' : kingStatus.check ? 'in check' : 'normal';
+        accessibilityController.announceLive(`Position status: ${turnText}, ${checkText}.`);
+      }
+      return;
+    }
+  }
+
   if (event.key === 'ArrowLeft') {
     if (event.preventDefault) event.preventDefault();
     scrubPrev();
@@ -1231,8 +1282,26 @@ function applyRefereeState(state) {
       });
     }
     moveHistory = moves;
+    if (accessibilityController && accessibilityController.lastAnnouncedHistoryLength < history.length) {
+      if (accessibilityController.lastAnnouncedHistoryLength > 0 || history.length === 1) {
+        const lastIdx = history.length - 1;
+        const lastSan = sanHistory[lastIdx];
+        const lastColor = (lastIdx % 2 === 0) ? 'white' : 'black';
+        accessibilityController.announceMove(lastSan, lastColor);
+      }
+      accessibilityController.lastAnnouncedHistoryLength = history.length;
+    }
   } else {
     moveHistory = [];
+    if (accessibilityController) {
+      accessibilityController.lastAnnouncedHistoryLength = 0;
+    }
+  }
+  if (gameOver && accessibilityController && !accessibilityController.announcedGameOver) {
+    accessibilityController.announceGameOutcome(state.status, state.result, state.reason);
+    accessibilityController.announcedGameOver = true;
+  } else if (!gameOver && accessibilityController) {
+    accessibilityController.announcedGameOver = false;
   }
   liveBoard = state.board;
   liveHistory = state.history || [];
@@ -3444,6 +3513,140 @@ function setupAiCoachUI() {
   }
 }
 
+let accessibilityController = null;
+
+function handleVoiceTranscript(transcript) {
+  const AccessModule = (typeof window !== 'undefined' && window.AccessibilityVoice) || (typeof AccessibilityVoice !== 'undefined' ? AccessibilityVoice : null);
+  if (!AccessModule || !board) return;
+
+  const candidates = [];
+  for (const [from, p] of Object.entries(board.pieces || {})) {
+    if (p && p.color === turn) {
+      const dests = getLegalMoves(board, from, turn);
+      for (const to of dests) {
+        const isPromo = isPromotionMove(from, to);
+        const promos = isPromo ? ['q', 'r', 'b', 'n'] : [undefined];
+        for (const pr of promos) {
+          const san = typeof moveToSan === 'function' ? moveToSan(board, from, to, pr) : `${from}${to}`;
+          candidates.push({ from, to, promo: pr, san, uci: `${from}${to}${pr || ''}` });
+        }
+      }
+    }
+  }
+
+  const match = AccessModule.parseSpokenMove(transcript, candidates);
+  const transcriptStatus = document.getElementById('voice-transcript-status');
+
+  if (!match) {
+    if (transcriptStatus) {
+      transcriptStatus.textContent = `Unrecognized: "${transcript}"`;
+      transcriptStatus.style.color = '#dc2626';
+    }
+    if (accessibilityController) {
+      accessibilityController.speak(`Move ${transcript} not recognized or not legal.`);
+    }
+    return;
+  }
+
+  if (match.action === 'resign') {
+    if (typeof handleResignClick === 'function') handleResignClick();
+    return;
+  }
+  if (match.action === 'draw' || match.action === 'accept_draw') {
+    if (typeof handleDrawOffer === 'function') handleDrawOffer();
+    return;
+  }
+  if (match.action === 'decline_draw') {
+    if (typeof handleDrawDecline === 'function') handleDrawDecline();
+    return;
+  }
+
+  if (match.move) {
+    const { from, to, promo } = match.move;
+    if (transcriptStatus) {
+      transcriptStatus.textContent = `Executed: ${match.move.san || from + to}`;
+      transcriptStatus.style.color = '#16a34a';
+    }
+    submitMoveToReferee(from + to + (promo || ''));
+  }
+}
+
+function setupAccessibilityVoiceUI() {
+  const AccessModule = (typeof window !== 'undefined' && window.AccessibilityVoice) || (typeof AccessibilityVoice !== 'undefined' ? AccessibilityVoice : null);
+  if (!AccessModule) return;
+
+  accessibilityController = new AccessModule.AccessibilityVoiceController({
+    submitMoveCallback: (moveStr) => submitMoveToReferee(moveStr)
+  });
+
+  const voiceToggleBtn = document.getElementById('voice-toggle');
+  if (voiceToggleBtn) {
+    voiceToggleBtn.textContent = accessibilityController.voiceEnabled ? 'Voice: On' : 'Voice: Off';
+    voiceToggleBtn.classList.toggle('active', accessibilityController.voiceEnabled);
+    voiceToggleBtn.onclick = () => {
+      const enabled = accessibilityController.toggleVoice();
+      voiceToggleBtn.textContent = enabled ? 'Voice: On' : 'Voice: Off';
+      voiceToggleBtn.classList.toggle('active', enabled);
+    };
+  }
+
+  const blindToggleBtn = document.getElementById('blind-mode-toggle');
+  if (blindToggleBtn) {
+    blindToggleBtn.textContent = accessibilityController.blindModeEnabled ? 'Blind Mode: On' : 'Blind Mode: Off';
+    blindToggleBtn.classList.toggle('active', accessibilityController.blindModeEnabled);
+    blindToggleBtn.onclick = () => {
+      const enabled = accessibilityController.toggleBlindMode();
+      blindToggleBtn.textContent = enabled ? 'Blind Mode: On' : 'Blind Mode: Off';
+      blindToggleBtn.classList.toggle('active', enabled);
+      if (enabled && focusedSquareId) {
+        setRovingSquare(focusedSquareId, true);
+      }
+    };
+  }
+
+  const micMoveBtn = document.getElementById('mic-move-btn');
+  const transcriptStatus = document.getElementById('voice-transcript-status');
+
+  if (micMoveBtn) {
+    micMoveBtn.onclick = () => {
+      if (accessibilityController.isListening) {
+        accessibilityController.stopVoiceRecognition();
+        micMoveBtn.textContent = '🎤 Mic';
+        micMoveBtn.style.background = '';
+        if (transcriptStatus) transcriptStatus.style.display = 'none';
+        return;
+      }
+
+      micMoveBtn.textContent = '🔴 Listening...';
+      micMoveBtn.style.background = '#fee2e2';
+      if (transcriptStatus) {
+        transcriptStatus.style.display = 'inline-block';
+        transcriptStatus.textContent = 'Listening...';
+        transcriptStatus.style.color = 'var(--text-color)';
+      }
+
+      accessibilityController.startVoiceRecognition(
+        (transcript) => {
+          micMoveBtn.textContent = '🎤 Mic';
+          micMoveBtn.style.background = '';
+          handleVoiceTranscript(transcript);
+        },
+        (statusText, isError) => {
+          if (transcriptStatus) {
+            transcriptStatus.style.display = 'inline-block';
+            transcriptStatus.textContent = statusText;
+            transcriptStatus.style.color = isError ? '#dc2626' : 'var(--text-color)';
+          }
+          if (isError) {
+            micMoveBtn.textContent = '🎤 Mic';
+            micMoveBtn.style.background = '';
+          }
+        }
+      );
+    };
+  }
+}
+
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('keydown', handleGlobalScrubberKeydown);
   window.jumpToPly = jumpToPly;
@@ -3505,6 +3708,9 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.showCoachHint = showCoachHint;
   window.setupAiCoachUI = setupAiCoachUI;
   window.renderPostGameNarrativeReport = renderPostGameNarrativeReport;
+  window.getAccessibilityController = () => accessibilityController;
+  window.setupAccessibilityVoiceUI = setupAccessibilityVoiceUI;
+  window.handleVoiceTranscript = handleVoiceTranscript;
 }
 
 const copyRoomButton = document.getElementById('copy-room-link');
@@ -3531,6 +3737,7 @@ setupMatchgradeSocialUI();
 setupBotUI();
 setupMistakePuzzlesUI();
 setupAiCoachUI();
+setupAccessibilityVoiceUI();
 if (typeof setInterval === 'function') {
   setInterval(syncNtpClock, 10000);
 }

@@ -874,7 +874,12 @@
         </select>
         <button id="theme-mode-toggle">Dark mode</button>
         <button id="sound-toggle">Sound: On</button>
+        <button id="voice-toggle" title="Toggle voice move announcements (Shortcut: V)">Voice: Off</button>
+        <button id="mic-move-btn" title="Speak move using microphone (Shortcut: M)">🎤 Mic</button>
+        <button id="blind-mode-toggle" title="Toggle Blind Accessibility Mode (Shortcut: B)">Blind Mode: Off</button>
+        <span id="voice-transcript-status" style="display:none; font-size:0.75rem; padding:2px 6px; border-radius:4px; background:rgba(37,99,235,0.1); color:var(--text-color);"></span>
     </div>
+    <div id="accessibility-announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true" style="position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;"></div>
     </header>
     <main id="workspace" class="workspace" tabindex="-1">
     <div id="game-container">
@@ -1170,6 +1175,7 @@
     <script src="move-review.js"></script>
     <script src="ai-coach.js"></script>
     <script src="game-report.js"></script>
+    <script src="accessibility-voice.js"></script>
     <script src="openings-db.js"></script>
     <script src="game-archive.js"></script>
     <script src="ui.js"></script>
