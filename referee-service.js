@@ -436,7 +436,7 @@ class RefereeService {
           expectedRevision,
           actualRevision: this.revision
         };
-        this._idempotency.set(id, conflict);
+        this._setIdempotency(id, conflict);
         return conflict;
       }
       let result;
@@ -446,14 +446,22 @@ class RefereeService {
         result = { ok: false, error: String(e && e.message || e), httpStatus: 500 };
       }
       result = Object.assign({ revision: this.revision }, result);
-      this._idempotency.set(id, result);
+      this._setIdempotency(id, result);
       return result;
     }).catch(err => {
       const result = { ok: false, error: String(err && err.message || err), httpStatus: 500, revision: this.revision };
-      this._idempotency.set(id, result);
+      this._setIdempotency(id, result);
       return result;
     });
     return this._tail;
+  }
+
+  _setIdempotency(id, result) {
+    if (this._idempotency.size >= 500) {
+      const oldestKey = this._idempotency.keys().next().value;
+      if (oldestKey !== undefined) this._idempotency.delete(oldestKey);
+    }
+    this._idempotency.set(id, result);
   }
 
   _dispatch(command) {
