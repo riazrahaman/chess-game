@@ -14,6 +14,8 @@ let clockTickInterval = null;
 let moveHistory = [];
 let lastKnownStateJson = "";
 let pollStarted = false;
+let sseStarted = false;
+let sseEventSource = null;
 let refereeStatus = 'ongoing';
 let gameOver = false;
 let result = null;
@@ -593,6 +595,47 @@ async function pollReferee() {
   setTimeout(pollReferee, 600);
 }
 
+// D1: SSE push handler. When an EventSource event arrives, apply the same
+// applyRefereeState path as pollReferee — board/clocks/history come ONLY from
+// the referee. This is just a fresher transport; no local board mutation ever.
+function handleSSEStateEvent(state) {
+  const stateJson = JSON.stringify(state);
+  if (stateJson === lastKnownStateJson) return;
+  playSound(classifySound(previousRefereeState, state));
+  previousRefereeState = state;
+  cacheRefereeState(state);
+  selectedSquare = null;
+  legalMoves = [];
+  applyRefereeState(state);
+  lastKnownStateJson = stateJson;
+}
+
+// D1: Prefer EventSource('/api/events') for near-instant referee-state push.
+// On any error (including reconnect attempts), the 600ms pollReferee fallback
+// stays active so the UI never renders stale-only. EventSource auto-reconnects
+// natively; if it gives up, pollReferee covers all state transitions.
+function startSSE() {
+  if (sseStarted) return;
+  sseStarted = true;
+  try {
+    sseEventSource = new EventSource('/api/events');
+    sseEventSource.addEventListener('state', (event) => {
+      try {
+        const state = JSON.parse(event.data);
+        handleSSEStateEvent(state);
+      } catch (e) {
+        console.error('SSE state parse error:', e);
+      }
+    });
+    sseEventSource.onerror = (e) => {
+      console.warn('SSE connection error; pollReferee fallback remains active');
+    };
+  } catch (e) {
+    console.warn('EventSource unavailable; falling back to polling only');
+    sseEventSource = null;
+  }
+}
+
 // C3: HTML5 drag-and-drop move submission. This reuses the same
 // submitMoveToReferee / promotion-modal path as click-to-move so the
 // referee remains the single source of truth. The UI never mutates the
@@ -838,6 +881,9 @@ function initGame() {
   if (!pollStarted) {
     pollStarted = true;
     pollReferee();
+  }
+  if (!sseStarted) {
+    startSSE();
   }
 }
 

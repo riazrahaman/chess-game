@@ -1,10 +1,115 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { execFile } = require('child_process');
 
 const PORT = 39281;
 const DIR = __dirname;
+const STATE_FILE = process.env.CHESS_STATE_FILE || path.join(DIR, '.referee-state.json');
+const SSE_HEARTBEAT_MS = Number(process.env.CHESS_SSE_HEARTBEAT_MS) || 15000;
+const SSE_WATCH_INTERVAL_MS = Number(process.env.CHESS_SSE_WATCH_INTERVAL_MS) || 250;
+
+// D1: SSE client registry. Each connected client holds its res object and a
+// per-connection heartbeat timer. A shared watcher (fs.watchFile) pushes state
+// JSON to every client whenever the referee-state file content hash changes.
+const sseClients = new Set();
+let lastStateHash = '';
+let watcherStarted = false;
+let watcherRef = null;
+
+function computeStateHash() {
+  try {
+    const raw = fs.readFileSync(STATE_FILE, 'utf8');
+    return crypto.createHash('sha256').update(raw).digest('hex');
+  } catch (e) {
+    return '';
+  }
+}
+
+function readStateJson() {
+  try {
+    return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+  } catch (e) {
+    return null;
+  }
+}
+
+function broadcastStateToSSEClients() {
+  const hash = computeStateHash();
+  if (hash === lastStateHash) return;
+  lastStateHash = hash;
+  const state = readStateJson();
+  if (!state) return;
+  const data = JSON.stringify(state);
+  for (const client of sseClients) {
+    try {
+      client.res.write(`event: state\ndata: ${data}\n\n`);
+    } catch (e) {
+      removeSSEClient(client);
+    }
+  }
+}
+
+function startStateWatcher() {
+  if (watcherStarted) return;
+  watcherStarted = true;
+  lastStateHash = computeStateHash();
+  try {
+    fs.watchFile(STATE_FILE, { interval: SSE_WATCH_INTERVAL_MS }, () => {
+      broadcastStateToSSEClients();
+    });
+    watcherRef = () => fs.unwatchFile(STATE_FILE);
+  } catch (e) {
+    // fs.watchFile may not be available on all platforms; fall back to interval.
+    const intervalId = setInterval(broadcastStateToSSEClients, SSE_WATCH_INTERVAL_MS);
+    watcherRef = () => clearInterval(intervalId);
+  }
+}
+
+function stopStateWatcher() {
+  if (watcherRef) { watcherRef(); watcherRef = null; }
+  watcherStarted = false;
+}
+
+function removeSSEClient(client) {
+  sseClients.delete(client);
+  if (client.heartbeatTimer) clearInterval(client.heartbeatTimer);
+  try { client.res.end(); } catch (e) { /* already closed */ }
+}
+
+function handleSSEEndpoint(req, res) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-store, no-cache, must-revalidate',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  });
+  res.write('\n');
+
+  const client = { res, heartbeatTimer: null };
+  sseClients.add(client);
+
+  // Heartbeat: SSE comment lines keep the connection alive through proxies.
+  client.heartbeatTimer = setInterval(() => {
+    try {
+      res.write(': heartbeat\n\n');
+    } catch (e) {
+      removeSSEClient(client);
+    }
+  }, SSE_HEARTBEAT_MS);
+
+  // Immediately push the current state so the client doesn't wait for a change.
+  const state = readStateJson();
+  if (state) {
+    try {
+      res.write(`event: state\ndata: ${JSON.stringify(state)}\n\n`);
+    } catch (e) { /* ignore */ }
+  }
+
+  req.on('close', () => removeSSEClient(client));
+  req.on('error', () => removeSSEClient(client));
+}
 
 const MIME = {
   '.html': 'text/html',
@@ -128,9 +233,9 @@ function createServer() {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
 
     if (req.method === 'OPTIONS') { res.statusCode = 204; res.end(); return; }
-
     const urlPath = req.url.split('?')[0];
 
+    if (req.method === 'GET' && urlPath === '/api/events') { startStateWatcher(); handleSSEEndpoint(req, res); return; }
     if (req.method === 'POST' && urlPath === '/api/move') { handleMoveEndpoint(req, res); return; }
     if (req.method === 'POST' && urlPath === '/api/reset') { handleResetEndpoint(res); return; }
     if ((req.method === 'GET' || req.method === 'POST') && urlPath === '/api/resign') {
@@ -181,7 +286,7 @@ function createServer() {
   });
 }
 
-module.exports = { createServer };
+module.exports = { createServer, stopStateWatcher };
 
 if (require.main === module) {
   const port = process.env.CHESS_PORT ? Number(process.env.CHESS_PORT) : PORT;
