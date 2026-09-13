@@ -1016,6 +1016,22 @@
                 </div>
             </div>
             <div id="classification-summary"></div>
+            <div id="retry-mistakes-section" style="margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--panel-border);">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:0.85rem; font-weight:600;">Mistake Puzzles</span>
+                    <button id="retry-mistakes-btn" type="button" style="font-size:0.78rem; padding:3px 10px; background:var(--accent); color:#fff; border-radius:4px; font-weight:600;">Retry Mistakes</button>
+                </div>
+                <div id="puzzle-box" class="hidden" style="margin-top:8px; padding:8px; background:rgba(0,0,0,0.03); border:1px solid var(--panel-border); border-radius:4px; font-size:0.8rem;">
+                    <div id="puzzle-header" style="font-weight:600; margin-bottom:4px;">Puzzle: Find the Best Move</div>
+                    <div id="puzzle-instruction" style="color:var(--muted); margin-bottom:6px;">Can you find the best move in this position?</div>
+                    <div id="puzzle-feedback" style="margin-bottom:6px; font-weight:600;"></div>
+                    <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                        <button id="puzzle-hint-btn" type="button" style="font-size:0.75rem; padding:2px 8px;">Show Hint</button>
+                        <button id="puzzle-next-btn" type="button" class="hidden" style="font-size:0.75rem; padding:2px 8px; background:#059669; color:#fff; font-weight:600;">Next Mistake</button>
+                        <button id="puzzle-exit-btn" type="button" style="font-size:0.75rem; padding:2px 8px;">Exit Puzzles</button>
+                    </div>
+                </div>
+            </div>
         </div>
         <div id="explorer-panel">
             <div style="display: flex; justify-content: space-between; align-items: center;">

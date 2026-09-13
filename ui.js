@@ -1954,6 +1954,11 @@ function handleSquareClick(squareId) {
   // Until a referee snapshot exists, there is no board for the UI to act on.
   if (!board || gameOver || commandPending) return;
 
+  if (typeof puzzleModeActive !== 'undefined' && puzzleModeActive) {
+    if (typeof handlePuzzleSquareClick === 'function') handlePuzzleSquareClick(squareId);
+    return;
+  }
+
   if (typeof isViewingHistory === 'function' && isViewingHistory()) {
     scrubLast();
     return;
@@ -3143,6 +3148,148 @@ function setupBotUI() {
   fetchBotConfig();
 }
 
+// ==========================================
+// C7: Retry Your Mistakes / Puzzle Generator
+// ==========================================
+
+let puzzleModeActive = false;
+let activeMistakePuzzles = [];
+let currentPuzzleIndex = 0;
+
+function handlePuzzleSquareClick(squareId) {
+  if (!activeMistakePuzzles || activeMistakePuzzles.length === 0) return;
+  const puzzle = activeMistakePuzzles[currentPuzzleIndex];
+  if (!puzzle) return;
+
+  if (legalMoves.includes(squareId) && selectedSquare) {
+    const moveAttempt = selectedSquare + squareId;
+    selectedSquare = null;
+    legalMoves = [];
+    renderBoard();
+
+    const feedbackEl = document.getElementById('puzzle-feedback');
+    const nextBtn = document.getElementById('puzzle-next-btn');
+
+    if (moveAttempt === puzzle.bestMove.slice(0, 4)) {
+      if (feedbackEl) {
+        feedbackEl.textContent = '✓ Best Move! (★) Excellent find!';
+        feedbackEl.style.color = '#16a34a';
+      }
+      if (nextBtn && currentPuzzleIndex < activeMistakePuzzles.length - 1) {
+        nextBtn.classList.remove('hidden');
+      }
+      playSound('move');
+    } else {
+      if (feedbackEl) {
+        feedbackEl.textContent = `✗ Not the best move (${moveAttempt}). Try again!`;
+        feedbackEl.style.color = '#dc2626';
+      }
+      playSound('illegal');
+    }
+    return;
+  }
+
+  const pieceData = board && board.pieces && board.pieces[squareId];
+  if (pieceData && pieceData.color === (puzzle.color || (board && board.turn))) {
+    selectedSquare = squareId;
+    legalMoves = getLegalMoves(board, squareId, pieceData.color);
+    renderBoard();
+  } else {
+    selectedSquare = null;
+    legalMoves = [];
+    renderBoard();
+  }
+}
+
+function startMistakePuzzles() {
+  const reviewModule = (typeof window !== 'undefined' && window.MoveReview) || (typeof MoveReview !== 'undefined' ? MoveReview : null);
+  if (!reviewModule || typeof reviewModule.generateMistakePuzzles !== 'function') return;
+
+  const fenHistory = (historyPositions || []).map(hp => hp && hp.fen ? hp.fen : (hp && hp.board && typeof rulesEngine !== 'undefined' && rulesEngine.boardToFen ? rulesEngine.boardToFen(hp.board) : null));
+  activeMistakePuzzles = reviewModule.generateMistakePuzzles(liveHistory || [], evalHistory || [], fenHistory);
+
+  const puzzleBox = document.getElementById('puzzle-box');
+  const feedbackEl = document.getElementById('puzzle-feedback');
+  if (!activeMistakePuzzles || activeMistakePuzzles.length === 0) {
+    if (puzzleBox) puzzleBox.classList.remove('hidden');
+    if (feedbackEl) {
+      feedbackEl.textContent = 'No mistakes or blunders detected in this game! Great game!';
+      feedbackEl.style.color = '#16a34a';
+    }
+    return;
+  }
+
+  currentPuzzleIndex = 0;
+  puzzleModeActive = true;
+  loadCurrentPuzzle();
+}
+
+function loadCurrentPuzzle() {
+  if (!activeMistakePuzzles || activeMistakePuzzles.length === 0) return;
+  const puzzle = activeMistakePuzzles[currentPuzzleIndex];
+  if (!puzzle) return;
+
+  const puzzleBox = document.getElementById('puzzle-box');
+  if (puzzleBox) puzzleBox.classList.remove('hidden');
+
+  const headerEl = document.getElementById('puzzle-header');
+  if (headerEl) {
+    headerEl.textContent = `Puzzle ${currentPuzzleIndex + 1} of ${activeMistakePuzzles.length} (Ply ${puzzle.ply}): ${puzzle.classification}`;
+  }
+
+  const instrEl = document.getElementById('puzzle-instruction');
+  if (instrEl) {
+    instrEl.textContent = `At ply ${puzzle.ply}, ${puzzle.color} played ${puzzle.playedMove} (${puzzle.key}). Find the best move!`;
+  }
+
+  const feedbackEl = document.getElementById('puzzle-feedback');
+  if (feedbackEl) feedbackEl.textContent = '';
+
+  const nextBtn = document.getElementById('puzzle-next-btn');
+  if (nextBtn) nextBtn.classList.add('hidden');
+
+  jumpToPly(puzzle.ply - 1);
+}
+
+function setupMistakePuzzlesUI() {
+  const retryBtn = document.getElementById('retry-mistakes-btn');
+  if (retryBtn) {
+    retryBtn.onclick = startMistakePuzzles;
+  }
+
+  const hintBtn = document.getElementById('puzzle-hint-btn');
+  if (hintBtn) {
+    hintBtn.onclick = () => {
+      const puzzle = activeMistakePuzzles && activeMistakePuzzles[currentPuzzleIndex];
+      const feedbackEl = document.getElementById('puzzle-feedback');
+      if (puzzle && feedbackEl) {
+        feedbackEl.textContent = `💡 Hint: Focus on the piece at ${puzzle.bestMove.slice(0, 2)} moving to ${puzzle.bestMove.slice(2, 4)}.`;
+        feedbackEl.style.color = '#2563eb';
+      }
+    };
+  }
+
+  const nextBtn = document.getElementById('puzzle-next-btn');
+  if (nextBtn) {
+    nextBtn.onclick = () => {
+      if (currentPuzzleIndex < activeMistakePuzzles.length - 1) {
+        currentPuzzleIndex++;
+        loadCurrentPuzzle();
+      }
+    };
+  }
+
+  const exitBtn = document.getElementById('puzzle-exit-btn');
+  if (exitBtn) {
+    exitBtn.onclick = () => {
+      puzzleModeActive = false;
+      const puzzleBox = document.getElementById('puzzle-box');
+      if (puzzleBox) puzzleBox.classList.add('hidden');
+      scrubLast();
+    };
+  }
+}
+
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('keydown', handleGlobalScrubberKeydown);
   window.jumpToPly = jumpToPly;
@@ -3196,6 +3343,10 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.updateBotUI = updateBotUI;
   window.sendBotConfigUpdate = sendBotConfigUpdate;
   window.setupBotUI = setupBotUI;
+  window.startMistakePuzzles = startMistakePuzzles;
+  window.setupMistakePuzzlesUI = setupMistakePuzzlesUI;
+  window.getActiveMistakePuzzles = () => activeMistakePuzzles;
+  window.isPuzzleModeActive = () => puzzleModeActive;
 }
 
 const copyRoomButton = document.getElementById('copy-room-link');
@@ -3220,6 +3371,7 @@ initSeatAuth();
 syncNtpClock();
 setupMatchgradeSocialUI();
 setupBotUI();
+setupMistakePuzzlesUI();
 if (typeof setInterval === 'function') {
   setInterval(syncNtpClock, 10000);
 }
