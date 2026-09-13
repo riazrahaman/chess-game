@@ -5,8 +5,11 @@
   "scripts": {
     "test": "npm run test:unit && npm run test:browser",
     "test:unit": "node engine-selftest.js && node pieces-selftest.js",
-    "test:browser": "if [ -f scripts/smoke-test.mjs ]; then node scripts/smoke-test.mjs; else echo 'SKIP: scripts/smoke-test.mjs not found (built in sibling worktree)'; fi",
+    "test:browser": "if [ -f scripts/smoke-test.mjs ]; then node scripts/smoke-test.mjs; else echo 'SKIP: scripts/smoke-test.mjs not found'; fi",
     "lint": "node --check engine.js && node --check pieces.js && node --check ui.js && node --check server.js && node --check engine-selftest.js && node --check pieces-selftest.js",
     "check": "npm run lint && npm run test:unit"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
   }
 }
