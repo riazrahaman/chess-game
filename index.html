@@ -29,9 +29,14 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            font-size: clamp(16px, 6vw, 35px);
             cursor: pointer;
             user-select: none;
+        }
+        .chess-piece {
+            display: block;
+            width: 86%;
+            height: 86%;
+            pointer-events: none;
         }
         .white-sq { background-color: #eeeed2; }
         .black-sq { background-color: #769656; }
@@ -93,7 +98,14 @@
         }
         .captured-pieces {
             min-height: 1.2em;
-            letter-spacing: 0.1em;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 2px;
+        }
+        .captured-pieces .chess-piece {
+            width: 1.2em;
+            height: 1.2em;
         }
         #material-advantage {
             margin-top: 5px;
@@ -151,9 +163,11 @@
             justify-content: center;
         }
         .promo-btn {
-            font-size: 36px;
-            line-height: 1;
             padding: 8px 12px;
+        }
+        .promo-btn .chess-piece {
+            width: 45px;
+            height: 45px;
         }
         #promo-cancel {
             margin-top: 12px;
@@ -244,6 +258,7 @@
         </div>
     </div>
     <script src="engine.js"></script>
+    <script src="pieces.js"></script>
     <script src="ui.js"></script>
 </body>
 </html>

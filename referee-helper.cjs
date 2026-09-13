@@ -1,7 +1,7 @@
 const engine = require('./engine.js');
 const fs = require('fs');
 
-const STATE_FILE = '/Users/riazrahaman/Documents/agend-grid/chess-game/.referee-state.json';
+const STATE_FILE = process.env.CHESS_STATE_FILE || '/Users/riazrahaman/Documents/agend-grid/chess-game/.referee-state.json';
 const LOCK_FILE = STATE_FILE + '.lock';
 
 // Single source of truth for clock constants (C1).
