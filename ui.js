@@ -824,14 +824,24 @@ function getAuthHeaders(extraHeaders = {}) {
   return headers;
 }
 
+function showUiError(message) {
+  if (statusElement) {
+    statusElement.textContent = message;
+    statusElement.style.color = '#ef4444';
+  } else {
+    console.error(message);
+  }
+}
+
 async function submitMoveToReferee(moveStr) {
   const roomParam = getCurrentRoomId() !== 'default' ? `?room=${encodeURIComponent(getCurrentRoomId())}` : '';
   const headers = getAuthHeaders();
   const clientSentAt = Date.now();
+  const cmdId = 'move:' + moveStr + ':' + clientSentAt + ':' + Math.random().toString(36).slice(2);
   return runRefereeCommand('Submitting move', () => fetch('/api/move' + roomParam, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ move: moveStr, clientSentAt })
+      body: JSON.stringify({ move: moveStr, clientSentAt, id: cmdId })
     }));
 }
 
@@ -1990,8 +2000,9 @@ function initGame() {
 }
 
 async function resetReferee() {
+  const cmdId = 'reset:' + Date.now() + ':' + Math.random().toString(36).slice(2);
   const accepted = await runRefereeCommand('Starting new game', () =>
-    fetch(withRoomParam('/api/reset'), { method: 'POST', headers: getAuthHeaders() }));
+    fetch(withRoomParam('/api/reset'), { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ id: cmdId }) }));
   if (accepted) {
     // The board is still changed only by the subsequent referee poll.
     lastKnownStateJson = '';
@@ -2009,15 +2020,18 @@ if (flipBoardButton) flipBoardButton.onclick = () => {
 const resignButton = document.getElementById('resign');
 if (resignButton) resignButton.onclick = async () => {
   const resignRole = currentSeatRole || (turn === 'white' ? 'white' : 'black');
+  const cmdId = 'resign:' + resignRole + ':' + Date.now() + ':' + Math.random().toString(36).slice(2);
   await runRefereeCommand('Submitting resignation', () =>
-    fetch(withRoomParam(`/api/resign?color=${encodeURIComponent(resignRole)}`), { method: 'POST', headers: getAuthHeaders() }));
+    fetch(withRoomParam(`/api/resign?color=${encodeURIComponent(resignRole)}`), { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ id: cmdId }) }));
 };
 const drawButton = document.getElementById('offer-draw');
 if (drawButton) drawButton.onclick = async () => {
-  await runRefereeCommand('Offering draw', () => fetch(withRoomParam('/api/draw'), { method: 'POST', headers: getAuthHeaders() }));
+  const cmdId = 'draw:' + Date.now() + ':' + Math.random().toString(36).slice(2);
+  await runRefereeCommand('Offering draw', () => fetch(withRoomParam('/api/draw'), { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ id: cmdId }) }));
 };
 if (undoButton) undoButton.onclick = async () => {
-  await runRefereeCommand('Requesting undo', () => fetch(withRoomParam('/api/undo'), { method: 'POST', headers: getAuthHeaders() }));
+  const cmdId = 'undo:' + Date.now() + ':' + Math.random().toString(36).slice(2);
+  await runRefereeCommand('Requesting undo', () => fetch(withRoomParam('/api/undo'), { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ id: cmdId }) }));
 };
 
 const btnScrubStart = document.getElementById('scrub-start');
@@ -2295,8 +2309,7 @@ async function claimSeat(role) {
       startSeatHeartbeat();
       return true;
     } else {
-      if (statusElement) statusElement.textContent = data.error || 'Failed to claim seat';
-      else if (typeof alert === 'function') alert(data.error || 'Failed to claim seat');
+      showUiError(data.error || 'Failed to claim seat');
       return false;
     }
   } catch (e) {
@@ -2502,7 +2515,18 @@ async function viewArchivedGame(gameId) {
       }
     }
 
-    liveHistory = uciMoves;
+    if (!viewingArchivedGame) {
+      savedLiveStateBeforeArchive = {
+        history: liveHistory.slice(),
+        board: liveBoard,
+        moves: moveHistory.slice(),
+        positions: historyPositions.slice(),
+        viewedPly
+      };
+    }
+    viewingArchivedGame = true;
+
+    liveHistory = uciMoves.slice();
     const sanHistory = historyToSan(uciMoves);
     const moves = [];
     for (let i = 0; i < uciMoves.length; i += 2) {
@@ -2521,12 +2545,31 @@ async function viewArchivedGame(gameId) {
     updateHistoryUI();
     if (statusElement) {
       statusElement.textContent = `Viewing archive: ${game.white} vs ${game.black} (${game.result || '*'})`;
+      statusElement.style.color = '#0284c7';
     }
 
     const modal = document.getElementById('archive-modal');
     if (modal) modal.classList.add('hidden');
   } catch (err) {
-    alert(`Could not view game: ${err.message}`);
+    showUiError(`Could not view game: ${err.message}`);
+  }
+}
+
+function exitArchivedGameView() {
+  if (!viewingArchivedGame || !savedLiveStateBeforeArchive) return;
+  viewingArchivedGame = false;
+  liveHistory = savedLiveStateBeforeArchive.history;
+  liveBoard = savedLiveStateBeforeArchive.board;
+  moveHistory = savedLiveStateBeforeArchive.moves;
+  historyPositions = savedLiveStateBeforeArchive.positions;
+  viewedPly = savedLiveStateBeforeArchive.viewedPly;
+  savedLiveStateBeforeArchive = null;
+  renderBoard();
+  updateHistoryUI();
+  updateScrubberButtons();
+  if (statusElement) {
+    statusElement.textContent = 'Returned to live game';
+    statusElement.style.color = '';
   }
 }
 
@@ -2565,20 +2608,39 @@ async function reloadArchivedGameOntoBoard(gameId) {
       }
     }
 
-    await runRefereeCommand('Resetting referee', () => fetch('/api/reset', { method: 'POST' }));
-
-    for (const move of uciMoves) {
-      await fetch('/api/move', {
+    const resetSuccess = await runRefereeCommand('Resetting referee', () =>
+      fetch(withRoomParam('/api/reset'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ move })
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ id: 'reset-archive:' + Date.now() })
+      })
+    );
+    if (!resetSuccess) {
+      throw new Error('Failed to reset referee state');
+    }
+
+    for (let i = 0; i < uciMoves.length; i++) {
+      const move = uciMoves[i];
+      const moveRes = await fetch(withRoomParam('/api/move'), {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ move, id: `archive:${gameId}:${i}:${Date.now()}` })
       });
+      if (!moveRes.ok) {
+        const errPayload = await moveRes.json().catch(() => ({}));
+        throw new Error(`Move ${i + 1} (${move}) failed: ${errPayload.error || moveRes.status}`);
+      }
     }
 
     const modal = document.getElementById('archive-modal');
     if (modal) modal.classList.add('hidden');
+    if (statusElement) {
+      statusElement.textContent = `Loaded game onto board (${uciMoves.length} moves)`;
+      statusElement.style.color = '#10b981';
+    }
+    pollReferee();
   } catch (err) {
-    alert(`Could not reload game onto board: ${err.message}`);
+    showUiError(`Could not reload game onto board: ${err.message}`);
   }
 }
 
@@ -2726,6 +2788,8 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.updateRoomBadge = updateRoomBadge;
   window.loadGameArchiveList = loadGameArchiveList;
   window.viewArchivedGame = viewArchivedGame;
+  window.exitArchivedGameView = exitArchivedGameView;
+  window.showUiError = showUiError;
   window.downloadArchivedGamePgn = downloadArchivedGamePgn;
   window.setupGameArchiveUI = setupGameArchiveUI;
 }
@@ -2749,6 +2813,10 @@ updateRoomBadge();
 initGame();
 setupGameArchiveUI();
 initSeatAuth();
+syncNtpClock();
+if (typeof setInterval === 'function') {
+  setInterval(syncNtpClock, 10000);
+}
 const cachedState = restoreCachedRefereeState();
 if (cachedState) {
   // This is a paint-only bootstrap. The first referee poll always runs with

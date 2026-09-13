@@ -240,10 +240,15 @@ const ALLOWED_FILES = new Set([
 
 const rateLimitMap = new Map();
 const RATE_LIMIT_WINDOW_MS = 60000;
-const RATE_LIMIT_MAX_REQUESTS = 120;
+const RATE_LIMIT_MAX_REQUESTS = Number(process.env.CHESS_RATE_LIMIT) || 600;
 
 function checkRateLimit(ip) {
   const now = Date.now();
+  if (rateLimitMap.size > 2000) {
+    for (const [k, v] of rateLimitMap.entries()) {
+      if (now > v.resetAt) rateLimitMap.delete(k);
+    }
+  }
   const entry = rateLimitMap.get(ip) || { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
   if (now > entry.resetAt) {
     entry.count = 0;
@@ -608,6 +613,11 @@ function createServer() {
     if (!checkCors(req, res)) return;
 
     if (isApiRequest(urlPath)) {
+      const clientIp = req.socket.remoteAddress || '127.0.0.1';
+      if (!checkRateLimit(clientIp)) {
+        sendJsonError(res, 429, 'rate limit exceeded');
+        return;
+      }
       if (req.method === 'GET' && urlPath === '/api/time') {
         const t0 = req.url.includes('?') ? new URLSearchParams(req.url.split('?')[1]).get('t0') : null;
         const now = Date.now();
@@ -810,7 +820,8 @@ module.exports = {
   extractRoomId,
   isValidRoomId,
   seatAuthManager,
-  gameArchive
+  gameArchive,
+  checkRateLimit
 };
 
 if (require.main === module) {
