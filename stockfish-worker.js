@@ -1,8 +1,10 @@
 'use strict';
 
-// Stockfish 17 NNUE WASM Engine & UCI Web Worker
+// Lightweight Local Heuristic Engine & UCI Web Worker
+// Fast in-browser fallback engine (PST + material evaluation, alpha-beta search).
 // Supports Universal Chess Interface (UCI) protocol, depth calculation,
 // Multi-PV candidate analysis, and centipawn scoring.
+// Retains Stockfish 17 UCI alias for protocol backward compatibility.
 
 const PIECE_VALUES = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 20000 };
 
@@ -393,8 +395,9 @@ class StockfishEngine {
     const op = tokens[0].toLowerCase();
 
     if (op === 'uci') {
-      this.send('id name Stockfish 17 NNUE WASM');
-      this.send('id author the Stockfish developers');
+      this.send('id name Lightweight Local Engine (PST+Material)');
+      this.send('id alias Stockfish 17 NNUE WASM');
+      this.send('id author Chess Game Contributors & Stockfish Compatibility Layer');
       this.send('option name MultiPV type spin default 1 min 1 max 500');
       this.send('option name Threads type spin default 1 min 1 max 512');
       this.send('option name Hash type spin default 16 min 1 max 33554432');
