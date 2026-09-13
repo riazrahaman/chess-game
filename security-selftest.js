@@ -40,6 +40,26 @@ function httpGet(server, urlPath) {
   });
 }
 
+function httpRequestWithOrigin(server, method, urlPath, origin) {
+  return new Promise((resolve, reject) => {
+    const headers = {};
+    if (origin !== undefined) headers['Origin'] = origin;
+    const req = http.request({
+      host: '127.0.0.1',
+      port: server.address().port,
+      method,
+      path: urlPath,
+      headers,
+    }, (res) => {
+      let body = '';
+      res.on('data', c => { body += c; });
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 function httpPost(server, urlPath, payload) {
   return new Promise((resolve, reject) => {
     const data = typeof payload === 'string' ? payload : JSON.stringify(payload);
@@ -237,6 +257,82 @@ async function runSecurityTests() {
     const nullResp = await httpGet(server, '/index.html%00.js');
     assert(nullResp.status === 404 || nullResp.status === 403,
       'null byte: /index.html%00.js rejected with ' + nullResp.status);
+
+    // --- CORS origin validation ---
+    const allowedPort = server.address().port;
+    const allowedOriginA = `http://localhost:${allowedPort}`;
+    const allowedOriginB = `http://127.0.0.1:${allowedPort}`;
+    const disallowedOrigin = 'http://evil.example.com';
+    process.env.CHESS_ALLOWED_ORIGIN = `${allowedOriginA},${allowedOriginB}`;
+
+    // Disallowed Origin on GET (static file) -> 403
+    const corsBadGet = await httpRequestWithOrigin(server, 'GET', '/index.html', disallowedOrigin);
+    assert(corsBadGet.status === 403,
+      'cors: disallowed Origin on GET static -> 403 (got ' + corsBadGet.status + ')');
+    let corsBadGetJson = {};
+    try { corsBadGetJson = JSON.parse(corsBadGet.body); } catch (e) {}
+    assert(corsBadGetJson.ok === false && corsBadGetJson.error,
+      'cors: disallowed Origin GET returns structured JSON error');
+    assert(corsBadGet.headers['access-control-allow-origin'] !== disallowedOrigin,
+      'cors: disallowed Origin not echoed in ACAO header');
+
+    // Disallowed Origin on POST /api/reset -> 403
+    const corsBadApi = await httpRequestWithOrigin(server, 'POST', '/api/reset', disallowedOrigin);
+    assert(corsBadApi.status === 403,
+      'cors: disallowed Origin on POST /api/reset -> 403 (got ' + corsBadApi.status + ')');
+
+    // Disallowed Origin on GET /api/events (SSE) -> 403
+    const corsBadSse = await httpRequestWithOrigin(server, 'GET', '/api/events', disallowedOrigin);
+    assert(corsBadSse.status === 403,
+      'cors: disallowed Origin on GET /api/events -> 403 (got ' + corsBadSse.status + ')');
+
+    // Allowed Origin (localhost variant) on GET -> passes, ACAO echoed
+    const corsGoodGet = await httpRequestWithOrigin(server, 'GET', '/index.html', allowedOriginA);
+    assert(corsGoodGet.status === 200,
+      'cors: allowed Origin (localhost) GET -> 200 (got ' + corsGoodGet.status + ')');
+    assert(corsGoodGet.headers['access-control-allow-origin'] === allowedOriginA,
+      'cors: allowed Origin (localhost) echoed in ACAO header');
+
+    // Allowed Origin (127.0.0.1 variant) on GET -> passes, ACAO echoed
+    const corsGoodGetB = await httpRequestWithOrigin(server, 'GET', '/index.html', allowedOriginB);
+    assert(corsGoodGetB.status === 200,
+      'cors: allowed Origin (127.0.0.1) GET -> 200 (got ' + corsGoodGetB.status + ')');
+    assert(corsGoodGetB.headers['access-control-allow-origin'] === allowedOriginB,
+      'cors: allowed Origin (127.0.0.1) echoed in ACAO header');
+
+    // Allowed Origin on POST /api/reset -> passes
+    const corsGoodApi = await httpRequestWithOrigin(server, 'POST', '/api/reset', allowedOriginA);
+    assert(corsGoodApi.status === 200,
+      'cors: allowed Origin POST /api/reset -> 200 (got ' + corsGoodApi.status + ')');
+
+    // No Origin header on GET -> passes (same-origin browser flow)
+    const corsNoOrigin = await httpGet(server, '/index.html');
+    assert(corsNoOrigin.status === 200,
+      'cors: no Origin header GET -> 200 (got ' + corsNoOrigin.status + ')');
+    assert(corsNoOrigin.headers['access-control-allow-origin'] === undefined,
+      'cors: no Origin header -> no ACAO header set');
+
+    // No Origin header on POST /api/reset -> passes
+    const corsNoOriginApi = await httpPost(server, '/api/reset', {});
+    assert(corsNoOriginApi.status === 200,
+      'cors: no Origin header POST /api/reset -> 200 (got ' + corsNoOriginApi.status + ')');
+
+    // OPTIONS preflight with disallowed Origin -> 403
+    const corsBadOpts = await httpRequestWithOrigin(server, 'OPTIONS', '/api/move', disallowedOrigin);
+    assert(corsBadOpts.status === 403,
+      'cors: disallowed Origin OPTIONS preflight -> 403 (got ' + corsBadOpts.status + ')');
+
+    // OPTIONS preflight with allowed Origin -> 204
+    const corsGoodOpts = await httpRequestWithOrigin(server, 'OPTIONS', '/api/move', allowedOriginA);
+    assert(corsGoodOpts.status === 204,
+      'cors: allowed Origin OPTIONS preflight -> 204 (got ' + corsGoodOpts.status + ')');
+    assert(corsGoodOpts.headers['access-control-allow-origin'] === allowedOriginA,
+      'cors: allowed Origin OPTIONS echoes ACAO header');
+
+    // No wildcard ACAO on any response
+    const corsWildcardCheck = await httpGet(server, '/index.html');
+    assert(corsWildcardCheck.headers['access-control-allow-origin'] !== '*',
+      'cors: no wildcard Access-Control-Allow-Origin on responses');
 
   } finally {
     await new Promise(r => server.close(r));
