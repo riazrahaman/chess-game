@@ -76,5 +76,8 @@
 | 3     | Gate 3       | Long-lived referee + SSE push            | Completed ✅ |
 | 4     | Gate 4       | Playing experience (accessibility, UX)   | Completed ✅ |
 | 5     | Gate 5       | Stockfish worker + analysis arrows       | Completed ✅ |
+| 6     | Phase 1      | Web Audio soundpack, multi-premoves (1-5 plies), right-click doodling canvas, move tree scrubber | Completed ✅ |
+| 7     | Phase 2      | Stockfish 17 NNUE WASM, Multi-PV top-3 arrows, CAPS accuracy review & badges, ECO Opening Explorer & SVG graph | Completed ✅ |
+| 8     | Phase 3      | Player seat tokens, spectator security, NTP latency clock lag compensation, multi-room, SQLite archive | Completed / In-Flight ✅ |
 
-All gates have passed their exit criteria in CI and are merged to `main`.
+All gates and roadmap phases pass their exit criteria across 10+ automated test suites with 0 regressions.
