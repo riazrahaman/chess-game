@@ -28,8 +28,22 @@ async function runTests() {
   // 1. Storage Backend Initialization (SQLite & JSON Fallback)
   // -------------------------------------------------------------
   console.log('--- 1. Storage Backend Initialization ---');
+  const hasSqlite = (() => {
+    if (process.env.CHESS_ARCHIVE_FORCE_JSON === '1') return false;
+    try {
+      const { DatabaseSync } = require('node:sqlite');
+      return typeof DatabaseSync === 'function';
+    } catch (_) {
+      return false;
+    }
+  })();
+
   const sqliteArchive = gameArchiveMod.createGameArchive(':memory:');
-  assert(sqliteArchive.backendType === 'sqlite', 'createGameArchive(":memory:") uses SQLite backend');
+  if (hasSqlite) {
+    assert(sqliteArchive.backendType === 'sqlite', 'createGameArchive(":memory:") uses SQLite backend');
+  } else {
+    assert(sqliteArchive.backendType === 'json', 'createGameArchive(":memory:") gracefully falls back to JSON when node:sqlite is unavailable');
+  }
 
   const tmpJsonPath = path.join(__dirname, `.test-archive-${Date.now()}.json`);
   const jsonArchive = gameArchiveMod.createGameArchive({ forceJson: true, jsonPath: tmpJsonPath });

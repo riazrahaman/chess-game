@@ -366,6 +366,10 @@ class JsonFileStorageAdapter {
   }
 
   _load() {
+    if (!this.filePath || this.filePath === ':memory:' || !fs) {
+      this.games = new Map();
+      return;
+    }
     try {
       if (fs.existsSync(this.filePath)) {
         const raw = fs.readFileSync(this.filePath, 'utf8');
@@ -382,6 +386,7 @@ class JsonFileStorageAdapter {
   }
 
   _saveToDisk() {
+    if (!this.filePath || this.filePath === ':memory:' || !fs) return;
     try {
       const list = Array.from(this.games.values());
       const tempPath = `${this.filePath}.tmp.${Date.now()}`;
@@ -474,7 +479,7 @@ class GameArchive {
     }
 
     if (!this.storage) {
-      const jsonPath = options.jsonPath || DEFAULT_JSON_PATH;
+      const jsonPath = typeof options === 'string' ? options : (options.jsonPath || DEFAULT_JSON_PATH);
       this.storage = new JsonFileStorageAdapter(jsonPath);
       this.backendType = 'json';
     }
