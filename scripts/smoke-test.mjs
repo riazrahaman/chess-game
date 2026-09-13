@@ -61,7 +61,7 @@ async function waitForSquareData(page, squareId, expectPiece, timeoutMs) {
 }
 
 async function readRefereeState() {
-  const res = await fetch(`${BASE_URL}.referee-state.json?t=${Date.now()}`);
+  const res = await fetch(`${BASE_URL}api/state?t=${Date.now()}`);
   if (!res.ok) throw new Error(`referee state fetch failed: ${res.status}`);
   return res.json();
 }

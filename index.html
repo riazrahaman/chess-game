@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chess UI</title>
+    <base href="/">
     <style>
         /* A6: Theme system — CSS custom properties on :root.
            Default = current light look (no visual regression for existing users).
@@ -716,6 +717,8 @@
         </select>
         <button id="theme-mode-toggle">Dark mode</button>
         <button id="sound-toggle">Sound: On</button>
+        <span id="room-badge" style="margin-left: 8px; font-size: 0.85rem; font-weight: bold; background: #e2e8f0; padding: 2px 8px; border-radius: 4px;">Room: default</span>
+        <button id="copy-room-link" type="button" style="font-size: 0.8rem; padding: 2px 6px;">Copy Room Link</button>
         <div id="seat-bar" style="display:inline-flex; align-items:center; gap:6px; margin-left:12px;">
             <span id="seat-badge" style="font-size:0.75rem; padding:2px 6px; border-radius:4px; background:#e2e8f0; font-weight:600;">Unseated</span>
             <button id="claim-white-btn" type="button" style="font-size:0.75rem; padding:2px 8px;">Play White</button>

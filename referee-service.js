@@ -140,19 +140,35 @@ function rebuildState(history, moveTimestamps) {
   return s;
 }
 
-function atomicSaveSnapshot(s) {
-  const tmp = STATE_FILE + '.tmp.' + process.pid;
+function getRoomStateFile(roomId = 'default') {
+  if (!roomId || roomId === 'default') {
+    return process.env.CHESS_STATE_FILE || path.join(DIR, '.referee-state.json');
+  }
+  const baseDir = process.env.CHESS_STATE_FILE ? path.dirname(process.env.CHESS_STATE_FILE) : DIR;
+  return path.join(baseDir, `.referee-state-${roomId}.json`);
+}
+
+function getRoomJournalFile(roomId = 'default') {
+  if (!roomId || roomId === 'default') {
+    return process.env.CHESS_JOURNAL_FILE || path.join(DIR, '.referee-journal.jsonl');
+  }
+  const baseDir = process.env.CHESS_JOURNAL_FILE ? path.dirname(process.env.CHESS_JOURNAL_FILE) : DIR;
+  return path.join(baseDir, `.referee-journal-${roomId}.jsonl`);
+}
+
+function atomicSaveSnapshot(s, targetFile = STATE_FILE) {
+  const tmp = targetFile + '.tmp.' + process.pid + '.' + Math.random().toString(36).slice(2);
   fs.writeFileSync(tmp, JSON.stringify(s, null, 2));
-  fs.renameSync(tmp, STATE_FILE);
+  fs.renameSync(tmp, targetFile);
 }
 
-function appendJournal(entry) {
-  fs.appendFileSync(JOURNAL_FILE, JSON.stringify(entry) + '\n');
+function appendJournal(entry, targetFile = JOURNAL_FILE) {
+  fs.appendFileSync(targetFile, JSON.stringify(entry) + '\n');
 }
 
-function readJournal() {
+function readJournal(targetFile = JOURNAL_FILE) {
   try {
-    const raw = fs.readFileSync(JOURNAL_FILE, 'utf8');
+    const raw = fs.readFileSync(targetFile, 'utf8');
     const lines = raw.split('\n').filter(Boolean);
     const entries = [];
     for (const line of lines) {
@@ -233,7 +249,14 @@ function stateView(s) {
 }
 
 class RefereeService {
-  constructor() {
+  constructor(options = {}) {
+    if (typeof options === 'string') {
+      options = { roomId: options };
+    }
+    const roomId = (options && options.roomId) ? options.roomId : 'default';
+    this.roomId = roomId;
+    this.stateFile = (options && options.stateFile) || getRoomStateFile(roomId);
+    this.journalFile = (options && options.journalFile) || getRoomJournalFile(roomId);
     this.state = null;
     this.revision = 0;
     this._tail = Promise.resolve();
@@ -247,19 +270,21 @@ class RefereeService {
     let snapshot = null;
     let snapMtime = 0;
     try {
-      const raw = fs.readFileSync(STATE_FILE, 'utf8');
+      const raw = fs.readFileSync(this.stateFile, 'utf8');
       snapshot = ensureClocks(JSON.parse(raw));
-      snapMtime = fs.statSync(STATE_FILE).mtimeMs;
+      snapMtime = fs.statSync(this.stateFile).mtimeMs;
     } catch (_) { /* no snapshot */ }
 
-    const journal = readJournal();
+    const journal = readJournal(this.journalFile);
 
     if (snapshot) {
       this.state = snapshot;
     } else {
       this.state = newGame();
-      atomicSaveSnapshot(this.state);
-      snapMtime = fs.statSync(STATE_FILE).mtimeMs;
+      atomicSaveSnapshot(this.state, this.stateFile);
+      try {
+        snapMtime = fs.statSync(this.stateFile).mtimeMs;
+      } catch (_) {}
     }
     this._lastSnapshotMtime = snapMtime;
     this.revision = 0;
@@ -275,7 +300,7 @@ class RefereeService {
 
   _checkExternalChange() {
     try {
-      const mtime = fs.statSync(STATE_FILE).mtimeMs;
+      const mtime = fs.statSync(this.stateFile).mtimeMs;
       if (mtime !== this._lastSnapshotMtime) {
         this._rebootFromSnapshotOnly();
       }
@@ -286,9 +311,9 @@ class RefereeService {
     let snapshot = null;
     let snapMtime = 0;
     try {
-      const raw = fs.readFileSync(STATE_FILE, 'utf8');
+      const raw = fs.readFileSync(this.stateFile, 'utf8');
       snapshot = ensureClocks(JSON.parse(raw));
-      snapMtime = fs.statSync(STATE_FILE).mtimeMs;
+      snapMtime = fs.statSync(this.stateFile).mtimeMs;
     } catch (_) { /* no snapshot */ }
     if (snapshot) {
       this.state = snapshot;
@@ -395,9 +420,9 @@ class RefereeService {
   _journalAndSnapshot(type, args, moveTs) {
     this._journalSeq++;
     const entry = { seq: this._journalSeq, id: this._journalSeq, type, args, ts: (typeof moveTs === 'number' ? moveTs : Date.now()) };
-    appendJournal(entry);
-    atomicSaveSnapshot(this.state);
-    try { this._lastSnapshotMtime = fs.statSync(STATE_FILE).mtimeMs; } catch (_) {}
+    appendJournal(entry, this.journalFile);
+    atomicSaveSnapshot(this.state, this.stateFile);
+    try { this._lastSnapshotMtime = fs.statSync(this.stateFile).mtimeMs; } catch (_) {}
     this.revision = this._computeRevision();
   }
 
@@ -474,21 +499,33 @@ class RefereeService {
   }
 }
 
-let _instance = null;
-function getReferee() {
-  if (!_instance) _instance = new RefereeService();
-  return _instance;
+const _instances = new Map();
+
+function getReferee(roomId = 'default') {
+  const id = (typeof roomId === 'string' && roomId.trim()) ? roomId.trim() : 'default';
+  if (!_instances.has(id)) {
+    _instances.set(id, new RefereeService({ roomId: id }));
+  }
+  return _instances.get(id);
 }
 
-function resetInstance() {
-  _instance = null;
+function resetInstance(roomId) {
+  if (roomId) {
+    _instances.delete(roomId);
+  } else {
+    _instances.clear();
+  }
 }
 
 module.exports = {
   RefereeService,
   getReferee,
   resetInstance,
+  getRoomStateFile,
+  getRoomJournalFile,
   atomicSaveSnapshot,
+  appendJournal,
+  readJournal,
   newGame,
   ensureClocks,
   allLegalMoves,
