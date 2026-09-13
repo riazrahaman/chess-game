@@ -353,7 +353,7 @@ function renderBoard(lastMove = null, boardBeforeRender = previousBoard) {
       }
 
       if (lastMove && (lastMove.from === squareId || lastMove.to === squareId)) {
-        classes.push('highlight');
+        classes.push('last-move');
       }
 
       const pieceData = board.pieces[squareId];

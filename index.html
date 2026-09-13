@@ -29,6 +29,9 @@
             --active-timer-border: #ffcc00;
             --drop-hint-bg: #bcd4ff;
             --overlay-bg: rgba(17, 24, 39, 0.7);
+            /* A4: last-move accent — subtle amber overlay, visually distinct
+               from the selected-square yellow (.highlight). */
+            --last-move: rgba(255, 193, 77, 0.45);
         }
 
         /* ---- Dark mode ---- */
@@ -46,6 +49,8 @@
             --text-color: #e0e0e0;
             --timer-border: #456;
             --overlay-bg: rgba(5, 5, 15, 0.85);
+            /* A4: slightly warmer amber for dark mode to stay visible. */
+            --last-move: rgba(255, 183, 77, 0.30);
         }
 
         /* ---- Board theme: classic-dark (lichess green, dark page pairing) ---- */
@@ -138,6 +143,11 @@
         .white-sq { background-color: var(--sq-white); }
         .black-sq { background-color: var(--sq-black); }
         .highlight { background-color: var(--highlight) !important; }
+        /* A4: last-move accent for from/to squares of the most recent move.
+           Uses a subtle amber overlay — visually distinct from the yellow
+           .highlight used for the currently selected square. The !important
+           keeps it from being overridden by .white-sq/.black-sq base colors. */
+        .last-move { background-color: var(--last-move) !important; }
         /* A3: chess-standard legal-move indicators. Quiet moves show a small
            centered dot via ::after; captures show a ring around the piece. */
         .legal-move::after {

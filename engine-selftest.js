@@ -619,6 +619,30 @@ assert(JSON.stringify(moveTouched) === JSON.stringify(['e2', 'e4']) &&
   moveHarness.elements.get('e4').firstElementChild === movingPawn,
   'D2: a single-move diff touches only from/to squares and preserves piece identity');
 
+// A4: last-move accent — from/to squares of the most recent move receive the
+// .last-move class (subtle amber), NOT .highlight (yellow = selected square).
+// Render-only decoration derived from the referee history tail; no local
+// game logic involved.
+const a4FromSq = moveHarness.elements.get('e2');
+const a4ToSq = moveHarness.elements.get('e4');
+assert(a4FromSq && a4FromSq.className.includes('last-move') &&
+  a4ToSq && a4ToSq.className.includes('last-move'),
+  'A4: last-move from/to squares carry the .last-move class');
+assert(a4FromSq && !a4FromSq.className.includes('highlight') &&
+  a4ToSq && !a4ToSq.className.includes('highlight'),
+  'A4: last-move accent is distinct from .highlight (no yellow on last-move squares)');
+const a4Unrelated = moveHarness.elements.get('a1');
+assert(a4Unrelated && !a4Unrelated.className.includes('last-move'),
+  'A4: squares outside last-move from/to do not receive .last-move');
+const a4NullHarness = createReconcileHarness(createInitialBoard());
+a4NullHarness.context.board = cloneBoardHelper(createInitialBoard());
+a4NullHarness.context.renderBoard(null, a4NullHarness.context.previousBoard);
+const a4AnyLastMove = [...a4NullHarness.elements.values()].some(
+  el => el.id !== 'board' && typeof el.className === 'string' && el.className.includes('last-move')
+);
+assert(a4AnyLastMove === false,
+  'A4: null lastMove leaves no square with .last-move class');
+
 let beforeCapture = makeMove(createInitialBoard(), 'e2', 'e4');
 beforeCapture = makeMove(beforeCapture, 'd7', 'd5');
 const captureHarness = createReconcileHarness(beforeCapture);
