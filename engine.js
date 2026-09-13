@@ -815,11 +815,31 @@ function deserializeRefereeState(serialized) {
   }
 }
 
+// A8: display-only clock formatter for the UI's render-only interpolation.
+// Pure function — takes seconds (possibly fractional) and returns a display
+// string. Below TENTHS_THRESHOLD seconds it shows tenths (e.g. 0:09.4),
+// otherwise it shows m:ss. Never mutates; never persists. The referee file
+// remains the single source of clock truth (C1).
+const TENTHS_THRESHOLD = 10;
+
+function formatClockTick(seconds) {
+  const clamped = Math.max(0, seconds);
+  if (clamped < TENTHS_THRESHOLD) {
+    const tenths = Math.floor(clamped * 10) % 10;
+    const wholeSeconds = Math.floor(clamped);
+    return `0:${wholeSeconds.toString().padStart(2, '0')}.${tenths}`;
+  }
+  const m = Math.floor(clamped / 60);
+  const s = Math.floor(clamped) % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     createInitialBoard, getLegalMoves, makeMove, isCheck, isCheckmate,
     isStalemate, getGameStatus, getKingStatus, moveToSan, historyToSan,
     buildPgn, computeCaptured, getBoardRenderOrder, getRankLabels, getFileLabels,
-    gameEndPresentation, classifySound, serializeRefereeState, deserializeRefereeState
+    gameEndPresentation, classifySound, serializeRefereeState, deserializeRefereeState,
+    formatClockTick
   };
 }
