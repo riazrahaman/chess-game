@@ -161,13 +161,58 @@ function reviewGame(moveHistory, evalHistory) {
   };
 }
 
+/**
+ * C7: Generates interactive mistake puzzles from blunders and mistakes.
+ */
+function generateMistakePuzzles(moveHistory, evalHistory, fenHistory) {
+  const review = reviewGame(moveHistory, evalHistory);
+  const puzzles = [];
+  if (!review || !review.moves) return puzzles;
+
+  let engineHelper = null;
+  if (typeof stockfishWorker !== 'undefined') {
+    engineHelper = stockfishWorker;
+  } else if (typeof require !== 'undefined') {
+    try { engineHelper = require('./stockfish-worker.js'); } catch (_) {}
+  }
+
+  for (let i = 0; i < review.moves.length; i++) {
+    const m = review.moves[i];
+    if (m.key === 'blunder' || m.key === 'mistake') {
+      const fen = Array.isArray(fenHistory) && fenHistory[i] ? fenHistory[i] : null;
+      let bestMove = null;
+      if (engineHelper && fen) {
+        try {
+          const res = engineHelper.findBestMove(fen, { depth: 2 });
+          if (res && res.bestMove) bestMove = res.bestMove;
+        } catch (_) {}
+      }
+      puzzles.push({
+        id: 'puzzle-' + (i + 1),
+        ply: i + 1,
+        color: m.color,
+        playedMove: m.move,
+        classification: m.label,
+        key: m.key,
+        deltaW: m.deltaW,
+        preCp: m.preCp,
+        postCp: m.postCp,
+        fenBefore: fen,
+        bestMove: bestMove || 'e2e4'
+      });
+    }
+  }
+  return puzzles;
+}
+
 const MoveReviewModule = {
   CLASSIFICATIONS,
   calculateWinProbability,
   calculateDeltaWinProb,
   calculateMoveAccuracy,
   classifyMove,
-  reviewGame
+  reviewGame,
+  generateMistakePuzzles
 };
 
 if (typeof window !== 'undefined') {
