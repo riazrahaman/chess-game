@@ -6,6 +6,8 @@ const crypto = require('crypto');
 const referee = require('./referee-service.js');
 const { seatAuthManager } = require('./seat-auth.js');
 const gameArchive = require('./game-archive.js');
+const { BotService, BOT_LEVELS } = require('./bot-service.js');
+const botService = new BotService(seatAuthManager);
 
 const PORT = 39281;
 const DIR = __dirname;
@@ -407,6 +409,13 @@ function handleMoveEndpoint(req, res, roomId = 'default') {
       sendJson(res, result.httpStatus || (result.ok ? 200 : 409), result);
       if (result.ok) {
         broadcastRoomStateToSSEClients(targetRoom);
+        botService.triggerBotMoveIfNeeded(targetRoom, referee, (eventType, payload) => {
+          if (eventType === 'chat') {
+            broadcastRoomEventToSSEClients(targetRoom, 'chat', payload);
+          } else {
+            broadcastRoomStateToSSEClients(targetRoom);
+          }
+        });
       }
     });
   });
@@ -466,6 +475,13 @@ function handleQueueCommand(req, res, commandType, argsExtractor, roomId = 'defa
       sendJson(res, result.httpStatus || (result.ok ? 200 : 409), result);
       if (result.ok) {
         broadcastRoomStateToSSEClients(targetRoom);
+        botService.triggerBotMoveIfNeeded(targetRoom, referee, (eventType, payload) => {
+          if (eventType === 'chat') {
+            broadcastRoomEventToSSEClients(targetRoom, 'chat', payload);
+          } else {
+            broadcastRoomStateToSSEClients(targetRoom);
+          }
+        });
       }
     });
   }).catch(() => {
@@ -883,8 +899,39 @@ function createServer() {
         }
         ref.enqueue({ id: 'rematch-' + Date.now() + '-' + Math.random().toString(36).slice(2), type: 'rematch', args: { action, color: role } }).then(r => {
           broadcastRoomStateToSSEClients(targetRoom);
+          botService.triggerBotMoveIfNeeded(targetRoom, referee, (eventType, payload) => {
+            if (eventType === 'chat') {
+              broadcastRoomEventToSSEClients(targetRoom, 'chat', payload);
+            } else {
+              broadcastRoomStateToSSEClients(targetRoom);
+            }
+          });
           sendJson(res, 200, r);
         }).catch(err => sendJsonError(res, 500, err.message));
+        return;
+      }
+      if (req.method === 'GET' && urlPath === '/api/bot') {
+        const targetRoom = new URLSearchParams(req.url.split('?')[1] || '').get('room') || roomId;
+        sendJson(res, 200, { ok: true, bot: botService.getBotConfig(targetRoom), levels: BOT_LEVELS });
+        return;
+      }
+      if (req.method === 'POST' && urlPath === '/api/bot') {
+        const targetRoom = new URLSearchParams(req.url.split('?')[1] || '').get('room') || roomId;
+        readJsonBody(req).then(body => {
+          if (!body) {
+            sendJsonError(res, 400, 'Invalid JSON body');
+            return;
+          }
+          const result = botService.setBotConfig(targetRoom, body);
+          botService.triggerBotMoveIfNeeded(targetRoom, referee, (eventType, payload) => {
+            if (eventType === 'chat') {
+              broadcastRoomEventToSSEClients(targetRoom, 'chat', payload);
+            } else {
+              broadcastRoomStateToSSEClients(targetRoom);
+            }
+          });
+          sendJson(res, 200, result);
+        }).catch(() => sendJsonError(res, 413, 'request body too large'));
         return;
       }
       if (req.method === 'GET' && urlPath === '/api/games') {
@@ -964,7 +1011,9 @@ module.exports = {
   isValidRoomId,
   seatAuthManager,
   gameArchive,
-  checkRateLimit
+  checkRateLimit,
+  botService,
+  BOT_LEVELS
 };
 
 if (require.main === module) {
