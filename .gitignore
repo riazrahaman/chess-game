@@ -1,8 +1,8 @@
 .tier-worktrees/
-.referee-state.json
-.referee-state.json.lock
-opencode.json
 node_modules/
-.referee-journal.jsonl
+opencode.json
+.referee-state*
+.referee-journal*
 games.db
 .games-archive.json
+

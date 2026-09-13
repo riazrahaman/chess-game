@@ -36,6 +36,8 @@ function ensureClocks(s) {
   if (!Object.prototype.hasOwnProperty.call(s, 'flagged')) s.flagged = null;
   if (!Object.prototype.hasOwnProperty.call(s, 'resigned')) s.resigned = null;
   if (!Object.prototype.hasOwnProperty.call(s, 'draw')) s.draw = false;
+  if (!Object.prototype.hasOwnProperty.call(s, 'drawReason')) s.drawReason = null;
+  if (!Object.prototype.hasOwnProperty.call(s, 'drawOffer')) s.drawOffer = null;
   if (typeof s.fen !== 'string' || !s.fen) {
     try { s.fen = rulesEngine.boardToFen(s.board); } catch (_) { s.fen = null; }
   }
@@ -134,8 +136,18 @@ function rebuildState(history, moveTimestamps) {
   const status = engine.getGameStatus(s.board, s.board.turn);
   s.status = status;
   s.gameOver = status === 'checkmate' || status === 'stalemate';
-  s.result = status === 'checkmate' ? (s.board.turn === 'white' ? '0-1' : '1-0')
-    : status === 'stalemate' ? '½-½' : null;
+  if (status === 'checkmate') s.result = s.board.turn === 'white' ? '0-1' : '1-0';
+  if (status === 'stalemate') s.result = '½-½';
+  if (!s.gameOver) {
+    const draw = rulesEngine.evaluateDraw(s.board, s.history);
+    if (draw.draw) {
+      s.gameOver = true;
+      s.status = 'draw';
+      s.draw = true;
+      s.drawReason = draw.reason;
+      s.result = '½-½';
+    }
+  }
   s.fen = rulesEngine.boardToFen(s.board);
   return s;
 }
@@ -228,6 +240,16 @@ function applyMove(s, moveStr, moveTs, lagCompMs = 0) {
   s.gameOver = status === 'checkmate' || status === 'stalemate';
   if (status === 'checkmate') s.result = nextTurn === 'white' ? '0-1' : '1-0';
   if (status === 'stalemate') s.result = '½-½';
+  if (!s.gameOver) {
+    const draw = rulesEngine.evaluateDraw(s.board, s.history);
+    if (draw.draw) {
+      s.gameOver = true;
+      s.status = 'draw';
+      s.draw = true;
+      s.drawReason = draw.reason;
+      s.result = '½-½';
+    }
+  }
   s.fen = rulesEngine.boardToFen(s.board);
   return { flagged: false };
 }
@@ -240,6 +262,8 @@ function stateView(s) {
     flagged: s.flagged,
     resigned: s.resigned,
     draw: s.draw,
+    drawReason: s.drawReason || null,
+    drawOffer: s.drawOffer || null,
     clocks: s.clocks,
     elapsed: s.elapsed,
     board: renderAscii(s.board),
@@ -343,6 +367,16 @@ class RefereeService {
       if (this.state.history.length > 0) {
         this.state = rebuildState(this.state.history.slice(0, -1), this.state.moveTimestamps.slice(0, -1));
       }
+    } else if (entry.type === 'timeout') {
+      const color = entry.args && entry.args.color;
+      if (['white', 'black'].includes(color) && !this.state.gameOver) {
+        this.state.gameOver = true;
+        this.state.status = 'timeout';
+        this.state.flagged = color;
+        this.state.result = color === 'white' ? '0-1 on time' : '1-0 on time';
+        this.state.clocks[color] = 0;
+        this.state.moveStartTs = 0;
+      }
     } else if (entry.type === 'resign') {
       const color = entry.args.color;
       if (['white', 'black'].includes(color) && !this.state.gameOver) {
@@ -352,11 +386,27 @@ class RefereeService {
         this.state.result = color === 'white' ? '0-1' : '1-0';
       }
     } else if (entry.type === 'draw') {
-      if (!this.state.gameOver) {
+      const args = entry.args || {};
+      if (args.action === 'claim') {
         this.state.gameOver = true;
         this.state.status = 'draw';
         this.state.draw = true;
+        this.state.drawReason = args.reason || 'claim';
         this.state.result = '½-½';
+        this.state.drawOffer = null;
+      } else if (args.action === 'offer') {
+        this.state.drawOffer = args.color;
+      } else if (args.action === 'decline') {
+        this.state.drawOffer = null;
+      } else {
+        if (!this.state.gameOver) {
+          this.state.gameOver = true;
+          this.state.status = 'draw';
+          this.state.draw = true;
+          this.state.drawReason = args.reason || 'agreement';
+          this.state.result = '½-½';
+          this.state.drawOffer = null;
+        }
       }
     }
   }
@@ -411,7 +461,7 @@ class RefereeService {
       case 'move': return this._cmdMove(command.args || {});
       case 'undo': return this._cmdUndo();
       case 'resign': return this._cmdResign((command.args || {}).color);
-      case 'draw': return this._cmdDraw();
+      case 'draw': return this._cmdDraw(command.args || {});
       case 'reset': return this._cmdReset();
       default: return { ok: false, error: 'unknown command type: ' + command.type, httpStatus: 400 };
     }
@@ -438,6 +488,7 @@ class RefereeService {
     const moveTs = Date.now();
     const lagCompMs = args.transitDelayMs || (args.clientSentAt ? Math.max(0, Math.min(1000, moveTs - args.clientSentAt)) : 0);
     const r = applyMove(s, normalized, moveTs, lagCompMs);
+    s.drawOffer = null;
     this._journalAndSnapshot('move', { move: normalized }, moveTs);
     if (r.flagged) {
       return Object.assign({ ok: false, error: 'flagged', httpStatus: 409 }, stateView(s));
@@ -471,17 +522,79 @@ class RefereeService {
     return Object.assign({ ok: true, resigned: color }, stateView(s));
   }
 
-  _cmdDraw() {
+  _cmdDraw(args = {}) {
     const s = this.state;
     if (s.gameOver) {
       return Object.assign({ ok: false, error: 'game over', httpStatus: 409 }, stateView(s));
     }
+
+    const action = args.action || null;
+    const color = args.color || null;
+
+    if (action === 'claim') {
+      const claim = rulesEngine.claimableDraw(s.board, s.history);
+      if (!claim.claimable) {
+        return { ok: false, error: 'No claimable draw condition (threefold repetition or 50-move rule)', httpStatus: 400 };
+      }
+      s.gameOver = true;
+      s.status = 'draw';
+      s.draw = true;
+      s.drawReason = claim.reason;
+      s.result = '½-½';
+      s.drawOffer = null;
+      this._journalAndSnapshot('draw', { action: 'claim', reason: claim.reason });
+      return Object.assign({ ok: true, draw: true, drawReason: claim.reason }, stateView(s));
+    }
+
+    if (action === 'decline') {
+      s.drawOffer = null;
+      this._journalAndSnapshot('draw', { action: 'decline' });
+      return Object.assign({ ok: true, declined: true }, stateView(s));
+    }
+
+    if (action === 'offer') {
+      s.drawOffer = color || s.board.turn;
+      this._journalAndSnapshot('draw', { action: 'offer', color: s.drawOffer });
+      return Object.assign({ ok: true, offer: s.drawOffer }, stateView(s));
+    }
+
+    if (action === 'accept') {
+      s.gameOver = true;
+      s.status = 'draw';
+      s.draw = true;
+      s.drawReason = 'agreement';
+      s.result = '½-½';
+      s.drawOffer = null;
+      this._journalAndSnapshot('draw', { action: 'accept' });
+      return Object.assign({ ok: true, draw: true, drawReason: 'agreement' }, stateView(s));
+    }
+
+    // Default / legacy draw:
+    if (s.drawOffer && color && s.drawOffer !== color) {
+      s.gameOver = true;
+      s.status = 'draw';
+      s.draw = true;
+      s.drawReason = 'agreement';
+      s.result = '½-½';
+      s.drawOffer = null;
+      this._journalAndSnapshot('draw', { action: 'accept' });
+      return Object.assign({ ok: true, draw: true, drawReason: 'agreement' }, stateView(s));
+    }
+
+    if (args.isSeated && color && !s.drawOffer) {
+      s.drawOffer = color;
+      this._journalAndSnapshot('draw', { action: 'offer', color });
+      return Object.assign({ ok: true, offer: color }, stateView(s));
+    }
+
     s.gameOver = true;
     s.status = 'draw';
     s.draw = true;
+    s.drawReason = 'agreement';
     s.result = '½-½';
+    s.drawOffer = null;
     this._journalAndSnapshot('draw', {});
-    return Object.assign({ ok: true, draw: true }, stateView(s));
+    return Object.assign({ ok: true, draw: true, drawReason: 'agreement' }, stateView(s));
   }
 
   _cmdReset() {
@@ -490,7 +603,31 @@ class RefereeService {
     return { ok: true, reset: true };
   }
 
+  checkFlagFall(now = Date.now()) {
+    const s = this.state;
+    if (!s || s.gameOver || !s.moveStartTs || s.moveStartTs <= 0) {
+      return { flagged: false };
+    }
+    const turn = s.board.turn;
+    const elapsedSinceStart = Math.max(0, (now - s.moveStartTs) / 1000);
+    const remainingClock = s.clocks[turn] - elapsedSinceStart;
+
+    if (remainingClock <= 0) {
+      s.gameOver = true;
+      s.status = 'timeout';
+      s.flagged = turn;
+      s.result = turn === 'white' ? '0-1 on time' : '1-0 on time';
+      s.clocks[turn] = 0;
+      s.elapsed[turn] = s.elapsed[turn] + elapsedSinceStart;
+      s.moveStartTs = 0;
+      this._journalAndSnapshot('timeout', { color: turn });
+      return { flagged: true, color: turn };
+    }
+    return { flagged: false, remainingClock };
+  }
+
   getState() {
+    this.checkFlagFall();
     return this.state;
   }
 
