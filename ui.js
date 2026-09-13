@@ -821,7 +821,10 @@ if (promoModal) promoModal.onkeydown = event => {
 function getAuthHeaders(extraHeaders = {}) {
   const headers = { 'Content-Type': 'application/json', ...extraHeaders };
   const seatToken = (typeof window !== 'undefined' && window.sessionStorage && window.sessionStorage.getItem('chess_seat_token')) || currentSeatToken;
-  if (seatToken) headers['X-Seat-Token'] = seatToken;
+  if (seatToken) {
+    headers['X-Seat-Token'] = seatToken;
+    headers['Authorization'] = `Bearer ${seatToken}`;
+  }
   return headers;
 }
 
@@ -1298,6 +1301,7 @@ function applyRefereeState(state) {
   }
   updateStatus();
   updateHistoryUI();
+  if (typeof updateMatchgradeSocialUI === 'function') updateMatchgradeSocialUI(state);
   return true;
 }
 
@@ -1703,6 +1707,14 @@ function startSSE() {
         handleSSEStateEvent(state);
       } catch (e) {
         console.error('SSE state parse error:', e);
+      }
+    });
+    sseEventSource.addEventListener('chat', (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (typeof appendChatMessage === 'function') appendChatMessage(msg);
+      } catch (e) {
+        console.error('SSE chat parse error:', e);
       }
     });
     sseEventSource.onerror = (e) => {
@@ -2873,6 +2885,177 @@ function setupGameArchiveUI() {
   }
 }
 
+// ==========================================
+// Phase 3: Matchgrade Social, Time Control, Rematch & Chat
+// ==========================================
+
+function updateMatchgradeSocialUI(state) {
+  if (!state) return;
+  const tcSelect = document.getElementById('time-control-select');
+  if (tcSelect && state.timeControl && state.timeControl.preset && document.activeElement !== tcSelect) {
+    tcSelect.value = state.timeControl.preset;
+  }
+  const rematchBtn = document.getElementById('rematch-btn');
+  if (rematchBtn) {
+    if (state.gameOver) {
+      rematchBtn.classList.remove('hidden');
+      if (state.rematchOffer) {
+        if (state.rematchOffer === currentSeatRole) {
+          rematchBtn.textContent = 'Rematch Offered…';
+          rematchBtn.disabled = true;
+        } else {
+          rematchBtn.textContent = `Accept Rematch (${state.rematchOffer})`;
+          rematchBtn.disabled = false;
+        }
+      } else {
+        rematchBtn.textContent = 'Offer Rematch';
+        rematchBtn.disabled = false;
+      }
+    } else {
+      rematchBtn.classList.add('hidden');
+    }
+  }
+  updateSpectatorBadge();
+}
+
+async function updateSpectatorBadge() {
+  const badge = document.getElementById('spectator-badge');
+  if (!badge) return;
+  try {
+    const res = await fetch(withRoomParam('/api/seat/status'));
+    if (res.ok) {
+      const data = await res.json();
+      badge.textContent = `👁 ${data.spectatorsCount || 0}`;
+      badge.title = `${data.spectatorsCount || 0} spectator(s) viewing`;
+    }
+  } catch (e) {}
+}
+
+function appendChatMessage(msg) {
+  const container = document.getElementById('chat-messages');
+  if (!container || !msg || !msg.text) return;
+  const div = document.createElement('div');
+  div.style.padding = '2px 0';
+  div.style.borderBottom = '1px solid rgba(0,0,0,0.05)';
+  const senderSpan = document.createElement('strong');
+  senderSpan.style.color = 'var(--accent, #2563eb)';
+  senderSpan.textContent = (msg.sender || 'Player') + ': ';
+  const textSpan = document.createElement('span');
+  textSpan.textContent = msg.text;
+  div.appendChild(senderSpan);
+  div.appendChild(textSpan);
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+
+  const countEl = document.getElementById('chat-count');
+  if (countEl) {
+    countEl.textContent = `${container.children.length} messages`;
+  }
+}
+
+async function loadChatMessages() {
+  try {
+    const res = await fetch(withRoomParam('/api/chat'));
+    if (res.ok) {
+      const data = await res.json();
+      const container = document.getElementById('chat-messages');
+      if (container && data.messages && Array.isArray(data.messages)) {
+        container.innerHTML = '';
+        data.messages.forEach(appendChatMessage);
+      }
+    }
+  } catch (e) {}
+}
+
+async function sendChatMessage() {
+  const input = document.getElementById('chat-input');
+  if (!input) return;
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  const sender = currentSeatRole ? (currentSeatRole.charAt(0).toUpperCase() + currentSeatRole.slice(1)) : 'Player';
+  try {
+    const res = await fetch(withRoomParam('/api/chat'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sender, text })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.message && !sseEventSource) {
+        appendChatMessage(data.message);
+      }
+    }
+  } catch (e) {}
+}
+
+async function handleRematchClick() {
+  const isOfferedToUs = previousRefereeState && previousRefereeState.rematchOffer && previousRefereeState.rematchOffer !== currentSeatRole;
+  const action = isOfferedToUs ? 'accept' : 'offer';
+  await runRefereeCommand(action === 'accept' ? 'Accepting rematch' : 'Offering rematch', async () => {
+    const res = await fetch(withRoomParam(`/api/rematch/${action}`), {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+    if (!res.ok && res.status === 403) {
+      return fetch(withRoomParam('/api/reset'), {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ id: 'reset:' + Date.now() })
+      });
+    }
+    return res;
+  });
+}
+
+function setupMatchgradeSocialUI() {
+  const tcSelect = document.getElementById('time-control-select');
+  if (tcSelect) {
+    tcSelect.addEventListener('change', async () => {
+      const preset = tcSelect.value;
+      try {
+        await fetch(withRoomParam('/api/time-control'), {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ preset })
+        });
+      } catch (e) {
+        console.error('Failed to change time control', e);
+      }
+    });
+  }
+
+  const rematchBtn = document.getElementById('rematch-btn');
+  if (rematchBtn) {
+    rematchBtn.onclick = handleRematchClick;
+  }
+
+  const chatForm = document.getElementById('chat-form');
+  if (chatForm) {
+    chatForm.onsubmit = (e) => {
+      e.preventDefault();
+      sendChatMessage();
+      return false;
+    };
+  }
+  const chatSendBtn = document.getElementById('chat-send-btn');
+  if (chatSendBtn) {
+    chatSendBtn.onclick = sendChatMessage;
+  }
+  const chatInput = document.getElementById('chat-input');
+  if (chatInput) {
+    chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        sendChatMessage();
+      }
+    });
+  }
+
+  loadChatMessages();
+  updateSpectatorBadge();
+}
+
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('keydown', handleGlobalScrubberKeydown);
   window.jumpToPly = jumpToPly;
@@ -2915,6 +3098,13 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.showUiError = showUiError;
   window.downloadArchivedGamePgn = downloadArchivedGamePgn;
   window.setupGameArchiveUI = setupGameArchiveUI;
+  window.updateMatchgradeSocialUI = updateMatchgradeSocialUI;
+  window.updateSpectatorBadge = updateSpectatorBadge;
+  window.appendChatMessage = appendChatMessage;
+  window.loadChatMessages = loadChatMessages;
+  window.sendChatMessage = sendChatMessage;
+  window.handleRematchClick = handleRematchClick;
+  window.setupMatchgradeSocialUI = setupMatchgradeSocialUI;
 }
 
 const copyRoomButton = document.getElementById('copy-room-link');
@@ -2937,6 +3127,7 @@ initGame();
 setupGameArchiveUI();
 initSeatAuth();
 syncNtpClock();
+setupMatchgradeSocialUI();
 if (typeof setInterval === 'function') {
   setInterval(syncNtpClock, 10000);
 }

@@ -122,6 +122,19 @@ function broadcastRoomStateToSSEClients(roomId = 'default') {
   }
 }
 
+function broadcastRoomEventToSSEClients(roomId = 'default', eventName = 'message', payload = {}) {
+  const clients = roomSseClients.get(roomId);
+  if (!clients) return;
+  const data = JSON.stringify(payload);
+  for (const client of Array.from(clients)) {
+    try {
+      client.res.write(`event: ${eventName}\ndata: ${data}\n\n`);
+    } catch (e) {
+      removeRoomSSEClient(roomId, client);
+    }
+  }
+}
+
 function broadcastStateToSSEClients() {
   broadcastRoomStateToSSEClients('default');
 }
@@ -311,6 +324,31 @@ function isPathAllowed(reqPath) {
 
 function isDotfile(relPath) {
   return relPath.split('/').some(seg => seg.startsWith('.'));
+}
+
+function readJsonBody(req, maxBytes = MAX_BODY_BYTES) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    let oversized = false;
+    req.on('data', chunk => {
+      if (oversized) return;
+      data += chunk;
+      if (Buffer.byteLength(data) > maxBytes) {
+        oversized = true;
+        reject(new Error('Payload Too Large'));
+      }
+    });
+    req.on('end', () => {
+      if (oversized) return;
+      if (!data.trim()) return resolve({});
+      try {
+        resolve(JSON.parse(data));
+      } catch (e) {
+        resolve(null);
+      }
+    });
+    req.on('error', reject);
+  });
 }
 
 // C2/C4: move submission goes through the in-process referee service
@@ -741,7 +779,112 @@ function createServer() {
       if (req.method === 'GET' && urlPath === '/api/seat/status') {
         const targetRoom = new URLSearchParams(req.url.split('?')[1] || '').get('room') || roomId;
         const status = seatAuthManager.getStatus(targetRoom);
-        sendJson(res, 200, status);
+        const sseCount = roomSseClients.get(targetRoom) ? roomSseClients.get(targetRoom).size : 0;
+        const spectators = Math.max(status.spectatorsCount, Math.max(0, sseCount - (status.whiteOccupied ? 1 : 0) - (status.blackOccupied ? 1 : 0)));
+        sendJson(res, 200, { ...status, spectatorsCount: spectators });
+        return;
+      }
+      if (req.method === 'GET' && urlPath === '/api/time-control') {
+        const targetRoom = new URLSearchParams(req.url.split('?')[1] || '').get('room') || roomId;
+        const ref = referee.getReferee(targetRoom);
+        sendJson(res, 200, { ok: true, timeControl: (ref && (ref.timeControl || ref.state.timeControl)) || null });
+        return;
+      }
+      if (req.method === 'POST' && urlPath === '/api/time-control') {
+        const targetRoom = new URLSearchParams(req.url.split('?')[1] || '').get('room') || roomId;
+        const authHeader = req.headers['authorization'];
+        const token = req.headers['x-seat-token'] || ((authHeader && authHeader.startsWith('Bearer ')) ? authHeader.slice(7).trim() : null);
+        const validation = seatAuthManager.validateMutation(targetRoom, token);
+        if (!validation.ok) {
+          sendJson(res, validation.status || 403, { ok: false, error: validation.error });
+          return;
+        }
+        readJsonBody(req).then(body => {
+          if (!body) {
+            sendJsonError(res, 400, 'Invalid JSON body');
+            return;
+          }
+          const PRESETS = {
+            'bullet_1_0': { preset: 'bullet_1_0', baseSeconds: 60, incrementSeconds: 0, name: 'Bullet 1+0' },
+            'blitz_3_2': { preset: 'blitz_3_2', baseSeconds: 180, incrementSeconds: 2, name: 'Blitz 3+2' },
+            'blitz_5_3': { preset: 'blitz_5_3', baseSeconds: 300, incrementSeconds: 3, name: 'Blitz 5+3' },
+            'rapid_10_0': { preset: 'rapid_10_0', baseSeconds: 600, incrementSeconds: 0, name: 'Rapid 10+0' },
+            'rapid_10_15': { preset: 'rapid_10_15', baseSeconds: 600, incrementSeconds: 15, name: 'Rapid 10+15' },
+            'classical_15_10': { preset: 'classical_15_10', baseSeconds: 900, incrementSeconds: 10, name: 'Classical 15+10' }
+          };
+          let tc = PRESETS[body.preset];
+          if (!tc && typeof body.baseSeconds === 'number') {
+            tc = {
+              preset: 'custom',
+              baseSeconds: Math.max(10, Math.min(7200, body.baseSeconds)),
+              incrementSeconds: Math.max(0, Math.min(60, body.incrementSeconds || 0)),
+              name: `Custom ${Math.floor(body.baseSeconds / 60)}+${body.incrementSeconds || 0}`
+            };
+          }
+          if (!tc) {
+            sendJsonError(res, 400, 'Invalid preset or baseSeconds');
+            return;
+          }
+          const ref = referee.getReferee(targetRoom);
+          if (!ref) {
+            sendJsonError(res, 500, 'Referee unavailable');
+            return;
+          }
+          ref.enqueue({ id: 'tc-' + Date.now() + '-' + Math.random().toString(36).slice(2), type: 'time-control', args: tc }).then(r => {
+            broadcastRoomStateToSSEClients(targetRoom);
+            sendJson(res, 200, r);
+          }).catch(err => sendJsonError(res, 500, err.message));
+        }).catch(() => sendJsonError(res, 413, 'request body too large'));
+        return;
+      }
+      if (req.method === 'GET' && urlPath === '/api/chat') {
+        const targetRoom = new URLSearchParams(req.url.split('?')[1] || '').get('room') || roomId;
+        const ref = referee.getReferee(targetRoom);
+        sendJson(res, 200, { ok: true, messages: ref ? ref.getChatMessages() : [] });
+        return;
+      }
+      if (req.method === 'POST' && urlPath === '/api/chat') {
+        const targetRoom = new URLSearchParams(req.url.split('?')[1] || '').get('room') || roomId;
+        readJsonBody(req).then(body => {
+          if (!body || !body.text || typeof body.text !== 'string' || !body.text.trim()) {
+            sendJsonError(res, 400, 'Message text is required');
+            return;
+          }
+          const ref = referee.getReferee(targetRoom);
+          if (!ref) {
+            sendJsonError(res, 500, 'Referee unavailable');
+            return;
+          }
+          const msg = ref.addChatMessage(body.sender || 'Player', body.text.trim());
+          broadcastRoomEventToSSEClients(targetRoom, 'chat', msg);
+          sendJson(res, 201, { ok: true, message: msg });
+        }).catch(() => sendJsonError(res, 413, 'request body too large'));
+        return;
+      }
+      if (req.method === 'POST' && urlPath.startsWith('/api/rematch/')) {
+        const action = urlPath.replace('/api/rematch/', '');
+        if (!['offer', 'accept', 'decline'].includes(action)) {
+          sendJsonError(res, 404, 'Unknown rematch action');
+          return;
+        }
+        const targetRoom = new URLSearchParams(req.url.split('?')[1] || '').get('room') || roomId;
+        const authHeader = req.headers['authorization'];
+        const token = req.headers['x-seat-token'] || ((authHeader && authHeader.startsWith('Bearer ')) ? authHeader.slice(7).trim() : null);
+        const validation = seatAuthManager.validateMutation(targetRoom, token);
+        if (!validation.ok) {
+          sendJson(res, validation.status || 403, { ok: false, error: validation.error });
+          return;
+        }
+        const role = seatAuthManager.getRole(targetRoom, token) || 'white';
+        const ref = referee.getReferee(targetRoom);
+        if (!ref) {
+          sendJsonError(res, 500, 'Referee unavailable');
+          return;
+        }
+        ref.enqueue({ id: 'rematch-' + Date.now() + '-' + Math.random().toString(36).slice(2), type: 'rematch', args: { action, color: role } }).then(r => {
+          broadcastRoomStateToSSEClients(targetRoom);
+          sendJson(res, 200, r);
+        }).catch(err => sendJsonError(res, 500, err.message));
         return;
       }
       if (req.method === 'GET' && urlPath === '/api/games') {

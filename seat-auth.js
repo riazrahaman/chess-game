@@ -179,6 +179,15 @@ class SeatAuthManager {
     return { ok: true, role: matchedRole };
   }
 
+  getRole(roomId = 'default', token) {
+    if (!token) return null;
+    const room = this._getRoom(roomId);
+    if (room.white && room.white.token === token && !this._isExpired(room.white)) return 'white';
+    if (room.black && room.black.token === token && !this._isExpired(room.black)) return 'black';
+    if (room.spectators.has(token)) return 'spectator';
+    return null;
+  }
+
   /**
    * Returns current seat occupancy status
    */

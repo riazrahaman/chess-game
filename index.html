@@ -921,6 +921,14 @@
         <p class="section-label">Your board</p>
         <div class="room-line">
         <span id="room-badge" style="margin-left: 8px; font-size: 0.85rem; font-weight: bold; background: #e2e8f0; padding: 2px 8px; border-radius: 4px;">Room: default</span>
+        <select id="time-control-select" aria-label="Game time control" style="font-size: 0.78rem; padding: 2px 6px; border-radius: 4px;">
+            <option value="bullet_1_0">Bullet 1+0</option>
+            <option value="blitz_3_2">Blitz 3+2</option>
+            <option value="blitz_5_3">Blitz 5+3</option>
+            <option value="rapid_10_0">Rapid 10+0</option>
+            <option value="rapid_10_15" selected>Rapid 10+15</option>
+            <option value="classical_15_10">Classical 15+10</option>
+        </select>
         <button id="copy-room-link" type="button" style="font-size: 0.8rem; padding: 2px 6px;">Copy Room Link</button>
         </div>
         <div id="seat-bar" style="display:inline-flex; align-items:center; gap:6px; margin-left:12px;">
@@ -928,6 +936,7 @@
             <button id="claim-white-btn" type="button" style="font-size:0.75rem; padding:2px 8px;">Play White</button>
             <button id="claim-black-btn" type="button" style="font-size:0.75rem; padding:2px 8px;">Play Black</button>
             <button id="leave-seat-btn" type="button" class="hidden" style="font-size:0.75rem; padding:2px 8px;">Leave Seat</button>
+            <span id="spectator-badge" style="font-size:0.75rem; padding:2px 6px; border-radius:4px; background:#e0e7ff; color:#3730a3; font-weight:600;" title="Spectators count">👁 0</span>
             <span id="ping-badge" style="font-size:0.72rem; padding:2px 6px; border-radius:4px; background:#f1f5f9; color:#64748b; font-weight:600;" title="Network Latency">--ms</span>
         </div>
         <p id="board-instructions" class="visually-hidden">Use the arrow keys to move between squares. Press Enter or Space to select a piece or move it.</p>
@@ -945,6 +954,7 @@
             <button id="resign" type="button">Resign</button>
             <button id="offer-draw" type="button">Draw</button>
             <button id="undo" type="button">Undo</button>
+            <button id="rematch-btn" type="button" class="hidden" style="grid-column: span 4; background: #059669; border-color: #059669; color: #fff; font-weight: 600;">Offer Rematch</button>
         </div>
     </section>
     <div id="history-container">
@@ -1006,6 +1016,16 @@
             <div id="eval-graph-container">
                 <svg id="eval-graph-svg" viewBox="0 0 400 80" preserveAspectRatio="none"></svg>
             </div>
+        <div id="chat-panel" style="background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 6px; padding: 10px; margin-top: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-size: 0.85rem; font-weight: 600;">Room Chat</span>
+                <span id="chat-count" style="font-size: 0.75rem; color: var(--muted);">0 messages</span>
+            </div>
+            <div id="chat-messages" style="height: 120px; overflow-y: auto; background: rgba(0,0,0,0.03); border: 1px solid var(--panel-border); border-radius: 4px; padding: 6px; font-size: 0.8rem; margin-bottom: 6px; display: flex; flex-direction: column; gap: 4px;"></div>
+            <form id="chat-form" style="display: flex; gap: 6px;" onsubmit="return false;">
+                <input id="chat-input" type="text" placeholder="Send chat message..." maxlength="200" style="flex: 1; padding: 6px 8px; font-size: 0.8rem; border-radius: 4px;" />
+                <button id="chat-send-btn" type="button" style="padding: 4px 10px; font-size: 0.8rem; background: var(--accent); color: #fff; font-weight: 600;">Send</button>
+            </form>
         </div>
     </div>
     </main>
