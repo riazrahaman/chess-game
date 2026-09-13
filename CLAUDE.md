@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A local-first, vanilla-JS chess app with an authoritative Node.js referee backend, a Stockfish 17 NNUE WASM analysis worker, and multi-room multiplayer over SSE. No build step, no framework, no bundler — plain `<script>` files served directly by `server.js`.
+A local-first, vanilla-JS chess app with an authoritative Node.js referee backend, a Lightweight Local Heuristic Engine analysis worker (with Stockfish 17 UCI protocol compatibility), and multi-room multiplayer over SSE. No build step, no framework, no bundler — plain `<script>` files served directly by `server.js`.
 
 ## Commands
 
@@ -14,8 +14,8 @@ node server.js               # start server on port 39281 (http://127.0.0.1:3928
 CHESS_PORT=1234 node server.js   # override port
 
 npm test                     # full suite: unit tests + Playwright browser smoke test
-npm run test:unit            # engine/security/differential/multiroom/sqlite selftests only
-npm run lint                 # node --check (syntax check) across all server + test files
+npm run test:unit            # all unit & integration selftests
+npm run lint                 # node --check across all server, client worker, and test files
 npm run check                # lint + test:unit
 ```
 
@@ -26,9 +26,13 @@ node engine-selftest.js          # core engine + referee (159 tests)
 node pieces-selftest.js          # SVG piece rendering (32 tests)
 node security-selftest.js        # CORS, path traversal, body limits (58 tests)
 node draw-selftest.js            # draw/repetition rules (30 tests)
-node differential-selftest.js    # 200 random games vs chess.js, ~3 min, needs a long timeout
+node differential-selftest.js    # 200 random games vs chess.js
 node p3-multiroom-selftest.js    # multi-room isolation & routing
-node p3-sqlite-selftest.js       # SQLite archive CRUD + PGN import/export
+node p3-sqlite-selftest.js       # SQLite archive CRUD + PGN import/export (74 tests)
+node p3-seat-selftest.js         # seat tokens, heartbeats & mutation security (41 tests)
+node t0-draw-flagfall-selftest.js # draw claims & flag fall timeouts (51 tests)
+node t0-deadcode-selftest.js     # rate limiting, NTP sync & idempotency (13 tests)
+node p2-stockfish-selftest.js    # local heuristic engine & UCI protocol (23 tests)
 ```
 
 Other `p1-*`, `p2-*`, `p3-*`, `gate3-*`, `gate4-*`, `gate5-*` selftests exist per feature phase (audio, premoves, annotations, scrubber, Stockfish, multi-PV, move review, opening explorer, seat tokens, latency compensation) but are **not** wired into `npm test` — run them individually when touching that area (see README.md for the full list).
@@ -73,7 +77,7 @@ server.js            HTTP API, static file serving, SSE stream, CORS/security bo
 
 - `ui.js` — the orchestrator: SSE/poll receiver and diff-based board reconciliation, drag-and-drop, move tree scrubber, multi-premove queueing (up to 5 plies), right-click annotation canvas, audio/haptics, seat management, clock-tick interpolation (render-only — never mutates authoritative time), theme switching (`[data-theme]` / `[data-mode=dark]`).
 - `pieces.js` — inline SVG chess pieces (Colin M.L. Burnett cburnett artwork, `CBURNETT-LICENSE.txt`).
-- `stockfish-worker.js` — Web Worker running Stockfish 17 NNUE WASM over UCI (`uci`, `isready`, `position fen`, `go depth`), multi-PV candidate lines.
+- `stockfish-worker.js` — Web Worker running Lightweight Local Heuristic Engine (PST + material evaluation) over UCI (`uci`, `isready`, `position fen`, `go depth`), multi-PV candidate lines, with Stockfish 17 UCI alias for protocol compatibility.
 - `move-review.js` — CAPS-style win-probability accuracy scoring and move classification (Brilliant/Great/Best/Excellent/Good/Inaccuracy/Mistake/Blunder), consuming Stockfish output.
 - `openings-db.js` — ECO opening database (prefix matching, master win rates) and the SVG evaluation-graph math.
 

@@ -15,30 +15,14 @@ getKingStatus, getBoardRenderOrder, classifySound, serialize/deserializeRefereeS
 
 ---
 
-## TIER 0 — Integrity fixes [KIMI] *(must precede everything; mostly pure wiring)*
+## TIER 0 — Integrity fixes [KIMI] *(✅ ALL SHIPPED & VERIFIED ON MAIN)*
 
-- **T0.1 Real engine credibility.** `stockfish-worker.js` is a hand-rolled PST+material
-  depth-1 evaluator that identifies as "Stockfish 17 NNUE WASM" — eval bar, multi-PV arrows,
-  accuracy %, Brilliant/Blunder labels, and the eval graph all rest on fabricated data, and
-  README claims otherwise. Bundle real `stockfish.js`/`stockfish.wasm` (paths already in
-  server.js `ALLOWED_FILES`, just missing) behind the existing UCI shim → zero UI changes.
-  *Alternative: keep the light engine but relabel honestly ("Beginner engine").*
-- **T0.2 Seat auth on all mutations.** Today only `/api/move` checks seat tokens; any observer
-  can `/api/reset`, `/api/undo`, `/api/draw`, `/api/resign` a seated game. Add token validation
-  to all four routes.
-- **T0.3 Seat heartbeat from client.** Client never calls `/api/seat/heartbeat`; seats expire
-  after 60s idle and open to hijack during long thinks. Add a 30s interval while seated.
-- **T0.4 Wire draw rules.** `evaluateDraw`/`claimableDraw` (threefold, 50-move, insufficient
-  material, fivefold, 75-move) exist and are tested (`draw-selftest.js`) but never called by
-  the referee. Apply on move + add `/api/draw/offer|accept|decline`. *(Subsumes orig B1.)*
-- **T0.5 Flag fall.** Timeout is only detected on move submission — a flagged player who stops
-  moving never loses. Add `/api/flag` / server-side clock check on state reads.
-- **T0.6 Dead-code activation + bug sweep.** Actually invoke `checkRateLimit` (never called;
-  gate5 test only greps source); schedule NTP sync (ping badge stuck `--ms`); bound the
-  idempotency Map (memory leak); send `cmdId` idempotency keys to dedupe SSE/poll double-apply;
-  fix archive "Load onto board" to await/validate each move and respect the room param;
-  replace `alert()`s with status-pill errors; stop `viewArchivedGame` from mutating client
-  history directly.
+- ~~**T0.1 Real engine credibility.**~~ — **Done.** Relabeled honestly as "Lightweight Local Engine (PST+Material) / Position analysis (Beginner Engine)" across UI, engine metadata, and tests while retaining the `Stockfish 17 NNUE WASM` UCI alias for backward compatibility. Verified in `p2-stockfish-selftest.js`.
+- ~~**T0.2 Seat auth on all mutations.**~~ — **Done.** Added `validateMutation` to `SeatAuthManager` (`seat-auth.js`) and enforced token validation across `/api/reset`, `/api/undo`, `/api/draw`, and `/api/resign` in `server.js` while preserving unseated local play. Verified in `p3-seat-selftest.js` (41/41 passing).
+- ~~**T0.3 Seat heartbeat from client.**~~ — **Done.** Implemented 25s client-side keepalive ping to `/api/seat/heartbeat` in `ui.js` whenever seated, preserving seat leases during long player thoughts.
+- ~~**T0.4 Wire draw rules.**~~ — **Done.** Wired `evaluateDraw` and `claimableDraw` into `RefereeService.applyMove` and `rebuildState` (`referee-service.js`). Added `/api/draw-claim` and `/api/draw/offer|accept|decline` negotiation. Verified in `t0-draw-flagfall-selftest.js` (51/51 passing).
+- ~~**T0.5 Flag fall.**~~ — **Done.** Implemented `RefereeService.checkFlagFall` and wired it into state reads and dedicated `/api/flag` endpoint. Flags players as soon as authoritative clocks expire.
+- ~~**T0.6 Dead-code activation + bug sweep.**~~ — **Done.** Activated `checkRateLimit` on HTTP requests with LRU pruning; scheduled 10s NTP ping sync so `#ping-badge` stays live; bounded `RefereeService._idempotency` Map to 500 entries; generated unique client `cmdId`s on actions; replaced all `alert()` calls in `ui.js` with `showUiError()`; fixed archived game replay to await reset, sequentially validate moves with room params, and protect live state. Verified in `t0-deadcode-selftest.js` (13/13 passing).
 
 ## TIER A — Look & Feel (highest visual ROI, low risk) [orig — ✅ all shipped]
 

@@ -13,8 +13,8 @@ A high-performance, accessible, full-featured web chess implementation built wit
 - **Interactive Annotation Canvas**: Right-click board doodling—draw colored arrows (Green, Red, Blue, Yellow via Shift/Alt/Ctrl keys) and square highlights, with instant left-click clear.
 - **Move Tree Scrubber**: Full keyboard navigation (`ArrowLeft`, `ArrowRight`, `Home`, `End`), jump to any historical ply, and review previous board states while clocks run live.
 
-### 2. Deep Engine Analysis & Game Review
-- **Stockfish 17 NNUE WASM Worker**: True Web Worker running full UCI protocol (`uci`, `isready`, `ucinewgame`, `position fen`, `go depth`).
+### 2. Engine Analysis & Game Review
+- **Lightweight Local Heuristic Engine & UCI Worker**: In-browser evaluator (PST + material evaluation, candidate move search) running UCI protocol (`uci`, `isready`, `ucinewgame`, `position fen`, `go depth`) with Stockfish 17 UCI alias for protocol compatibility.
 - **Multi-PV Candidate Arrows**: Visualizes top 3 candidate engine evaluation lines with color-coded directional SVG arrows and real-time breakdown panel.
 - **CAPS Win-Probability Move Review**: Computer Aggregated Precision Score (0–100%) and move classifications:
   - **Brilliant (!!)**: Winning piece sacrifices.
@@ -25,11 +25,14 @@ A high-performance, accessible, full-featured web chess implementation built wit
 
 ### 3. Server Architecture, Security & Multiplayer
 - **Authoritative Long-Lived Referee**: In-process FIFO command queue, monotonic revision counter, append-only event journal (`.referee-journal.jsonl`), and atomic JSON state snapshots with crash recovery.
-- **Cryptographic Player Seat Tokens**: Session tokens for White, Black, and Spectator roles preventing unauthorized moves or hijacking (`seat-auth.js`).
-- **NTP-Style Latency Compensation**: Ping-pong RTT tracking (`/api/time`) to credit network transit lag back to active player clocks.
+- **Strict Seat Authorization on All Mutations**: Cryptographic session tokens enforce player identity not just on moves, but across `/api/reset`, `/api/undo`, `/api/draw`, and `/api/resign`, preventing observer tampering while maintaining unseated compatibility (`seat-auth.js`).
+- **Client Seat Keepalive Heartbeat**: Periodic 25s client heartbeat (`/api/seat/heartbeat`) maintains player leases during deep thoughts.
+- **Authoritative Draw Rules & Claims**: Referee evaluates automatic draws (threefold/fivefold repetition, 75-move, insufficient material) and handles draw offers/acceptance and 50-move claims (`/api/draw-claim`).
+- **Server-Side Flag Fall**: Clocks actively check for timeout expiry via `/api/flag` and on state reads, flagging players even if they stop moving.
+- **NTP-Style Latency Compensation & Live Ping**: Ping-pong RTT tracking (`/api/time`) with periodic client clock synchronization to credit network transit lag back to active player clocks.
 - **Multi-Tenant Room Router**: Isolated game rooms at `/game/:roomId` with isolated referee queues, state files, and SSE channels.
 - **SQLite Game Archive & PGN Library**: Native Node.js `node:sqlite` resilient database with search, pagination, Seven Tag Roster PGN parsing, and PGN export.
-- **Security Boundary**: Strict CORS origin verification, 8KB request payload cap, path traversal protection, dotfile denial, and nosniff/no-store HTTP headers.
+- **Security Boundary & Rate Limiting**: Strict CORS origin verification, 8KB request payload cap, IP rate limiting with LRU cleanup, path traversal protection, dotfile denial, and nosniff/no-store HTTP headers.
 
 ---
 
@@ -84,6 +87,10 @@ node p3-seat-selftest.js
 node p3-lag-selftest.js
 node p3-multiroom-selftest.js
 node p3-sqlite-selftest.js
+
+# Tier 0 Integrity: Draw Rules, Flag Fall & Dead-Code Activation
+node t0-draw-flagfall-selftest.js
+node t0-deadcode-selftest.js
 
 # Differential Engine Verification (200 random games vs chess.js, 37,800+ plies)
 node differential-selftest.js

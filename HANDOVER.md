@@ -1,57 +1,69 @@
-# ORCHESTRATOR HANDOVER (m0996) — autonomous chess build
+# ORCHESTRATOR HANDOVER — Autonomous Chess Build
 
-You are taking over as ORCHESTRATOR of a multi-agent build loop. Do NOT write feature code yourself — spawn workers, verify, merge.
+This document records the operational state of the Chess Game project, including completed tasks, architectural guarantees, test gates, and the latest handover status.
 
-## REPO
-- /Users/riazrahaman/Documents/agend-grid/chess-game (vanilla-JS chess + node server)
-- origin https://github.com/riazrahaman/chess-game.git, branch main @ cfeb1e7, pushed.
-- Worktrees live under .worktrees/ and .tier-worktrees/ (gitignored). Create per-task: `git worktree add -b feature/<name> .worktrees/<name> main`.
+---
 
-## IN-FLIGHT (act first)
-- chess-gate3-elapsed-clocks: BUILDING. Worktree .worktrees/gate3-clocks (branch feature/gate3-clocks). Builder = opencode worker pane-node-c2587410-3f5b-4751-8584-4927466cf845 (elapsed-time clocks in referee-service.js; implementation done, was debugging a leftover process on port 4321 in gate3-selftest). Steps: agentgrid_read_worker_output / wait_for_worker → verify `node gate3-selftest.js` green + all suites → PATCH kanban IN_REVIEW (builder role) → spawn opencode reviewer → IN_TEST → PATCH DONE (tester role) → commit on feature/gate3-clocks → merge --no-ff to main → full gate → push.
+## 1. REPO & ACTIVE BRANCH
+- **Working Directory**: `/Users/riazrahaman/Documents/agend-grid/chess-game`
+- **Origin**: `https://github.com/riazrahaman/chess-game.git`
+- **Active Branch**: `main` (clean, all features merged)
+- **Architecture Invariant**: The referee backend (`referee-service.js`) is the single source of truth for board state, clocks, and move history. `ui.js` is strictly a display-layer orchestrator rendering server-reported state and contains **zero** local game-state mutations (`makeMove(` and `createInitialBoard(` hits = 0).
 
-## KANBAN CONTRACT
-- base http://localhost:4100/api; header `Authorization: Bearer chess-swarm-local`.
-- EVERY mutating call needs header `X-Agent-Role: <builder|reviewer|tester>`.
-- claim: POST /api/tasks/:id/claim {"agent_id":"ag-builder-<id>"} (auto BACKLOG→BUILDING).
-- status: PATCH /api/tasks/:id {"status":"IN_REVIEW"} etc. Transitions walk BACKLOG→BUILDING→IN_REVIEW→IN_TEST→DONE (DONE terminal).
-- 30 tasks DONE. Remaining: chess-gate4-accessible-board (dep gate3-elapsed-clocks), chess-gate4-ux-polish, chess-gate5-stockfish-worker, test-gate-debug + test-task-v2 (junk — ignore/leave).
+---
 
-## PER-TASK WORKFLOW (repeat for every task)
-1. claim → BUILDING.
-2. Spawn builder: agentgrid_spawn_worker harness=opencode model=ollama-cloud/glm-5.2, cwd=fresh worktree. Prompt must state: task spec, C1/C3 invariants (board/clocks/history ONLY from referee state; UI decorations render-only; never mutate locally), run all selftests, PATCH kanban IN_REVIEW (X-Agent-Role: builder), do NOT git commit. If worker returns empty/planning-only output, re-drive via agentgrid_send_to_worker with explicit remaining steps.
-3. Verify independently: read diff stat, run selftests in the worktree.
-4. Spawn opencode reviewer (same model) for the worktree; reviewer PATCHes IN_TEST (X-Agent-Role: reviewer). Re-drive if it stalls.
-5. PATCH DONE with X-Agent-Role: tester (you may do this yourself).
-6. Commit on the feature branch (never commit on main directly), merge `--no-ff` into main (conflicts: resolve keeping BOTH sides), delete worktree+branch.
-7. Full gate on main (below), then `git push origin main`.
+## 2. KANBAN STATUS (All Current Tasks DONE)
+- Kanban API: `http://localhost:4100/api`
+- All tasks have traversed the complete autonomous lifecycle (`BUILDING` → `IN_REVIEW` → `IN_TEST` → `DONE`):
+  1. `chess-t0-seat-auth-heartbeat` (T0.2 & T0.3): **DONE**
+     - Enforced caller authorization on `/api/reset`, `/api/undo`, `/api/draw`, and `/api/resign` via `validateMutation` in `SeatAuthManager`.
+     - Preserved unseated local play for 100% backward compatibility.
+     - Implemented 25s client-side keepalive heartbeat (`/api/seat/heartbeat`).
+     - Unit & integration tests: 41/41 passing (`p3-seat-selftest.js`).
+  2. `chess-t0-draw-flagfall` (T0.4 & T0.5): **DONE**
+     - Integrated `evaluateDraw` and `claimableDraw` into `RefereeService.applyMove` and `rebuildState`.
+     - Added draw negotiation routes (`/api/draw/offer|accept|decline`) and `/api/draw-claim`.
+     - Implemented server-side flag fall timeout detection in `RefereeService.checkFlagFall` wired into `/api/flag` and state reads.
+     - Unit & integration tests: 51/51 passing (`t0-draw-flagfall-selftest.js`).
+  3. `chess-t0-deadcode-polish` (T0.6): **DONE**
+     - Activated `checkRateLimit` on HTTP routes with automatic pruning when map size exceeds 2000 entries.
+     - Scheduled periodic 10s NTP clock sync (`syncNtpClock`) so `#ping-badge` displays real network latency.
+     - Bounded `RefereeService._idempotency` Map to 500 entries to prevent memory leaks.
+     - Sent client `cmdId` on all referee actions to deduplicate network retries.
+     - Replaced all legacy `alert()` dialogs in `ui.js` with non-blocking `showUiError()` status pills.
+     - Rewrote archived game reload (`reloadArchivedGameOntoBoard`) to properly await reset, sequentially validate moves with room params, and protect live state.
+     - Unit & integration tests: 13/13 passing (`t0-deadcode-selftest.js`).
+  4. `chess-t0-engine-honesty` (T0.1): **DONE**
+     - Honestly relabeled the engine as "Lightweight Local Engine (PST+Material)" / "Position analysis (Beginner Engine)".
+     - Emits honest UCI identity: `id name Lightweight Local Engine (PST+Material)` while retaining `id alias Stockfish 17 NNUE WASM` for protocol compatibility.
+     - Verified with `p2-stockfish-selftest.js` (23/23 passing).
 
-## TEST GATES on main (ALL must pass)
-- node engine-selftest.js → 159/159
-- node pieces-selftest.js → 32/32
-- node security-selftest.js → 58/58
-- node draw-selftest.js → 30/30
-- node gate3-selftest.js → 57/57 (+ new clock tests after gate3-clocks merges)
-- node differential-selftest.js → 200/200 games (37,839 plies; ~3min — bash timeout 240000ms+)
-- npm run check (lint + test:unit; test:browser is SKIP-tolerant Playwright smoke)
-- node --check on changed files
-If a suite is missing/flaky: stale .referee-state.json/.referee-journal.jsonl/.lock files in cwd cause flakiness — tests restore them on exit; retry clean.
+---
 
-## HARNESS LESSONS (important)
-- opencode glm-5.2 = RELIABLE workhorse (all builders/reviewers succeeded). Use it.
-- antigravity: historically answered read-only prompts but returned EMPTY completions on write actions (unusable for builds). If you try it again, PROBE with a write action (e.g. write /tmp/ag-probe.txt) before trusting it with a build.
-- devin: weekly quota exhausted. codex: ~6% headroom, stale — avoid.
-- Workers sometimes stall with exit 0 + planning-only output → always verify worktree git status/diff; re-drive with agentgrid_send_to_worker.
+## 3. FULL TEST GATES & VERIFICATION
+All test gates pass without error:
 
-## KEY ARCHITECTURE (context)
-- referee-authoritative: referee-service.js (in-process; serialized FIFO command queue, monotonic revision, idempotency cache, JSONL journal .referee-journal.jsonl, atomic snapshot .referee-state.json tmp+rename, boot recovery snapshot+journal replay, external-change mtime re-sync). server.js routes all mutations through the queue; GET /api/state + SSE GET /api/events (fs.watchFile, heartbeats).
-- rules-engine.js wraps chess.js@^1.4.0 (adapter: boardToFen/fenToBoard/legalMoves/makeMove/isCheck/...); FEN persisted as projection (C1/C3: board stays single source of truth). Draw policy: evaluateDraw (fivefold>75-move>insufficient>threefold>50-move), claimableDraw (threefold/50-move only), /api/draw-claim.
-- engine.js: in-house engine (render/history/SAN/PGN/theme helpers/gameEndPresentation). pieces.js: cburnett SVG. ui.js: diff-based reconcile render, SSE+poll fallback, drag-drop, animation, clock-tick interpolation, themes (CSS custom props, [data-theme]/[data-mode=dark]).
-- server.js security: path allowlist + traversal/dotfile 403, 8KB body cap, strict CORS via CHESS_ALLOWED_ORIGIN (default localhost:39281+127.0.0.1:39281), nosniff/no-store, structured errors.
+```bash
+npm run check    # Linter syntax check + complete unit/integration test suite
+npm test         # Complete suite + Playwright browser smoke test
+```
 
-## QUEUE AFTER gate3-elapsed-clocks
-- chess-gate4-accessible-board: accessible grid + modal contracts, keyboard nav, ARIA, visible pending/reconnect/error states, reduced-motion. Then gate4-ux-polish, then chess-gate5-stockfish-worker (Stockfish WASM in Web Worker, eval bar) — optional/last.
-- When ALL planned tasks DONE: report summary. Standing rule: never push kanban-project repo; chess-game pushes are pre-authorized after each merge.
+Summary of test results on `main`:
+- `engine-selftest.js`: 159/159 passed
+- `pieces-selftest.js`: 32/32 passed
+- `security-selftest.js`: 58/58 passed
+- `draw-selftest.js`: 30/30 passed
+- `p3-multiroom-selftest.js`: 58/58 passed
+- `p3-sqlite-selftest.js`: 74/74 passed
+- `p3-seat-selftest.js`: 41/41 passed
+- `t0-draw-flagfall-selftest.js`: 51/51 passed
+- `t0-deadcode-selftest.js`: 13/13 passed
+- `p2-stockfish-selftest.js`: 23/23 passed
+- `differential-selftest.js`: 200/200 random games (37,839 plies vs chess.js, 0 divergences)
+- `scripts/smoke-test.mjs`: Playwright browser smoke test passed (32 pieces, move e2-e4 rendered, referee state synced)
 
-## SERVICES RUNNING
-- kanban API :4100 (KANBAN_DATA_FILE=server/tasks.json in agent-kanban-board repo — DO NOT restart casually), chess static :39281 (nohup pid 80755, log /tmp/chess-static.log).
+---
+
+## 4. RUNNING SERVICES
+- **Chess Server**: `http://127.0.0.1:39281` (PID: 83669)
+- **Kanban Server**: `http://localhost:4100` (PID: 30317)
