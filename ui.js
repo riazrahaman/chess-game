@@ -592,6 +592,7 @@ function renderBoard(lastMove = null, boardBeforeRender = previousBoard) {
         squareDiv.onfocus = () => setRovingSquare(squareId, false);
         squareDiv.onmousedown = e => typeof handleSquareMouseDown === 'function' && handleSquareMouseDown(e, squareId);
         squareDiv.onmouseup = e => typeof handleSquareMouseUp === 'function' && handleSquareMouseUp(e, squareId);
+        squareDiv.onpointerdown = e => typeof handlePointerDown === 'function' && handlePointerDown(e, squareId);
         squareDiv.oncontextmenu = e => { if (e && e.preventDefault) e.preventDefault(); return false; };
         // C3: attach drag-and-drop handlers once per square. The draggable
         // attribute is toggled on every render based on the side to move,
@@ -1813,6 +1814,128 @@ function handleDragEnd() {
   selectedSquare = null;
   legalMoves = [];
   renderBoard();
+}
+
+// D5: Unified Pointer Events Drag-and-Drop (Mobile Touch, Tablet, & Pointer support)
+let activePointerDrag = null;
+
+function getSquareIdFromPoint(x, y) {
+  if (typeof document === 'undefined' || typeof document.elementFromPoint !== 'function') return null;
+  const el = document.elementFromPoint(x, y);
+  if (!el) return null;
+  const squareEl = el.closest ? el.closest('.square') : null;
+  return squareEl ? squareEl.id : null;
+}
+
+function handlePointerDown(e, squareId) {
+  if (e.button !== undefined && e.button !== 0) return;
+  if (!isSquareDraggable(squareId)) return;
+
+  activePointerDrag = {
+    fromSquare: squareId,
+    startX: e.clientX,
+    startY: e.clientY,
+    hasMoved: false,
+    ghostEl: null,
+    pointerId: e.pointerId
+  };
+}
+
+function handlePointerMove(e) {
+  if (!activePointerDrag) return;
+  const dx = e.clientX - activePointerDrag.startX;
+  const dy = e.clientY - activePointerDrag.startY;
+  const dist = Math.hypot(dx, dy);
+
+  if (!activePointerDrag.hasMoved && dist > 7) {
+    activePointerDrag.hasMoved = true;
+    dragFromSquare = activePointerDrag.fromSquare;
+    dragLegalMoves = getLegalMoves(board, activePointerDrag.fromSquare, turn);
+
+    const squareDiv = document.getElementById(activePointerDrag.fromSquare);
+    if (squareDiv) {
+      squareDiv.classList.add('dragging-source');
+      const pieceSvg = squareDiv.querySelector('.chess-piece');
+      if (pieceSvg) {
+        const ghost = pieceSvg.cloneNode(true);
+        ghost.id = 'active-pointer-ghost';
+        ghost.style.position = 'fixed';
+        ghost.style.pointerEvents = 'none';
+        ghost.style.zIndex = '9999';
+        ghost.style.width = (squareDiv.offsetWidth || 48) + 'px';
+        ghost.style.height = (squareDiv.offsetHeight || 48) + 'px';
+        ghost.style.transform = 'translate(-50%, -50%) scale(1.12)';
+        ghost.style.opacity = '0.92';
+        ghost.style.filter = 'drop-shadow(0 6px 14px rgba(0,0,0,0.38))';
+        document.body.appendChild(ghost);
+        activePointerDrag.ghostEl = ghost;
+      }
+    }
+    selectedSquare = activePointerDrag.fromSquare;
+    legalMoves = dragLegalMoves;
+    renderBoard();
+  }
+
+  if (activePointerDrag.hasMoved) {
+    if (activePointerDrag.ghostEl) {
+      activePointerDrag.ghostEl.style.left = e.clientX + 'px';
+      activePointerDrag.ghostEl.style.top = e.clientY + 'px';
+    }
+    const hoverSquare = getSquareIdFromPoint(e.clientX, e.clientY);
+    document.querySelectorAll('.drop-hint').forEach(el => {
+      if (el.id !== hoverSquare) el.classList.remove('drop-hint');
+    });
+    if (hoverSquare && dragLegalMoves.includes(hoverSquare)) {
+      const hoverDiv = document.getElementById(hoverSquare);
+      if (hoverDiv && !hoverDiv.classList.contains('drop-hint')) {
+        hoverDiv.classList.add('drop-hint');
+      }
+    }
+    if (e.cancelable && e.preventDefault) {
+      e.preventDefault();
+    }
+  }
+}
+
+function handlePointerUp(e) {
+  if (!activePointerDrag) return;
+  const fromSquare = activePointerDrag.fromSquare;
+  const hadMoved = activePointerDrag.hasMoved;
+
+  if (activePointerDrag.ghostEl && activePointerDrag.ghostEl.parentNode) {
+    activePointerDrag.ghostEl.parentNode.removeChild(activePointerDrag.ghostEl);
+  }
+
+  activePointerDrag = null;
+
+  if (hadMoved) {
+    const targetSquare = getSquareIdFromPoint(e.clientX, e.clientY);
+    clearDragState();
+    if (targetSquare && getLegalMoves(board, fromSquare, turn).includes(targetSquare)) {
+      submitDragMove(fromSquare, targetSquare);
+    } else {
+      selectedSquare = null;
+      legalMoves = [];
+      renderBoard();
+    }
+  }
+}
+
+function handlePointerCancel() {
+  if (activePointerDrag && activePointerDrag.ghostEl && activePointerDrag.ghostEl.parentNode) {
+    activePointerDrag.ghostEl.parentNode.removeChild(activePointerDrag.ghostEl);
+  }
+  activePointerDrag = null;
+  clearDragState();
+  selectedSquare = null;
+  legalMoves = [];
+  renderBoard();
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pointermove', handlePointerMove, { passive: false });
+  window.addEventListener('pointerup', handlePointerUp);
+  window.addEventListener('pointercancel', handlePointerCancel);
 }
 
 function handleSquareClick(squareId) {

@@ -619,9 +619,9 @@
         .badge-inaccuracy { background: #e69d00; color: white; }
         .badge-mistake { background: #e58f2a; color: white; }
         .badge-blunder { background: #ca3431; color: white; }
-        #review-panel {
-            background: #f8fafc;
-            border: 1px solid var(--board-border, #ccc);
+        #review-panel, #multipv-container, #explorer-panel, #graph-panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
             border-radius: 6px;
             padding: 10px;
             margin-top: 8px;
@@ -633,18 +633,11 @@
         }
         .accuracy-card {
             flex: 1;
-            background: white;
+            background: var(--panel-bg);
             padding: 6px 8px;
             border-radius: 4px;
-            border: 1px solid #e2e8f0;
+            border: 1px solid var(--panel-border);
             text-align: center;
-        }
-        #explorer-panel, #graph-panel {
-            background: #f8fafc;
-            border: 1px solid var(--board-border, #ccc);
-            border-radius: 6px;
-            padding: 10px;
-            margin-top: 8px;
         }
         .eco-badge {
             display: inline-block;
@@ -741,8 +734,10 @@
             --accent: #355a42; --accent-soft: #e3ebdf; --modal-bg: #fcfbf8;
             --card-bg: #fcfbf8; --board-border: #737d69; --label-color: #626b62;
             --timer-border: #d9d8cf; --active-timer-bg: #e3ebdf; --active-timer-border: #355a42;
-            --sq-white-grad: none; --sq-black-grad: none;
-            --piece-shadow: drop-shadow(0 1px 1px rgba(30,40,25,.16)); --board-bevel: none;
+            --sq-white-grad: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, rgba(0,0,0,0.03) 100%);
+            --sq-black-grad: linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(0,0,0,0.08) 100%);
+            --piece-shadow: drop-shadow(0 3px 3px rgba(0,0,0,0.24));
+            --board-bevel: inset 0 0 0 1px rgba(255,255,255,0.18), 0 6px 22px rgba(0,0,0,0.2), 0 1px 3px rgba(0,0,0,0.14);
         }
         [data-mode="dark"] {
             --bg-page: #1b211d; --panel-bg: #252d27; --panel-border: #445047;
@@ -750,6 +745,8 @@
             --accent: #b8d5a5; --accent-soft: #354735; --modal-bg: #252d27;
             --card-bg: #252d27; --board-border: #87937d; --label-color: #b4beaf;
             --timer-border: #445047; --active-timer-bg: #354735; --active-timer-border: #b8d5a5;
+            --piece-shadow: drop-shadow(0 3px 4px rgba(0,0,0,0.5));
+            --board-bevel: inset 0 0 0 1px rgba(255,255,255,0.08), 0 8px 24px rgba(0,0,0,0.45);
         }
         * { box-sizing: border-box; }
         body { display: block; min-height: 100dvh; padding: 0 28px 28px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.45; }
@@ -776,9 +773,9 @@
         .square:focus-visible { outline: 4px solid #1758b6; outline-offset: -4px; }
         .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: auto 1fr; align-items: start; gap: 0 24px; padding-top: 16px; }
         #game-container { grid-column: 1; grid-row: 1 / 3; margin: 0 auto; width: 100%; max-width: min(580px, calc(100dvh - 180px)); justify-self: center; display: flex; flex-direction: column; }
-        #board-shell { width: 100%; display: grid; grid-template-columns: 24px minmax(0, 1fr); grid-template-rows: auto 24px; }
-        #board { width: 100%; border-width: 1px; border-radius: 4px; }
-        #board-wrapper { min-width: 0; width: 100%; }
+        #board-shell { width: 100%; display: grid; grid-template-columns: 24px minmax(0, 1fr); grid-template-rows: auto 24px; touch-action: none; }
+        #board { width: 100%; border-width: 1px; border-radius: 6px; box-shadow: var(--board-bevel); touch-action: none; }
+        #board-wrapper { min-width: 0; width: 100%; touch-action: none; }
         #eval-bar-container { margin: 0 0 8px 24px; width: auto; flex: none; height: 16px; border: 1px solid var(--board-border); border-radius: 4px; background: #262626; position: relative; overflow: hidden; box-shadow: inset 0 1px 2px rgba(0,0,0,0.3); }
         #eval-bar-fill { height: 100%; width: 50%; background: #f0d9b5; transition: width 350ms cubic-bezier(0.4, 0, 0.2, 1); }
         #eval-score-text { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 11px; font-weight: 700; color: #111827; background: rgba(255, 255, 255, 0.9); padding: 1px 6px; border-radius: 3px; line-height: 1.2; z-index: 2; }
