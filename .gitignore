@@ -4,3 +4,5 @@
 opencode.json
 node_modules/
 .referee-journal.jsonl
+games.db
+.games-archive.json

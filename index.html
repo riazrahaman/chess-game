@@ -425,6 +425,38 @@
             color: var(--text-color);
         }
         #game-end-banner { margin: 0 0 18px; }
+        #archive-modal, #import-pgn-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 150;
+        }
+        #archive-modal.hidden, #import-pgn-modal.hidden {
+            display: none;
+        }
+        .modal-dialog {
+            background: var(--modal-bg);
+            border: 2px solid var(--modal-border);
+            border-radius: 8px;
+            padding: 20px;
+            color: var(--text-color);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+            width: min(90vw, 700px);
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            box-sizing: border-box;
+        }
+        #games-table th, #games-table td {
+            padding: 6px 8px;
+            border-bottom: 1px solid var(--panel-row-border, #eee);
+        }
+        #games-table tr:hover td {
+            background: rgba(0, 0, 0, 0.04);
+        }
 
         .visually-hidden {
             position: absolute !important;
@@ -676,6 +708,7 @@
             <button id="offer-draw" type="button">Draw</button>
             <button id="undo" type="button">Undo</button>
             <button id="game-review-btn" type="button">Game Review</button>
+            <button id="game-archive-btn" type="button">Game Archive</button>
         </div>
     </div>
     <div id="history-container">
@@ -733,9 +766,57 @@
             <button id="rematch" type="button">Start rematch</button>
         </div>
     </div>
+    <div id="archive-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="archive-title">
+        <div id="archive-box" class="modal-dialog">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h2 id="archive-title" style="margin: 0; font-size: 1.2rem;">Game Archive Library</h2>
+                <button id="close-archive-btn" type="button" aria-label="Close archive dialog" style="cursor: pointer; padding: 4px 10px; font-weight: bold; border-radius: 4px; border: 1px solid var(--panel-border); background: var(--panel-bg); color: var(--text-color);">✕</button>
+            </div>
+            <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
+                <input type="text" id="archive-search-input" placeholder="Search by player, ECO, result..." style="flex: 1; min-width: 180px; padding: 6px 10px; border-radius: 4px; border: 1px solid var(--panel-border); background: var(--panel-bg); color: var(--text-color);">
+                <button id="archive-search-btn" type="button" style="padding: 6px 12px; border-radius: 4px; border: 1px solid var(--panel-border); background: var(--panel-bg); color: var(--text-color); cursor: pointer;">Search</button>
+                <button id="archive-refresh-btn" type="button" style="padding: 6px 12px; border-radius: 4px; border: 1px solid var(--panel-border); background: var(--panel-bg); color: var(--text-color); cursor: pointer;">Refresh</button>
+                <button id="open-import-pgn-btn" type="button" style="padding: 6px 12px; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Import PGN</button>
+            </div>
+            <div id="archive-table-container" style="max-height: 360px; overflow-y: auto; border: 1px solid var(--panel-border); border-radius: 4px;">
+                <table id="games-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                    <thead>
+                        <tr style="background: rgba(0,0,0,0.05); text-align: left; border-bottom: 1px solid var(--panel-border);">
+                            <th style="padding: 8px;">Date</th>
+                            <th style="padding: 8px;">White</th>
+                            <th style="padding: 8px;">Black</th>
+                            <th style="padding: 8px;">Result</th>
+                            <th style="padding: 8px;">ECO</th>
+                            <th style="padding: 8px;">Moves</th>
+                            <th style="padding: 8px; text-align: right;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="games-table-body">
+                    </tbody>
+                </table>
+            </div>
+            <div id="archive-status-msg" style="margin-top: 8px; font-size: 0.8rem; color: #64748b;"></div>
+        </div>
+    </div>
+    <div id="import-pgn-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="import-pgn-title">
+        <div id="import-pgn-box" class="modal-dialog">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h2 id="import-pgn-title" style="margin: 0; font-size: 1.2rem;">Import PGN Game</h2>
+                <button id="close-import-pgn-btn" type="button" aria-label="Close import dialog" style="cursor: pointer; padding: 4px 10px; font-weight: bold; border-radius: 4px; border: 1px solid var(--panel-border); background: var(--panel-bg); color: var(--text-color);">✕</button>
+            </div>
+            <p style="margin: 0 0 8px; font-size: 0.85rem; color: #64748b;">Paste any PGN text below to import and save into your SQLite game library.</p>
+            <textarea id="import-pgn-textarea" rows="8" placeholder="[Event &quot;...&quot;]&#10;1. e4 e5 2. Nf3 Nc6..." style="width: 100%; box-sizing: border-box; font-family: monospace; font-size: 0.85rem; padding: 8px; border-radius: 4px; border: 1px solid var(--panel-border); background: var(--panel-bg); color: var(--text-color); margin-bottom: 12px;"></textarea>
+            <div style="display: flex; justify-content: flex-end; gap: 8px;">
+                <button id="cancel-import-pgn-btn" type="button" style="padding: 6px 14px; border-radius: 4px; border: 1px solid var(--panel-border); background: var(--panel-bg); color: var(--text-color); cursor: pointer;">Cancel</button>
+                <button id="submit-import-pgn-btn" type="button" style="padding: 6px 14px; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Save to Library</button>
+            </div>
+            <div id="import-pgn-status" style="margin-top: 8px; font-size: 0.8rem;"></div>
+        </div>
+    </div>
     <script src="engine.js"></script>
     <script src="pieces.js"></script>
     <script src="move-review.js"></script>
+    <script src="game-archive.js"></script>
     <script src="ui.js"></script>
 </body>
 </html>

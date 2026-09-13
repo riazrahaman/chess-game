@@ -4,6 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const referee = require('./referee-service.js');
+const gameArchive = require('./game-archive.js');
 
 const PORT = 39281;
 const DIR = __dirname;
@@ -155,6 +156,7 @@ const ALLOWED_FILES = new Set([
   'stockfish.js',
   'stockfish.wasm',
   'move-review.js',
+  'game-archive.js',
   'CBURNETT-LICENSE.txt'
 ]);
 
@@ -345,6 +347,97 @@ function handleUndoEndpoint(req, res) {
   }));
 }
 
+const MAX_GAME_BODY_BYTES = 1024 * 1024;
+
+function handleGetGamesEndpoint(req, res) {
+  const parsedUrl = new URL(req.url, 'http://127.0.0.1');
+  const params = parsedUrl.searchParams;
+  const limit = params.has('limit') ? parseInt(params.get('limit'), 10) : 50;
+  const offset = params.has('offset') ? parseInt(params.get('offset'), 10) : 0;
+  const q = params.get('q');
+  const white = params.get('white');
+  const black = params.get('black');
+  const eco = params.get('eco');
+  const result = params.get('result');
+
+  let games = [];
+  if (q) {
+    games = gameArchive.searchGames(q, { limit, offset });
+  } else if (white || black || eco || result) {
+    games = gameArchive.searchGames({ white, black, eco, result }, { limit, offset });
+  } else {
+    games = gameArchive.listGames({ limit, offset });
+  }
+
+  const origin = req.headers.origin;
+  if (origin && isOriginAllowed(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+  sendJson(res, 200, { ok: true, games });
+}
+
+function handlePostGameEndpoint(req, res) {
+  readBody(req, MAX_GAME_BODY_BYTES).then(body => {
+    let parsed = null;
+    try {
+      parsed = JSON.parse(body);
+    } catch (e) {
+      sendJsonError(res, 400, 'invalid json');
+      return;
+    }
+    if (!parsed || typeof parsed !== 'object') {
+      sendJsonError(res, 400, 'payload must be a json object');
+      return;
+    }
+    try {
+      const saved = gameArchive.saveGame(parsed);
+      const origin = req.headers.origin;
+      if (origin && isOriginAllowed(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+      }
+      sendJson(res, 201, { ok: true, id: saved.id, game: saved });
+    } catch (err) {
+      sendJsonError(res, 400, err.message || 'failed to save game');
+    }
+  }).catch(() => {
+    if (!res.headersSent) sendJsonError(res, 413, 'request body too large');
+  });
+}
+
+function handleGetGameEndpoint(req, res, id) {
+  const game = gameArchive.getGame(id);
+  if (!game) {
+    sendJsonError(res, 404, 'game not found');
+    return;
+  }
+  const origin = req.headers.origin;
+  if (origin && isOriginAllowed(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+  sendJson(res, 200, { ok: true, game });
+}
+
+function handleGetGamePgnEndpoint(req, res, id) {
+  const game = gameArchive.getGame(id);
+  if (!game) {
+    sendJsonError(res, 404, 'game not found');
+    return;
+  }
+  const pgn = game.pgn || gameArchive.exportPgn(game);
+  const origin = req.headers.origin;
+  if (origin && isOriginAllowed(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+  res.statusCode = 200;
+  res.setHeader('Content-Type', 'application/x-chess-pgn; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${id}.pgn"`);
+  res.end(pgn);
+}
+
 function isApiRequest(urlPath) {
   return urlPath.startsWith('/api/');
 }
@@ -406,6 +499,24 @@ function createServer() {
       handleUndoEndpoint(req, res);
       return;
     }
+    if (req.method === 'GET' && urlPath === '/api/games') {
+      handleGetGamesEndpoint(req, res);
+      return;
+    }
+    if (req.method === 'POST' && urlPath === '/api/games') {
+      handlePostGameEndpoint(req, res);
+      return;
+    }
+    const gamePgnMatch = urlPath.match(/^\/api\/games\/([^/?#]+)\/pgn$/);
+    if (req.method === 'GET' && gamePgnMatch) {
+      handleGetGamePgnEndpoint(req, res, decodeURIComponent(gamePgnMatch[1]));
+      return;
+    }
+    const gameIdMatch = urlPath.match(/^\/api\/games\/([^/?#]+)$/);
+    if (req.method === 'GET' && gameIdMatch) {
+      handleGetGameEndpoint(req, res, decodeURIComponent(gameIdMatch[1]));
+      return;
+    }
 
     if (isApiRequest(urlPath)) {
       sendJsonError(res, 404, 'not found');
@@ -440,7 +551,7 @@ function createServer() {
   });
 }
 
-module.exports = { createServer, stopStateWatcher };
+module.exports = { createServer, stopStateWatcher, gameArchive };
 
 if (require.main === module) {
   const port = process.env.CHESS_PORT ? Number(process.env.CHESS_PORT) : PORT;
