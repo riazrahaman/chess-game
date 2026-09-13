@@ -761,7 +761,19 @@ function gameEndPresentation(state) {
     const winner = state.flagged === 'white' ? 'Black' : 'White';
     return { banner: `${winner} wins on time`, reason: 'timeout' };
   }
-  if (status === 'draw') return { banner: 'Draw by agreement', reason: 'draw' };
+  if (status === 'draw') {
+    const reasonMap = {
+      'agreement': 'Draw by agreement',
+      'threefold': 'Draw by threefold repetition',
+      'fivefold': 'Draw by fivefold repetition',
+      'fifty-move': 'Draw by 50-move rule',
+      'seventyfive-move': 'Draw by 75-move rule',
+      'insufficient': 'Draw by insufficient material'
+    };
+    const banner = reasonMap[state.drawReason] || 'Draw by agreement';
+    const reason = state.drawReason || 'draw';
+    return { banner, reason };
+  }
   return { banner: state.result || 'Game over', reason: status || 'game over' };
 }
 

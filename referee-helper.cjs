@@ -40,6 +40,7 @@ function ensureClocks(s) {
   if (!Object.prototype.hasOwnProperty.call(s, 'flagged')) s.flagged = null;
   if (!Object.prototype.hasOwnProperty.call(s, 'resigned')) s.resigned = null;
   if (!Object.prototype.hasOwnProperty.call(s, 'draw')) s.draw = false;
+  if (!Object.prototype.hasOwnProperty.call(s, 'drawReason')) s.drawReason = null;
   // Backfill canonical FEN from the authoritative board for legacy state
   // files that predate the fen field. The board remains the single source of
   // truth (C1/C3); fen is a derived, read-only projection.
@@ -60,6 +61,7 @@ function newGame() {
     flagged: null,
     resigned: null,
     draw: false,
+    drawReason: null,
     fen: rulesEngine.boardToFen(board)
   };
   saveState(s);
@@ -170,6 +172,16 @@ function rebuildState(history) {
   s.gameOver = status === 'checkmate' || status === 'stalemate';
   s.result = status === 'checkmate' ? (s.board.turn === 'white' ? '0-1' : '1-0')
     : status === 'stalemate' ? '½-½' : null;
+  if (!s.gameOver) {
+    const draw = rulesEngine.evaluateDraw(s.board, s.history);
+    if (draw.draw) {
+      s.gameOver = true;
+      s.status = 'draw';
+      s.draw = true;
+      s.drawReason = draw.reason;
+      s.result = '½-½';
+    }
+  }
   s.fen = rulesEngine.boardToFen(s.board);
   return s;
 }
@@ -191,7 +203,7 @@ if (cmd === 'status') {
   const status = s.gameOver ? s.status : engine.getGameStatus(s.board, turn);
   console.log(JSON.stringify({
     turn, status, gameOver: s.gameOver, result: s.result, flagged: s.flagged,
-    resigned: s.resigned, draw: s.draw,
+    resigned: s.resigned, draw: s.draw, drawReason: s.drawReason || null,
     legalMoves: moves,
     clocks: s.clocks,
     board: renderAscii(s.board),
@@ -259,11 +271,26 @@ if (cmd === 'status') {
   s.gameOver = status === 'checkmate' || status === 'stalemate';
   if (status === 'checkmate') s.result = nextTurn === 'white' ? '0-1' : '1-0';
   if (status === 'stalemate') s.result = '½-½';
+  // Draw detection via chess.js (rules-engine adapter). Fivefold and 75-move
+  // are automatic draws per FIDE rules. Insufficient material is also an
+  // automatic draw. Threefold and 50-move are claimable but we also auto-apply
+  // them here since the referee is authoritative and there is no UI claim
+  // dialog delay — the draw-claim subcmd exists for explicit claims.
+  if (!s.gameOver) {
+    const draw = rulesEngine.evaluateDraw(s.board, s.history);
+    if (draw.draw) {
+      s.gameOver = true;
+      s.status = 'draw';
+      s.draw = true;
+      s.drawReason = draw.reason;
+      s.result = '½-½';
+    }
+  }
   s.fen = rulesEngine.boardToFen(s.board);
   saveState(s);
   console.log(JSON.stringify({
     ok: true, applied: moveStr, nextTurn, status, gameOver: s.gameOver,
-    result: s.result, flagged: s.flagged,
+    result: s.result, flagged: s.flagged, drawReason: s.drawReason || null,
     clocks: s.clocks,
     board: renderAscii(s.board),
     history: historyStr(s.history),
@@ -298,9 +325,36 @@ if (cmd === 'status') {
   s.gameOver = true;
   s.status = 'draw';
   s.draw = true;
+  s.drawReason = 'agreement';
   s.result = '½-½';
   saveState(s);
   console.log(JSON.stringify({ ok: true, gameOver: true, status: s.status, result: s.result, draw: true,
+    drawReason: s.drawReason,
+    clocks: s.clocks, board: renderAscii(s.board), history: historyStr(s.history), plyCount: s.history.length }, null, 2));
+} else if (cmd === 'draw-claim') {
+  let s = loadState();
+  if (!s) s = newGame();
+  if (s.gameOver) {
+    console.log(JSON.stringify({ ok: false, error: 'game over', gameOver: true, result: s.result }));
+    process.exit(1);
+  }
+  const claim = rulesEngine.claimableDraw(s.board, s.history);
+  if (!claim.claimable) {
+    console.log(JSON.stringify({
+      ok: false, error: 'no claimable draw condition (threefold or 50-move rule)',
+      gameOver: false, status: engine.getGameStatus(s.board, s.board.turn),
+      clocks: s.clocks, board: renderAscii(s.board), history: historyStr(s.history), plyCount: s.history.length
+    }, null, 2));
+    process.exit(1);
+  }
+  s.gameOver = true;
+  s.status = 'draw';
+  s.draw = true;
+  s.drawReason = claim.reason;
+  s.result = '½-½';
+  saveState(s);
+  console.log(JSON.stringify({ ok: true, gameOver: true, status: s.status, result: s.result, draw: true,
+    drawReason: s.drawReason,
     clocks: s.clocks, board: renderAscii(s.board), history: historyStr(s.history), plyCount: s.history.length }, null, 2));
 } else if (cmd === 'undo') {
   let s = loadState();
@@ -320,6 +374,6 @@ if (cmd === 'status') {
   newGame();
   console.log(JSON.stringify({ ok: true, reset: true }));
 } else {
-  console.log('usage: node referee-helper.cjs [status|move <coord>|resign <white|black>|draw|undo|reset]');
+  console.log('usage: node referee-helper.cjs [status|move <coord>|resign <white|black>|draw|draw-claim|undo|reset]');
   process.exit(1);
 }
