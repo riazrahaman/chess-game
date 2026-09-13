@@ -155,6 +155,69 @@ async function main() {
     });
     assert(validMoveRes.status === 200, `Move with valid seat token accepted 200 (got ${validMoveRes.status})`);
 
+    // --- T0.2 & T0.3 Mutation & Heartbeat Tests ---
+    console.log('\n--- T0.2 & T0.3 Mutation & Heartbeat Tests ---');
+
+    // 1. Observer without token cannot reset seated room
+    const obsReset = await request('/api/reset?room=testroom', { method: 'POST' });
+    assert(obsReset.status === 401, `Observer cannot reset seated room (expected 401, got ${obsReset.status})`);
+
+    // 2. Observer with invalid token cannot reset seated room
+    const badReset = await request('/api/reset?room=testroom', {
+      method: 'POST',
+      headers: { 'X-Seat-Token': 'bogus-token' }
+    });
+    assert(badReset.status === 403, `Bogus token cannot reset seated room (expected 403, got ${badReset.status})`);
+
+    // 3. Spectator cannot mutate seated room
+    const specClaimRes = await request('/api/seat/claim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'spectator', room: 'testroom' })
+    });
+    const tokenSpec = specClaimRes.json.token;
+    const specUndo = await request('/api/undo?room=testroom', {
+      method: 'POST',
+      headers: { 'X-Seat-Token': tokenSpec }
+    });
+    assert(specUndo.status === 403, `Spectator cannot undo in seated room (expected 403, got ${specUndo.status})`);
+
+    // 4. Seated White player CAN undo
+    const whiteUndo = await request('/api/undo?room=testroom', {
+      method: 'POST',
+      headers: { 'X-Seat-Token': tokenW }
+    });
+    assert(whiteUndo.status === 200, `Seated player can undo in seated room (expected 200, got ${whiteUndo.status})`);
+
+    // 5. Seated White player cannot resign as black
+    const whiteResignBlack = await request('/api/resign?color=black&room=testroom', {
+      method: 'POST',
+      headers: { 'X-Seat-Token': tokenW }
+    });
+    assert(whiteResignBlack.status === 403, `White cannot resign as black (expected 403, got ${whiteResignBlack.status})`);
+
+    // 6. Seated White player CAN offer/accept draw
+    const whiteDraw = await request('/api/draw?room=testroom', {
+      method: 'POST',
+      headers: { 'X-Seat-Token': tokenW }
+    });
+    assert(whiteDraw.status === 200, `Seated player can draw in seated room (expected 200, got ${whiteDraw.status})`);
+
+    // 7. Heartbeat keeps seat alive
+    const hbRes = await request('/api/seat/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: 'testroom', token: tokenW })
+    });
+    assert(hbRes.status === 200, `Heartbeat succeeds for active seat (got ${hbRes.status})`);
+
+    // 8. Seated White player CAN reset room
+    const whiteReset = await request('/api/reset?room=testroom', {
+      method: 'POST',
+      headers: { 'X-Seat-Token': tokenW }
+    });
+    assert(whiteReset.status === 200, `Seated player can reset seated room (expected 200, got ${whiteReset.status})`);
+
     // Release white seat
     const relRes = await request('/api/seat/release', {
       method: 'POST',
@@ -162,6 +225,10 @@ async function main() {
       body: JSON.stringify({ token: tokenW, room: 'testroom' })
     });
     assert(relRes.status === 200, 'POST /api/seat/release returns 200');
+
+    // 9. After release (unseated), anyone can reset (backward compatibility)
+    const unseatedReset = await request('/api/reset?room=testroom', { method: 'POST' });
+    assert(unseatedReset.status === 200, `Unseated room permits reset without token (backward compatibility, got ${unseatedReset.status})`);
 
   } finally {
     server.close();
