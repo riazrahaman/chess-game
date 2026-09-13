@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chess UI</title>
+    <title>Chess UI — Play &amp; study</title>
+    <meta name="description" content="A quiet space for chess. Play locally, explore your games, and keep your library on your own machine.">
     <base href="/">
     <style>
         /* A6: Theme system — CSS custom properties on :root.
@@ -733,10 +734,137 @@
             stroke-width: 1.5;
             stroke-dasharray: 2 2;
         }
+        /* Board-first workspace. Existing board themes and DOM contracts are retained. */
+        :root {
+            --bg-page: #f3f1eb; --panel-bg: #fcfbf8; --panel-border: #d9d8cf;
+            --panel-row-border: #e9e7df; --text-color: #272e29; --muted: #626b62;
+            --accent: #355a42; --accent-soft: #e3ebdf; --modal-bg: #fcfbf8;
+            --card-bg: #fcfbf8; --board-border: #737d69; --label-color: #626b62;
+            --timer-border: #d9d8cf; --active-timer-bg: #e3ebdf; --active-timer-border: #355a42;
+            --sq-white-grad: none; --sq-black-grad: none;
+            --piece-shadow: drop-shadow(0 1px 1px rgba(30,40,25,.16)); --board-bevel: none;
+        }
+        [data-mode="dark"] {
+            --bg-page: #1b211d; --panel-bg: #252d27; --panel-border: #445047;
+            --panel-row-border: #374039; --text-color: #e8ece4; --muted: #b4beaf;
+            --accent: #b8d5a5; --accent-soft: #354735; --modal-bg: #252d27;
+            --card-bg: #252d27; --board-border: #87937d; --label-color: #b4beaf;
+            --timer-border: #445047; --active-timer-bg: #354735; --active-timer-border: #b8d5a5;
+        }
+        * { box-sizing: border-box; }
+        body { display: block; min-height: 100dvh; padding: 0 28px 28px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.45; }
+        .hidden, [hidden] { display: none !important; }
+        .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+        .skip-link { position: fixed; top: -80px; left: 20px; z-index: 300; padding: 12px; background: var(--panel-bg); color: var(--text-color); }
+        .skip-link:focus { top: 12px; }
+        .app-header, .workspace, .app-footer { max-width: 1120px; margin-inline: auto; }
+        .app-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 22px 0 18px; border-bottom: 1px solid var(--panel-border); }
+        .brand { display: flex; align-items: center; gap: 14px; }
+        .brand-mark { display: grid; grid-template-columns: repeat(2, 9px); gap: 3px; transform: rotate(-8deg); }
+        .brand-mark i { width: 9px; height: 9px; background: var(--accent); }
+        .brand-mark i:nth-child(2), .brand-mark i:nth-child(3) { opacity: .35; }
+        h1 { font-family: Georgia, "Times New Roman", serif; font-size: 29px; line-height: 1; font-weight: 400; letter-spacing: -1px; margin: 0; }
+        .brand p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+        #theme-bar { margin: 0; gap: 8px; display: flex; align-items: center; flex-wrap: wrap; font-size: 12px; }
+        body button, body select, body input, body textarea { font: inherit; color: var(--text-color); background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 5px; }
+        body button, body select { min-height: 40px; padding: 8px 12px; font-size: 13px; font-weight: 500; }
+        body button { transition: background-color 150ms, border-color 150ms; }
+        body button:hover:not(:disabled), body summary:hover { background: var(--accent-soft); border-color: var(--accent); }
+        body button:active:not(:disabled) { transform: translateY(1px); }
+        body button:disabled { opacity: .45; cursor: not-allowed; }
+        body :is(button, select, input, textarea, summary, a):focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+        .square:focus-visible { outline: 4px solid #1758b6; outline-offset: -4px; }
+        .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: auto 1fr; align-items: start; gap: 0 24px; padding-top: 16px; }
+        #game-container { grid-column: 1; grid-row: 1 / 3; margin: 0 auto; width: 100%; max-width: min(580px, calc(100dvh - 180px)); justify-self: center; display: flex; flex-direction: column; }
+        #board-shell { width: 100%; display: grid; grid-template-columns: 24px minmax(0, 1fr); grid-template-rows: auto 24px; }
+        #board { width: 100%; border-width: 1px; border-radius: 4px; }
+        #board-wrapper { min-width: 0; width: 100%; }
+        #eval-bar-container { margin: 0 0 8px 24px; width: auto; flex: none; height: 16px; border: 1px solid var(--board-border); border-radius: 4px; background: #262626; position: relative; overflow: hidden; box-shadow: inset 0 1px 2px rgba(0,0,0,0.3); }
+        #eval-bar-fill { height: 100%; width: 50%; background: #f0d9b5; transition: width 350ms cubic-bezier(0.4, 0, 0.2, 1); }
+        #eval-score-text { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 11px; font-weight: 700; color: #111827; background: rgba(255, 255, 255, 0.9); padding: 1px 6px; border-radius: 3px; line-height: 1.2; z-index: 2; }
+        #timers { order: -1; display: flex; justify-content: space-between; gap: 12px; margin: 0 0 6px 24px; }
+        .player-tray { min-width: 0; flex: 1; text-align: left; display: grid; grid-template-columns: 1fr auto; gap: 3px 6px; color: var(--muted); font-size: 11px; }
+        .timer-badge { grid-column: 1 / -1; padding: 8px 12px; border-width: 1px; font-size: 20px; font-variant-numeric: tabular-nums; font-weight: 600; letter-spacing: -.5px; color: var(--text-color); background: var(--panel-bg); }
+        .active-timer { background: var(--active-timer-bg); border-color: var(--active-timer-border); box-shadow: inset 3px 0 var(--active-timer-border); }
+        .low-time { color: #b62e2e; border-color: #b62e2e; }
+        .captured-pieces { min-height: 20px; justify-content: flex-end; }
+        #material-advantage { font-size: 12px; color: var(--muted); margin: 0 0 8px 24px; }
+        #status-panel { grid-column: 2; margin: 0; width: 100%; text-align: left; min-width: 0; }
+        .section-label { margin: 0 0 8px; color: var(--muted); font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 600; }
+        .room-line { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+        #room-badge { margin: 0 !important; background: transparent !important; padding: 0 !important; font-size: 14px !important; overflow-wrap: anywhere; }
+        #copy-room-link { flex-shrink: 0; }
+        #seat-bar { display: flex !important; margin: 8px 0 14px !important; flex-wrap: wrap; gap: 6px !important; }
+        #seat-bar button, #copy-room-link { padding: 6px 8px !important; font-size: 12px !important; }
+        #seat-badge { padding: 5px 8px !important; background: var(--accent-soft) !important; color: var(--text-color) !important; }
+        #ping-badge { background: transparent !important; color: var(--muted) !important; margin-left: auto; }
+        #info { font-size: 22px; font-family: Georgia, "Times New Roman", serif; letter-spacing: -.4px; }
+        #status { color: var(--muted); font-size: 13px; margin-top: 2px; }
+        #connection-status, #command-status { font-size: 12px; }
+        #connection-status[data-state="connected"] { color: var(--accent); }
+        #command-status:empty { display: none; }
+        #command-controls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 12px 0 16px; }
+        #command-controls button { padding: 8px 4px; font-size: 12px; font-weight: 500; }
+        #new-game { grid-column: span 2; background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+        #game-review-btn { grid-column: span 2; background: #0284c7; border-color: #0284c7; color: #fff; font-weight: 600; }
+        #game-archive-btn { grid-column: span 2; background: #475569; border-color: #475569; color: #fff; font-weight: 600; }
+        #copy-pgn { grid-column: span 2; }
+        #history-container { grid-column: 2; min-width: 0; width: 100%; max-height: none; overflow: visible; margin: 0; padding: 0; border: 0; background: transparent; }
+        .history-heading { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--panel-border); }
+        .history-heading h2 { font-size: 14px; font-weight: 600; margin: 0 0 8px; }
+        .history-scroll { max-height: 180px; overflow: auto; background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 4px; }
+        #history-container table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+        #history-container th { background: var(--panel-bg); color: var(--muted); font-size: 11px; font-weight: 500; position: sticky; top: 0; z-index: 1; }
+        #history-container td, #history-container th { padding: 7px 10px; border-bottom: 1px solid var(--panel-row-border); text-align: left; }
+        .history-ply.active-ply { background: var(--accent); color: #fff; }
+        #scrubber-controls { margin: 0 0 6px; gap: 4px; }
+        #scrubber-controls button { min-width: 30px; min-height: 30px; padding: 2px 6px; background: var(--panel-bg); color: var(--text-color); border-color: var(--panel-border); }
+        .empty-history { font-size: 12px; color: var(--muted); padding: 14px 10px; margin: 0; background: var(--panel-bg); }
+        .history-scroll:has(#history-body tr) + .empty-history { display: none; }
+        #multipv-container, #review-panel, #explorer-panel, #graph-panel { background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 6px; padding: 12px; margin-top: 12px; }
+        #multipv-container { margin-left: 24px; }
+        .supporting-copy { color: var(--muted); font-size: 11px; line-height: 1.4; margin: 6px 0 0; }
+        .opening-title { color: var(--text-color); font-family: Georgia, "Times New Roman", serif; font-size: 16px; margin-top: 8px; }
+        .eco-badge { background: var(--accent-soft); color: var(--accent); }
+        .rec-move-item, .accuracy-card, #eval-graph-container { background: var(--panel-bg); border-color: var(--panel-border); color: var(--text-color); }
+        .rec-move-san { color: var(--accent); }
+        .graph-curve { stroke: var(--accent); }
+        .graph-dot { fill: var(--accent); }
+        #accuracy-bars .accuracy-card > div { color: var(--text-color) !important; }
+        #graph-panel summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+        #promo-box, #game-end-card, .modal-dialog { border: 1px solid var(--panel-border); border-radius: 10px; max-height: calc(100dvh - 40px); overflow: auto; }
+        #archive-box { width: min(920px,calc(100vw - 32px)); }
+        #import-pgn-box { width: min(560px,calc(100vw - 32px)); }
+        #archive-table-container { overflow: auto; }
+        #archive-box input, #import-pgn-box textarea { padding: 10px !important; }
+        #archive-box button, #import-pgn-box button { min-height: 40px; }
+        #open-import-pgn-btn, #submit-import-pgn-btn { background: var(--accent) !important; color: #fff !important; }
+        .app-footer { display: flex; justify-content: space-between; gap: 16px; border-top: 1px solid var(--panel-border); padding-top: 14px; margin-top: 24px; color: var(--muted); font-size: 11px; }
+        @media (max-width: 679px) {
+            .workspace { grid-template-columns: 1fr; gap: 16px; }
+            #game-container, #status-panel, #history-container { grid-column: 1; grid-row: auto; width: 100%; max-width: 540px; justify-self: center; }
+            .app-header { align-items: flex-start; }
+            #eval-bar-container, #timers, #multipv-container { margin-left: 24px; }
+        }
+        @media (max-width: 560px) {
+            body { padding: 0 12px 16px; }
+            .app-header { flex-direction: column; gap: 12px; padding: 14px 0 10px; }
+            #theme-bar { width: 100%; gap: 6px; }
+            #theme-bar select { max-width: 130px; }
+            #theme-bar button { padding-inline: 8px; }
+            .workspace { padding-top: 12px; }
+            #timers { gap: 8px; }
+            .timer-badge { font-size: 16px; padding: 6px; }
+            body button, body select, #seat-bar button { min-height: 38px; }
+            .app-footer { flex-direction: column; gap: 4px; }
+        }
+        @media (prefers-reduced-motion: reduce) { body *, body *::before, body *::after { animation: none !important; transition: none !important; } }
     </style>
 </head>
 <body>
-    <h1>Chess UI</h1>
+    <a class="skip-link" href="#workspace">Skip to game</a>
+    <header class="app-header">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><div><h1>Chess UI</h1><p>A little space to think.</p></div></div>
     <div id="theme-bar">
         <label for="theme-board-select">Board:</label>
         <select id="theme-board-select">
@@ -749,16 +877,9 @@
         </select>
         <button id="theme-mode-toggle">Dark mode</button>
         <button id="sound-toggle">Sound: On</button>
-        <span id="room-badge" style="margin-left: 8px; font-size: 0.85rem; font-weight: bold; background: #e2e8f0; padding: 2px 8px; border-radius: 4px;">Room: default</span>
-        <button id="copy-room-link" type="button" style="font-size: 0.8rem; padding: 2px 6px;">Copy Room Link</button>
-        <div id="seat-bar" style="display:inline-flex; align-items:center; gap:6px; margin-left:12px;">
-            <span id="seat-badge" style="font-size:0.75rem; padding:2px 6px; border-radius:4px; background:#e2e8f0; font-weight:600;">Unseated</span>
-            <button id="claim-white-btn" type="button" style="font-size:0.75rem; padding:2px 8px;">Play White</button>
-            <button id="claim-black-btn" type="button" style="font-size:0.75rem; padding:2px 8px;">Play Black</button>
-            <button id="leave-seat-btn" type="button" class="hidden" style="font-size:0.75rem; padding:2px 8px;">Leave Seat</button>
-            <span id="ping-badge" style="font-size:0.72rem; padding:2px 6px; border-radius:4px; background:#f1f5f9; color:#64748b; font-weight:600;" title="Network Latency">--ms</span>
-        </div>
     </div>
+    </header>
+    <main id="workspace" class="workspace" tabindex="-1">
     <div id="game-container">
         <div id="eval-bar-container" role="progressbar" aria-label="Engine Evaluation" aria-valuenow="50" aria-valuemin="0" aria-valuemax="100">
             <div id="eval-bar-fill"></div>
@@ -788,7 +909,7 @@
         <div id="material-advantage">Material even</div>
         <div id="multipv-container">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                <span style="font-weight: bold; font-size: 0.85rem;">Engine Analysis</span>
+                <span style="font-weight: 600; font-size: 0.85rem;">Position analysis</span>
                 <select id="multipv-select" aria-label="Engine lines count" style="font-size: 0.8rem; padding: 2px 4px; border-radius: 4px;">
                     <option value="1">1 Line</option>
                     <option value="2">2 Lines</option>
@@ -796,9 +917,22 @@
                 </select>
             </div>
             <div id="multipv-lines" style="font-size: 0.82rem;"></div>
+            <p class="supporting-copy">Experimental local engine. Suggestions are approximate and may include illegal moves.</p>
         </div>
     </div>
-    <div id="status-panel">
+    <section id="status-panel" aria-label="Game controls">
+        <p class="section-label">Your board</p>
+        <div class="room-line">
+        <span id="room-badge" style="margin-left: 8px; font-size: 0.85rem; font-weight: bold; background: #e2e8f0; padding: 2px 8px; border-radius: 4px;">Room: default</span>
+        <button id="copy-room-link" type="button" style="font-size: 0.8rem; padding: 2px 6px;">Copy Room Link</button>
+        </div>
+        <div id="seat-bar" style="display:inline-flex; align-items:center; gap:6px; margin-left:12px;">
+            <span id="seat-badge" style="font-size:0.75rem; padding:2px 6px; border-radius:4px; background:#e2e8f0; font-weight:600;">Unseated</span>
+            <button id="claim-white-btn" type="button" style="font-size:0.75rem; padding:2px 8px;">Play White</button>
+            <button id="claim-black-btn" type="button" style="font-size:0.75rem; padding:2px 8px;">Play Black</button>
+            <button id="leave-seat-btn" type="button" class="hidden" style="font-size:0.75rem; padding:2px 8px;">Leave Seat</button>
+            <span id="ping-badge" style="font-size:0.72rem; padding:2px 6px; border-radius:4px; background:#f1f5f9; color:#64748b; font-weight:600;" title="Network Latency">--ms</span>
+        </div>
         <p id="board-instructions" class="visually-hidden">Use the arrow keys to move between squares. Press Enter or Space to select a piece or move it.</p>
         <div id="info">Turn: White</div>
         <div id="status" aria-live="polite">Status: Ongoing</div>
@@ -807,22 +941,25 @@
         <button id="retry-command" class="hidden" type="button">Retry last action</button>
         <div id="command-controls">
             <button id="new-game" type="button">New Game</button>
+            <button id="game-review-btn" type="button">Game Review</button>
+            <button id="game-archive-btn" type="button">Game Archive</button>
             <button id="copy-pgn" type="button">Copy PGN</button>
             <button id="flip-board" type="button">Flip</button>
             <button id="resign" type="button">Resign</button>
             <button id="offer-draw" type="button">Draw</button>
             <button id="undo" type="button">Undo</button>
-            <button id="game-review-btn" type="button">Game Review</button>
-            <button id="game-archive-btn" type="button">Game Archive</button>
         </div>
-    </div>
+    </section>
     <div id="history-container">
+        <div class="history-heading"><h2>Move history</h2>
         <div id="scrubber-controls" aria-label="Game history scrubber">
             <button id="scrub-start" type="button" aria-label="First move" title="First move (|<<)">|&lt;</button>
             <button id="scrub-prev" type="button" aria-label="Previous move" title="Previous move (<)">&lt;</button>
             <button id="scrub-next" type="button" aria-label="Next move" title="Next move (>)">&gt;</button>
             <button id="scrub-end" type="button" aria-label="Last move" title="Last move (>>|)">&gt;|</button>
         </div>
+        </div>
+        <div class="history-scroll">
         <table>
             <thead>
                 <tr>
@@ -833,11 +970,14 @@
             </thead>
             <tbody id="history-body"></tbody>
         </table>
+        </div>
+        <p class="empty-history">Your moves will appear here. Select a piece to begin.</p>
         <div id="review-panel" class="hidden">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                <h3 style="margin: 0; font-size: 0.95rem;">Game Review &amp; Accuracy</h3>
-                <button id="close-review" type="button" style="padding: 2px 8px; font-size: 0.8rem; cursor: pointer;">✕</button>
+                <h3 style="margin: 0; font-size: 0.95rem;">Experimental game review</h3>
+                <button id="close-review" type="button" aria-label="Close game review" style="padding: 2px 8px; font-size: 0.8rem; cursor: pointer;">✕</button>
             </div>
+            <p class="supporting-copy">Preview only: missing evaluations are currently estimated. These scores are not a reliable measure of playing strength.</p>
             <div id="accuracy-bars">
                 <div class="accuracy-card">
                     <div style="font-size: 0.75rem; color: #64748b;">White Accuracy</div>
@@ -856,6 +996,7 @@
                 <span id="opening-eco-badge" class="eco-badge">A00</span>
             </div>
             <div id="opening-name" class="opening-title">Starting Position</div>
+            <p class="supporting-copy">Bundled opening guide. Percentages below are illustrative, not verified game statistics.</p>
             <div id="opening-stats-bar" class="stats-bar">
                 <div id="stat-white" class="stat-white" style="width: 38%;" title="White wins: 38%">38%</div>
                 <div id="stat-draw" class="stat-draw" style="width: 34%;" title="Draws: 34%">34%</div>
@@ -863,13 +1004,15 @@
             </div>
             <div id="opening-moves-list" class="moves-recommendations"></div>
         </div>
-        <div id="graph-panel">
-            <div style="font-weight: 600; font-size: 0.85rem; margin-bottom: 4px;">Advantage Graph</div>
+        <details id="graph-panel">
+            <summary>Evaluation history</summary>
             <div id="eval-graph-container">
                 <svg id="eval-graph-svg" viewBox="0 0 400 80" preserveAspectRatio="none"></svg>
             </div>
         </div>
     </div>
+    </main>
+    <footer class="app-footer"><span>Local chess. Your games stay on this server.</span><span>Arrow keys to navigate · Enter to select · Right-click to annotate</span></footer>
     <div id="promo-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="promo-title" aria-describedby="promo-description">
         <div id="promo-box">
             <div id="promo-title">Promote pawn</div>

@@ -902,11 +902,23 @@ function jumpToPly(ply) {
       ? { from: liveHistory[liveHistory.length - 1].slice(0, 2), to: liveHistory[liveHistory.length - 1].slice(2, 4) }
       : null;
     renderBoard(lastM);
+    if (evalWorker) {
+      const fen = getFenFromStateOrBoard(previousRefereeState || { board: liveBoard });
+      if (fen) {
+        try { evalWorker.postMessage({ type: 'position', fen }); } catch (e) {}
+      }
+    }
   } else if (historyPositions[viewedPly]) {
     const snap = historyPositions[viewedPly];
     board = snap.board;
     turn = snap.turn || snap.board.turn;
     renderBoard(snap.lastMove);
+    if (evalWorker) {
+      const fen = getFenFromStateOrBoard({ board: snap.board });
+      if (fen) {
+        try { evalWorker.postMessage({ type: 'position', fen }); } catch (e) {}
+      }
+    }
   }
 
   updateHistoryUI();
@@ -1108,6 +1120,59 @@ function refereeStateValidationError(state) {
   return null;
 }
 
+let evalWorker = null;
+let currentMultiPvCount = 3;
+let engineMultiPvLines = [];
+
+function getFenFromStateOrBoard(state) {
+  if (state && typeof state.fen === 'string' && state.fen) return state.fen;
+  const boardObj = (state && state.board) || (state && state.pieces ? state : board);
+  if (!boardObj || !boardObj.pieces) return null;
+  if (typeof boardToFen === 'function') {
+    try { return boardToFen(boardObj); } catch (e) {}
+  }
+  const rules = typeof RulesEngine !== 'undefined' ? RulesEngine : null;
+  if (rules && typeof rules.boardToFen === 'function') {
+    try { return rules.boardToFen(boardObj); } catch (e) {}
+  }
+  try {
+    const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+    const rows = [];
+    for (let r = 8; r >= 1; r--) {
+      let empty = 0;
+      let row = '';
+      for (let f = 0; f < 8; f++) {
+        const sq = `${files[f]}${r}`;
+        const p = boardObj.pieces[sq];
+        if (!p) {
+          empty++;
+        } else {
+          if (empty > 0) { row += empty; empty = 0; }
+          const char = p.color === 'white' ? p.type.toUpperCase() : p.type.toLowerCase();
+          row += char;
+        }
+      }
+      if (empty > 0) row += empty;
+      rows.push(row);
+    }
+    const turnStr = (boardObj.turn || 'white') === 'black' ? 'b' : 'w';
+    let castling = '';
+    if (boardObj.castling) {
+      if (boardObj.castling.white && boardObj.castling.white.kingSide) castling += 'K';
+      if (boardObj.castling.white && boardObj.castling.white.queenSide) castling += 'Q';
+      if (boardObj.castling.black && boardObj.castling.black.kingSide) castling += 'k';
+      if (boardObj.castling.black && boardObj.castling.black.queenSide) castling += 'q';
+    }
+    if (!castling) castling = '-';
+    const ep = boardObj.enPassant || '-';
+    const hm = boardObj.halfmoveClock || 0;
+    const fm = boardObj.fullmoveNumber || 1;
+    return `${rows.join('/')} ${turnStr} ${castling} ${ep} ${hm} ${fm}`;
+  } catch (e) {
+    return null;
+  }
+}
+
 function applyRefereeState(state) {
   const validationError = refereeStateValidationError(state);
   if (validationError) {
@@ -1208,20 +1273,18 @@ function applyRefereeState(state) {
   previousBoard = cloneBoardSnapshot(board);
   renderTimers();
   renderCaptured();
-  if (evalWorker && state.board) {
-    try {
-      const fen = boardToFen(state.board);
-      evalWorker.postMessage({ type: 'position', fen });
-    } catch (e) {}
+  if (evalWorker) {
+    const currentFen = getFenFromStateOrBoard(state);
+    if (currentFen) {
+      try {
+        evalWorker.postMessage({ type: 'position', fen: currentFen });
+      } catch (e) {}
+    }
   }
   updateStatus();
   updateHistoryUI();
   return true;
 }
-
-let evalWorker = null;
-let currentMultiPvCount = 3;
-let engineMultiPvLines = [];
 
 function updateEvalUI(data) {
   if (!data) return;
@@ -1501,8 +1564,9 @@ function setMultiPvCount(count) {
   if (evalWorker) {
     try {
       evalWorker.postMessage({ type: 'uci', command: `setoption name MultiPV value ${currentMultiPvCount}` });
-      if (board) {
-        evalWorker.postMessage({ type: 'position', fen: boardToFen(board) });
+      const fen = getFenFromStateOrBoard(previousRefereeState || (board ? { board } : null));
+      if (fen) {
+        evalWorker.postMessage({ type: 'position', fen });
       }
     } catch (e) {}
   }
@@ -1525,6 +1589,10 @@ function initEvalWorker() {
         updateEvalUI(event.data);
       };
       evalWorker.postMessage({ type: 'uci', command: `setoption name MultiPV value ${currentMultiPvCount}` });
+      const initialFen = getFenFromStateOrBoard(previousRefereeState || (board ? { board } : null));
+      if (initialFen) {
+        evalWorker.postMessage({ type: 'position', fen: initialFen });
+      }
     } catch (e) {}
   }
 }
@@ -1974,6 +2042,9 @@ function renderReviewPanel() {
   const panel = document.getElementById('review-panel');
   if (!panel || !latestGameReview) return;
   panel.classList.remove('hidden');
+  try {
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) {}
 
   const whiteAccEl = document.getElementById('white-accuracy');
   const blackAccEl = document.getElementById('black-accuracy');
