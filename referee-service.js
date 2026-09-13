@@ -38,18 +38,24 @@ function ensureClocks(s) {
   if (!Object.prototype.hasOwnProperty.call(s, 'draw')) s.draw = false;
   if (!Object.prototype.hasOwnProperty.call(s, 'drawReason')) s.drawReason = null;
   if (!Object.prototype.hasOwnProperty.call(s, 'drawOffer')) s.drawOffer = null;
+  if (!Object.prototype.hasOwnProperty.call(s, 'rematchOffer')) s.rematchOffer = null;
+  if (!s.timeControl) {
+    s.timeControl = { preset: 'rapid_10_15', baseSeconds: CLOCK_START_SECONDS, incrementSeconds: CLOCK_INCREMENT_SECONDS, name: 'Rapid 10+15' };
+  }
   if (typeof s.fen !== 'string' || !s.fen) {
     try { s.fen = rulesEngine.boardToFen(s.board); } catch (_) { s.fen = null; }
   }
   return s;
 }
 
-function newGame() {
+function newGame(timeControl) {
   const board = engine.createInitialBoard();
+  const tc = timeControl || { preset: 'rapid_10_15', baseSeconds: CLOCK_START_SECONDS, incrementSeconds: CLOCK_INCREMENT_SECONDS, name: 'Rapid 10+15' };
+  const baseSec = typeof tc.baseSeconds === 'number' ? tc.baseSeconds : CLOCK_START_SECONDS;
   const s = {
     board,
     history: [],
-    clocks: defaultClocks(),
+    clocks: { white: baseSec, black: baseSec },
     elapsed: defaultElapsed(),
     moveStartTs: 0,
     moveTimestamps: [],
@@ -59,6 +65,10 @@ function newGame() {
     flagged: null,
     resigned: null,
     draw: false,
+    drawReason: null,
+    drawOffer: null,
+    rematchOffer: null,
+    timeControl: tc,
     fen: rulesEngine.boardToFen(board)
   };
   return s;
@@ -232,7 +242,9 @@ function applyMove(s, moveStr, moveTs, lagCompMs = 0) {
   s.board = engine.makeMove(s.board, from, to, promo);
   s.history.push(moveStr);
   s.moveTimestamps.push(typeof moveTs === 'number' ? moveTs : 0);
-  s.clocks[turn] = Math.min(CLOCK_START_SECONDS, s.clocks[turn] + CLOCK_INCREMENT_SECONDS);
+  const baseSec = (s.timeControl && typeof s.timeControl.baseSeconds === 'number') ? s.timeControl.baseSeconds : CLOCK_START_SECONDS;
+  const incSec = (s.timeControl && typeof s.timeControl.incrementSeconds === 'number') ? s.timeControl.incrementSeconds : CLOCK_INCREMENT_SECONDS;
+  s.clocks[turn] = Math.min(baseSec + 3600, s.clocks[turn] + incSec);
   s.moveStartTs = typeof moveTs === 'number' ? moveTs : 0;
   const nextTurn = s.board.turn;
   const status = engine.getGameStatus(s.board, nextTurn);
@@ -264,6 +276,8 @@ function stateView(s) {
     draw: s.draw,
     drawReason: s.drawReason || null,
     drawOffer: s.drawOffer || null,
+    rematchOffer: s.rematchOffer || null,
+    timeControl: s.timeControl || null,
     clocks: s.clocks,
     elapsed: s.elapsed,
     board: renderAscii(s.board),
@@ -408,6 +422,30 @@ class RefereeService {
           this.state.drawOffer = null;
         }
       }
+    } else if (entry.type === 'time-control') {
+      const tc = entry.args || {};
+      if (typeof tc.baseSeconds === 'number') {
+        this.timeControl = {
+          preset: tc.preset || 'custom',
+          baseSeconds: tc.baseSeconds,
+          incrementSeconds: tc.incrementSeconds || 0,
+          name: tc.name || `${Math.floor(tc.baseSeconds / 60)}+${tc.incrementSeconds || 0}`
+        };
+        this.state.timeControl = this.timeControl;
+        if (this.state.history.length === 0) {
+          this.state.clocks = { white: tc.baseSeconds, black: tc.baseSeconds };
+        }
+      }
+    } else if (entry.type === 'rematch') {
+      const args = entry.args || {};
+      if (args.action === 'offer') {
+        this.state.rematchOffer = args.color;
+      } else if (args.action === 'decline') {
+        this.state.rematchOffer = null;
+      } else if (args.action === 'accept') {
+        this.state.rematchOffer = null;
+        this.state = newGame(this.timeControl);
+      }
     }
   }
 
@@ -470,6 +508,8 @@ class RefereeService {
       case 'undo': return this._cmdUndo();
       case 'resign': return this._cmdResign((command.args || {}).color);
       case 'draw': return this._cmdDraw(command.args || {});
+      case 'time-control': return this._cmdSetTimeControl(command.args || {});
+      case 'rematch': return this._cmdRematch(command.args || {});
       case 'reset': return this._cmdReset();
       default: return { ok: false, error: 'unknown command type: ' + command.type, httpStatus: 400 };
     }
@@ -606,9 +646,71 @@ class RefereeService {
   }
 
   _cmdReset() {
-    this.state = newGame();
+    const tc = this.timeControl || (this.state && this.state.timeControl);
+    this.state = newGame(tc);
     this._journalAndSnapshot('reset', {});
     return { ok: true, reset: true };
+  }
+
+  _cmdSetTimeControl(args = {}) {
+    if (typeof args.baseSeconds !== 'number') {
+      return { ok: false, error: 'invalid baseSeconds', httpStatus: 400 };
+    }
+    const tc = {
+      preset: args.preset || 'custom',
+      baseSeconds: Math.max(10, Math.min(7200, args.baseSeconds)),
+      incrementSeconds: Math.max(0, Math.min(60, args.incrementSeconds || 0)),
+      name: args.name || `${Math.floor(args.baseSeconds / 60)}+${args.incrementSeconds || 0}`
+    };
+    this.timeControl = tc;
+    this.state.timeControl = tc;
+    if (this.state.history.length === 0) {
+      this.state.clocks = { white: tc.baseSeconds, black: tc.baseSeconds };
+    }
+    this._journalAndSnapshot('time-control', tc);
+    return { ok: true, timeControl: tc, clocks: this.state.clocks };
+  }
+
+  _cmdRematch(args = {}) {
+    const action = args.action;
+    if (!['offer', 'accept', 'decline'].includes(action)) {
+      return { ok: false, error: 'invalid rematch action', httpStatus: 400 };
+    }
+    if (action === 'offer') {
+      this.state.rematchOffer = args.color || 'player';
+      this._journalAndSnapshot('rematch', { action, color: args.color });
+      return { ok: true, action, rematchOffer: this.state.rematchOffer };
+    }
+    if (action === 'decline') {
+      this.state.rematchOffer = null;
+      this._journalAndSnapshot('rematch', { action });
+      return { ok: true, action, rematchOffer: null };
+    }
+    if (action === 'accept') {
+      this.state.rematchOffer = null;
+      const tc = this.timeControl || (this.state && this.state.timeControl);
+      this.state = newGame(tc);
+      this._journalAndSnapshot('rematch', { action });
+      return { ok: true, action, reset: true };
+    }
+    return { ok: false, error: 'unhandled rematch action', httpStatus: 400 };
+  }
+
+  addChatMessage(sender, text) {
+    if (!this.chat) this.chat = [];
+    const msg = {
+      id: Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+      sender: String(sender || 'Player').slice(0, 32),
+      text: String(text || '').slice(0, 500),
+      timestamp: Date.now()
+    };
+    this.chat.push(msg);
+    if (this.chat.length > 100) this.chat.shift();
+    return msg;
+  }
+
+  getChatMessages() {
+    return this.chat || [];
   }
 
   checkFlagFall(now = Date.now()) {
