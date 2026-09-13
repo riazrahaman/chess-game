@@ -605,6 +605,101 @@
             border: 1px solid #e2e8f0;
             text-align: center;
         }
+        #explorer-panel, #graph-panel {
+            background: #f8fafc;
+            border: 1px solid var(--board-border, #ccc);
+            border-radius: 6px;
+            padding: 10px;
+            margin-top: 8px;
+        }
+        .eco-badge {
+            display: inline-block;
+            background: #0284c7;
+            color: white;
+            font-size: 0.72rem;
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        .opening-title {
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: #1e293b;
+            margin: 4px 0;
+        }
+        .stats-bar {
+            display: flex;
+            height: 18px;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 6px 0;
+            font-size: 0.7rem;
+            line-height: 18px;
+            font-weight: bold;
+            text-align: center;
+        }
+        .stat-white { background: #f1f5f9; color: #0f172a; border-right: 1px solid #cbd5e1; }
+        .stat-draw { background: #94a3b8; color: white; }
+        .stat-black { background: #1e293b; color: white; border-left: 1px solid #334155; }
+        .moves-recommendations {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-top: 6px;
+            font-size: 0.75rem;
+        }
+        .rec-move-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: white;
+            padding: 3px 6px;
+            border-radius: 4px;
+            border: 1px solid #e2e8f0;
+        }
+        .rec-move-san {
+            font-weight: bold;
+            color: #2563eb;
+        }
+        #eval-graph-container {
+            width: 100%;
+            height: 80px;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            position: relative;
+            overflow: hidden;
+            margin-top: 4px;
+        }
+        #eval-graph-svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        .graph-zero-line {
+            stroke: #cbd5e1;
+            stroke-dasharray: 3 3;
+            stroke-width: 1;
+        }
+        .graph-curve {
+            fill: none;
+            stroke: #2563eb;
+            stroke-width: 2;
+        }
+        .graph-dot {
+            fill: #2563eb;
+            stroke: white;
+            stroke-width: 1.5;
+            cursor: pointer;
+        }
+        .graph-dot:hover {
+            fill: #ef4444;
+        }
+        .graph-active-indicator {
+            stroke: #ef4444;
+            stroke-width: 1.5;
+            stroke-dasharray: 2 2;
+        }
     </style>
 </head>
 <body>
@@ -712,6 +807,25 @@
             </div>
             <div id="classification-summary"></div>
         </div>
+        <div id="explorer-panel">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-weight: 600; font-size: 0.85rem;">Opening Explorer</span>
+                <span id="opening-eco-badge" class="eco-badge">A00</span>
+            </div>
+            <div id="opening-name" class="opening-title">Starting Position</div>
+            <div id="opening-stats-bar" class="stats-bar">
+                <div id="stat-white" class="stat-white" style="width: 38%;" title="White wins: 38%">38%</div>
+                <div id="stat-draw" class="stat-draw" style="width: 34%;" title="Draws: 34%">34%</div>
+                <div id="stat-black" class="stat-black" style="width: 28%;" title="Black wins: 28%">28%</div>
+            </div>
+            <div id="opening-moves-list" class="moves-recommendations"></div>
+        </div>
+        <div id="graph-panel">
+            <div style="font-weight: 600; font-size: 0.85rem; margin-bottom: 4px;">Advantage Graph</div>
+            <div id="eval-graph-container">
+                <svg id="eval-graph-svg" viewBox="0 0 400 80" preserveAspectRatio="none"></svg>
+            </div>
+        </div>
     </div>
     <div id="promo-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="promo-title" aria-describedby="promo-description">
         <div id="promo-box">
@@ -736,6 +850,7 @@
     <script src="engine.js"></script>
     <script src="pieces.js"></script>
     <script src="move-review.js"></script>
+    <script src="openings-db.js"></script>
     <script src="ui.js"></script>
 </body>
 </html>

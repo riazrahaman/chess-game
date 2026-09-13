@@ -979,6 +979,8 @@ function updateHistoryUI() {
     historyBody.appendChild(row);
   });
   updateScrubberButtons();
+  updateOpeningExplorerUI();
+  updateEvalGraphUI();
 }
 
 function renderGameEnd(state) {
@@ -1208,6 +1210,7 @@ function updateEvalUI(data) {
   } else if (svg && data.bestMove && typeof data.bestMove === 'string' && data.bestMove.length >= 4) {
     drawAnalysisArrow(svg, data.bestMove.slice(0, 2), data.bestMove.slice(2, 4));
   }
+  updateEvalGraphUI();
 }
 
 // Phase 1: Interactive Right-Click Annotation Canvas (Arrows and Circles)
@@ -1965,6 +1968,114 @@ if (closeReviewButton) closeReviewButton.onclick = () => {
   if (panel) panel.classList.add('hidden');
 };
 
+function updateOpeningExplorerUI() {
+  const openingsModule = (typeof window !== 'undefined' && window.Openings) || (typeof Openings !== 'undefined' ? Openings : null);
+  if (!openingsModule) return;
+
+  const currentPly = viewedPly === null ? (liveHistory ? liveHistory.length : 0) : viewedPly;
+  const movesSlice = liveHistory ? liveHistory.slice(0, currentPly) : [];
+  const opening = openingsModule.findOpening(movesSlice);
+
+  const ecoBadge = document.getElementById('opening-eco-badge');
+  const nameEl = document.getElementById('opening-name');
+  const wStat = document.getElementById('stat-white');
+  const dStat = document.getElementById('stat-draw');
+  const bStat = document.getElementById('stat-black');
+  const movesListEl = document.getElementById('opening-moves-list');
+
+  if (ecoBadge) ecoBadge.textContent = opening.eco || 'A00';
+  if (nameEl) nameEl.textContent = opening.name || 'Starting Position';
+
+  if (wStat && dStat && bStat && opening.stats) {
+    wStat.style.width = `${opening.stats.white}%`;
+    wStat.textContent = `${opening.stats.white}%`;
+    wStat.title = `White wins: ${opening.stats.white}%`;
+
+    dStat.style.width = `${opening.stats.draw}%`;
+    dStat.textContent = `${opening.stats.draw}%`;
+    dStat.title = `Draws: ${opening.stats.draw}%`;
+
+    bStat.style.width = `${opening.stats.black}%`;
+    bStat.textContent = `${opening.stats.black}%`;
+    bStat.title = `Black wins: ${opening.stats.black}%`;
+  }
+
+  if (movesListEl) {
+    movesListEl.innerHTML = '';
+    if (opening.popularMoves && Array.isArray(opening.popularMoves)) {
+      opening.popularMoves.slice(0, 4).forEach(pm => {
+        const item = document.createElement('div');
+        item.className = 'rec-move-item';
+        item.innerHTML = `
+          <div>
+            <span class="rec-move-san">${pm.san || pm.uci}</span>
+            <span style="color:#64748b; margin-left:6px;">${pm.name || ''}</span>
+          </div>
+          <span style="font-weight:600; color:#475569;">${pm.frequency}%</span>
+        `;
+        movesListEl.appendChild(item);
+      });
+    }
+  }
+}
+
+function updateEvalGraphUI() {
+  const openingsModule = (typeof window !== 'undefined' && window.Openings) || (typeof Openings !== 'undefined' ? Openings : null);
+  const svg = document.getElementById('eval-graph-svg');
+  if (!svg || !openingsModule) return;
+
+  const currentPly = viewedPly === null ? (liveHistory ? liveHistory.length : 0) : viewedPly;
+  const graphData = openingsModule.generateEvalGraphData(evalHistory || [0], 400, 80);
+
+  svg.innerHTML = '';
+
+  // Zero-center line
+  const zeroLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  zeroLine.setAttribute('x1', '0');
+  zeroLine.setAttribute('y1', String(graphData.zeroY));
+  zeroLine.setAttribute('x2', '400');
+  zeroLine.setAttribute('y2', String(graphData.zeroY));
+  zeroLine.setAttribute('class', 'graph-zero-line');
+  svg.appendChild(zeroLine);
+
+  // Curve path
+  if (graphData.pathData) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', graphData.pathData);
+    path.setAttribute('class', 'graph-curve');
+    svg.appendChild(path);
+  }
+
+  // Active ply indicator
+  if (graphData.points && graphData.points[currentPly]) {
+    const activePt = graphData.points[currentPly];
+    const indLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    indLine.setAttribute('x1', String(activePt.x));
+    indLine.setAttribute('y1', '0');
+    indLine.setAttribute('x2', String(activePt.x));
+    indLine.setAttribute('y2', '80');
+    indLine.setAttribute('class', 'graph-active-indicator');
+    svg.appendChild(indLine);
+  }
+
+  // Dots for each ply
+  if (graphData.points) {
+    graphData.points.forEach(pt => {
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', String(pt.x));
+      circle.setAttribute('cy', String(pt.y));
+      circle.setAttribute('r', pt.ply === currentPly ? '4' : '2.5');
+      circle.setAttribute('class', 'graph-dot');
+      circle.dataset.ply = String(pt.ply);
+      circle.onclick = () => jumpToPly(pt.ply);
+      const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      title.textContent = `Ply ${pt.ply}: ${pt.cp >= 0 ? '+' : ''}${(pt.cp / 100).toFixed(2)}`;
+      circle.appendChild(title);
+      svg.appendChild(circle);
+    });
+  }
+}
+
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('keydown', handleGlobalScrubberKeydown);
   window.jumpToPly = jumpToPly;
@@ -1983,6 +2094,8 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.getLatestGameReview = () => latestGameReview;
   window.getEvalHistory = () => evalHistory;
   window.setEvalHistory = (h) => { evalHistory = h; };
+  window.updateOpeningExplorerUI = updateOpeningExplorerUI;
+  window.updateEvalGraphUI = updateEvalGraphUI;
 }
 
 initGame();
