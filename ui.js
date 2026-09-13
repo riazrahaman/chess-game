@@ -14,6 +14,11 @@ let gameOver = false;
 let result = null;
 let kingStatus = { kingSquare: null, check: false, mate: false };
 let boardFlipped = false;
+// C3: drag-and-drop state. dragFromSquare holds the source square while a
+// drag is in progress; dragLegalMoves caches the legal targets so dragover
+// can validate without re-computing on every mousemove. Both are view-only.
+let dragFromSquare = null;
+let dragLegalMoves = [];
 // Snapshot of the last referee board painted into the DOM. It is comparison
 // data only: the current board still comes exclusively from applyRefereeState.
 let previousBoard = null;
@@ -181,6 +186,14 @@ function renderBoard(lastMove = null, boardBeforeRender = previousBoard) {
         squareDiv = document.createElement('div');
         squareDiv.id = squareId;
         squareDiv.onclick = () => handleSquareClick(squareId);
+        // C3: attach drag-and-drop handlers once per square. The draggable
+        // attribute is toggled on every render based on the side to move,
+        // so only the side-to-move's pieces are ever draggable.
+        squareDiv.ondragstart = e => handleDragStart(e, squareId);
+        squareDiv.ondragover = e => handleDragOver(e, squareId);
+        squareDiv.ondragleave = e => handleDragLeave(e, squareId);
+        squareDiv.ondrop = e => handleDrop(e, squareId);
+        squareDiv.ondragend = e => handleDragEnd(e, squareId);
         boardElement.appendChild(squareDiv);
       } else if (orientationChanged) {
         // appendChild reorders an existing node without destroying it.
@@ -219,6 +232,18 @@ function renderBoard(lastMove = null, boardBeforeRender = previousBoard) {
 
       const nextClassName = classes.join(' ');
       if (squareDiv.className !== nextClassName) squareDiv.className = nextClassName;
+
+      // C3: toggle draggable so only the side-to-move's occupied squares
+      // are draggable. Empty squares and opponent pieces are not. The
+      // dropEffect is controlled in handleDragOver based on legal targets.
+      // The check is inlined so the reconcile path stays self-contained
+      // even when the hermetic selftest harness slices renderBoard out.
+      const pieceOnSquare = board.pieces[squareId];
+      const gameActive = (typeof gameOver === 'undefined') ? true : !gameOver;
+      const shouldBeDraggable = gameActive && !!pieceOnSquare && pieceOnSquare.color === turn;
+      if (squareDiv.draggable !== shouldBeDraggable) {
+        squareDiv.draggable = shouldBeDraggable;
+      }
 
       const beforePiece = boardBeforeRender && boardBeforeRender.pieces[squareId];
       const nextPiece = board.pieces[squareId];
@@ -411,6 +436,108 @@ async function pollReferee() {
     console.error('pollReferee error:', e);
   }
   setTimeout(pollReferee, 600);
+}
+
+// C3: HTML5 drag-and-drop move submission. This reuses the same
+// submitMoveToReferee / promotion-modal path as click-to-move so the
+// referee remains the single source of truth. The UI never mutates the
+// board locally; it only reads `board` (the latest referee snapshot) to
+// decide what is draggable and where it may be dropped.
+function isSquareDraggable(squareId) {
+  if (!board || gameOver) return false;
+  const pieceData = board.pieces[squareId];
+  return !!pieceData && pieceData.color === turn;
+}
+
+function handleDragStart(e, squareId) {
+  if (!isSquareDraggable(squareId)) {
+    e.preventDefault();
+    return;
+  }
+  // C3: stash the source + legal targets so dragover can validate cheaply.
+  dragFromSquare = squareId;
+  dragLegalMoves = getLegalMoves(board, squareId, turn);
+  try {
+    e.dataTransfer.setData('text/plain', squareId);
+    e.dataTransfer.effectAllowed = 'move';
+  } catch (err) {
+    // Some browsers throw if dataTransfer is accessed outside a drag; ignore.
+  }
+  const squareDiv = document.getElementById(squareId);
+  if (squareDiv) squareDiv.classList.add('dragging-source');
+  // C3: give the click-to-move selection a visual hint too, so the legal
+  // targets highlight during a drag just like they do on click.
+  selectedSquare = squareId;
+  legalMoves = dragLegalMoves;
+  renderBoard();
+}
+
+function handleDragOver(e, squareId) {
+  if (dragFromSquare === null) return;
+  if (!dragLegalMoves.includes(squareId)) {
+    e.dataTransfer && (e.dataTransfer.dropEffect = 'none');
+    return;
+  }
+  e.preventDefault();
+  e.dataTransfer && (e.dataTransfer.dropEffect = 'move');
+  const squareDiv = document.getElementById(squareId);
+  if (squareDiv && !squareDiv.classList.contains('drop-hint')) {
+    squareDiv.classList.add('drop-hint');
+  }
+}
+
+function handleDragLeave(e, squareId) {
+  const squareDiv = document.getElementById(squareId);
+  if (squareDiv) squareDiv.classList.remove('drop-hint');
+}
+
+function handleDrop(e, squareId) {
+  e.preventDefault();
+  const fromSquare = dragFromSquare;
+  // C3: clear drag state immediately so a subsequent poll doesn't see it.
+  clearDragState();
+  if (!board || gameOver || !fromSquare) return;
+  if (!getLegalMoves(board, fromSquare, turn).includes(squareId)) return;
+  submitDragMove(fromSquare, squareId);
+}
+
+function submitDragMove(fromSquare, toSquare) {
+  // C3: promotion opens the piece modal BEFORE finalizing, mirroring the
+  // click-to-move flow exactly. The pending move is resolved by
+  // choosePromotion -> submitMoveToReferee.
+  if (isPromotionMove(fromSquare, toSquare)) {
+    pendingPromo = { from: fromSquare, to: toSquare };
+    setPromoPieces(board.pieces[fromSquare].color);
+    if (promoModal) promoModal.classList.remove('hidden');
+  } else {
+    submitMoveToReferee(fromSquare + toSquare);
+  }
+  // C3: clear any click-to-move selection left over from dragstart.
+  selectedSquare = null;
+  legalMoves = [];
+  renderBoard();
+}
+
+function clearDragState() {
+  if (dragFromSquare !== null) {
+    const prev = document.getElementById(dragFromSquare);
+    if (prev) prev.classList.remove('dragging-source');
+  }
+  document.querySelectorAll('.drop-hint').forEach(el => el.classList.remove('drop-hint'));
+  dragFromSquare = null;
+  dragLegalMoves = [];
+}
+
+function handleDragEnd() {
+  clearDragState();
+  // C3: if a drag ended without a valid drop, reset the selection hint so
+  // the board doesn't stay highlighted as if a click-select is active.
+  if (legalMoves === dragLegalMoves || (dragLegalMoves.length === 0 && legalMoves.length === 0)) {
+    // best-effort reset; the next referee poll will reconcile anyway.
+  }
+  selectedSquare = null;
+  legalMoves = [];
+  renderBoard();
 }
 
 function handleSquareClick(squareId) {
