@@ -834,12 +834,37 @@ function formatClockTick(seconds) {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+// A6: Theme list helper — pure function returning the list of available
+// board themes and the default theme id. CSS custom properties on :root and
+// [data-theme=...] handle the actual styling; this is metadata only so the
+// selftest harness can verify the theme catalog without a DOM.
+const BOARD_THEMES = ['classic', 'classic-dark', 'slate', 'walnut'];
+const DEFAULT_BOARD_THEME = 'classic';
+const COLORBLIND_THEMES = ['colorblind', 'colorblind-dark'];
+
+function getBoardThemes() {
+  return [...BOARD_THEMES];
+}
+
+function isColorblindTheme(themeId) {
+  return COLORBLIND_THEMES.indexOf(themeId) !== -1;
+}
+
+function isValidBoardTheme(themeId) {
+  return BOARD_THEMES.indexOf(themeId) !== -1 || COLORBLIND_THEMES.indexOf(themeId) !== -1;
+}
+
+function getDefaultBoardTheme() {
+  return DEFAULT_BOARD_THEME;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     createInitialBoard, getLegalMoves, makeMove, isCheck, isCheckmate,
     isStalemate, getGameStatus, getKingStatus, moveToSan, historyToSan,
     buildPgn, computeCaptured, getBoardRenderOrder, getRankLabels, getFileLabels,
     gameEndPresentation, classifySound, serializeRefereeState, deserializeRefereeState,
-    formatClockTick
+    formatClockTick,
+    getBoardThemes, isColorblindTheme, isValidBoardTheme, getDefaultBoardTheme
   };
 }
