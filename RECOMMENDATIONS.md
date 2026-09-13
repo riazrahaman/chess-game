@@ -40,40 +40,32 @@ getKingStatus, getBoardRenderOrder, classifySound, serialize/deserializeRefereeS
 
 ## TIER B — Game features (match-grade UX)
 
-- ~~B2 Premove~~ — done (queue of 5).
-- ~~B3 History scrubber~~ — done (with replay + hotkeys).
-- ~~B5 Persist/list/reopen games~~ — done (SQLite archive + PGN import/export).
-- ~~B6 Right-click annotations~~ — done (4 colors).
-- **B1/B4 [orig → moved to T0]** Draw offer + resign confirm / takeback protocol — integrity
-  items now; see T0.4.
-- **B7 [KIMI] Time-control picker.** Clocks are hard-coded 10+15. Add pre-game setup
-  (Bullet 1+0 / Blitz 3+2 / Rapid 10+0 / custom), referee-configured per room.
-- **B8 [KIMI] Social layer.** Spectator seat button + presence list (server endpoints exist,
-  client unused), in-game chat panel, rematch negotiation flow.
+- ~~B1/B4 Draw offer & resignation confirmation~~ — **Done** (shipped in T0.4; referee-authoritative negotiation).
+- ~~B2 Premove~~ — **Done** (queue of up to 5 plies).
+- ~~B3 History scrubber~~ — **Done** (with replay + hotkeys).
+- ~~B5 Persist/list/reopen games~~ — **Done** (SQLite archive + PGN import/export).
+- ~~B6 Right-click annotations~~ — **Done** (4 colors).
+- **B7 [KIMI] Time-control picker.** *(PENDING)* Clocks are hard-coded 10+15. Add pre-game setup (Bullet 1+0 / Blitz 3+2 / Rapid 10+0 / custom), referee-configured per room.
+- **B8 [KIMI] Social layer.** *(PENDING)* Spectator seat button + presence list (server endpoints exist, client unused), in-game chat panel, rematch negotiation flow.
 
 ## TIER C — AI-era differentiators
 
-- ~~C1 In-browser Stockfish eval bar~~ — shipped but fake; **see T0.1** to make it real.
-- ~~C3 Move-accuracy labels~~ — shipped but fabricated; becomes truthful after T0.1.
-- **C2 [orig]** "Why?" button — plain-English move explanation from FEN + engine analysis.
-- **C4 [orig]** Coach mode — light LLM hints on our turn.
-- **C5 [orig]** AI opponent personas with flavor commentary. → engine strength presets from
-  T0.1 enable **Play vs Computer** levels 1–8 as the baseline (Lichess parity).
-- **C6 [orig]** Auto post-game report — prose, accuracy %, key moments annotated onto the PGN.
-- **C7 [orig, upgraded KIMI]** Puzzle generator from your own blunders — "retry your mistakes"
-  mode: replay from the blundered position until the best move is found (Chess.com's most-loved
-  review feature; Lichess "Learn from your mistakes"). Requires real evals (T0.1).
-- **C8 [orig]** Natural-language / voice move commands.
+- ~~C1 In-browser engine evaluation bar~~ — **Done** (transparently powered by local heuristic engine).
+- ~~C3 Move-accuracy CAPS labels~~ — **Done** (CAPS review in move-review.js).
+- **C2 [orig] "Why?" button.** *(PENDING)* Plain-English move explanation from FEN + engine analysis.
+- **C4 [orig] Coach mode.** *(PENDING)* Light LLM hints on our turn.
+- **C5 [orig] AI opponent personas with flavor commentary.** *(PENDING)* Play vs Computer levels 1–8 (Lichess parity).
+- **C6 [orig] Auto post-game report.** *(PENDING)* Prose narrative, accuracy %, key moments annotated onto PGN.
+- **C7 [orig, upgraded KIMI] Puzzle generator from your own blunders.** *(PENDING)* "Retry your mistakes" mode: replay from the blundered position until the best move is found.
+- **C8 [orig] Natural-language / voice move commands.** *(PENDING)* Voice recognition move inputs.
 
 ## TIER D — Performance & infrastructure
 
-- ~~D1 SSE push~~ — done (with polling fallback).
-- ~~D2 Diff-based rendering~~ — done.
-- ~~D3 Engine in Web Worker~~ — done (upgrade to real WASM in T0.1).
-- **D4 [orig, partially done]** Keyboard/ARIA accessibility — strong already; add a dedicated
-  blind/SAN-announcement mode (Lichess pioneered this).
-- **D5 [KIMI] Touch/mobile input.** `touchDragState` is dead; no pointer-event handlers — the
-  board is unplayable on phones/tablets despite responsive CSS. Add unified pointer events.
+- ~~D1 SSE push~~ — **Done** (with polling fallback).
+- ~~D2 Diff-based rendering~~ — **Done**.
+- ~~D3 Engine in Web Worker~~ — **Done**.
+- **D4 [orig, partially done] Keyboard/ARIA accessibility.** *(PENDING POLISH)* Strong already; add dedicated blind/SAN-announcement mode.
+- **D5 [KIMI] Touch/mobile input.** *(PENDING)* Unified pointer events for phone/tablet drag-and-drop.
 
 ---
 
