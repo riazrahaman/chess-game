@@ -33,11 +33,18 @@ let retryCommand = null;
 // can validate without re-computing on every mousemove. Both are view-only.
 let dragFromSquare = null;
 let dragLegalMoves = [];
+let premoveQueue = [];
+const MAX_PREMOVES = 5;
 let queuedPremove = null;
 let touchDragState = null;
 
 function clearPremove() {
+  premoveQueue = [];
   queuedPremove = null;
+}
+
+function getPremoveQueue() {
+  return premoveQueue;
 }
 // Snapshot of the last referee board painted into the DOM. It is comparison
 // data only: the current board still comes exclusively from applyRefereeState.
@@ -598,7 +605,12 @@ function renderBoard(lastMove = null, boardBeforeRender = previousBoard) {
         }
       }
 
-      if (typeof queuedPremove !== 'undefined' && queuedPremove) {
+      if (typeof premoveQueue !== 'undefined' && premoveQueue && premoveQueue.length > 0) {
+        premoveQueue.forEach(pm => {
+          if (pm.from === squareId) classes.push('premove-source');
+          if (pm.to === squareId) classes.push('premove-target');
+        });
+      } else if (typeof queuedPremove !== 'undefined' && queuedPremove) {
         if (queuedPremove.from === squareId) classes.push('premove-source');
         if (queuedPremove.to === squareId) classes.push('premove-target');
       }
@@ -903,7 +915,26 @@ function applyRefereeState(state) {
   }
   const boardBeforeRender = previousBoard;
   board = state.board;
-  if (typeof queuedPremove !== 'undefined' && queuedPremove && state.board) {
+  if (typeof premoveQueue !== 'undefined' && premoveQueue && premoveQueue.length > 0 && state.board) {
+    const nextPremove = premoveQueue[0];
+    if (state.board.turn === nextPremove.color) {
+      premoveQueue.shift();
+      queuedPremove = premoveQueue[0] || null;
+      const pFrom = nextPremove.from;
+      const pTo = nextPremove.to;
+      const pColor = nextPremove.color;
+      const validLegal = getLegalMoves(state.board, pFrom, pColor);
+      if (validLegal.includes(pTo)) {
+        if (isPromotionMove(pFrom, pTo)) {
+          openPromotionDialog(pFrom, pTo, pColor);
+        } else {
+          submitMoveToReferee(pFrom + pTo);
+        }
+      } else {
+        clearPremove();
+      }
+    }
+  } else if (typeof queuedPremove !== 'undefined' && queuedPremove && state.board) {
     if (state.board.turn === queuedPremove.color) {
       const pFrom = queuedPremove.from;
       const pTo = queuedPremove.to;
@@ -1208,7 +1239,14 @@ function handleSquareClick(squareId) {
         submitMoveToReferee(fromSquare + squareId);
       }
     } else {
-      queuedPremove = { from: fromSquare, to: squareId, color: pieceColor };
+      if (typeof premoveQueue !== 'undefined') {
+        if (premoveQueue.length < MAX_PREMOVES) {
+          premoveQueue.push({ from: fromSquare, to: squareId, color: pieceColor });
+          queuedPremove = premoveQueue[0];
+        }
+      } else {
+        queuedPremove = { from: fromSquare, to: squareId, color: pieceColor };
+      }
     }
     renderBoard();
     return;
@@ -1224,7 +1262,6 @@ function handleSquareClick(squareId) {
       renderBoard();
       return;
     } else {
-      clearPremove();
       selectedSquare = squareId;
       legalMoves = getLegalMoves(board, squareId, pTurn);
       renderBoard();
