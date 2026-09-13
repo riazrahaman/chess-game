@@ -154,6 +154,7 @@ const ALLOWED_FILES = new Set([
   'stockfish-worker.js',
   'stockfish.js',
   'stockfish.wasm',
+  'move-review.js',
   'CBURNETT-LICENSE.txt'
 ]);
 

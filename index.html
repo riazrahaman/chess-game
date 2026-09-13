@@ -568,6 +568,43 @@
         .multipv-rank-1 { border-left: 3px solid #2563eb; }
         .multipv-rank-2 { border-left: 3px solid #10b981; }
         .multipv-rank-3 { border-left: 3px solid #f59e0b; }
+        .move-badge {
+            display: inline-block;
+            font-size: 0.68rem;
+            font-weight: bold;
+            padding: 1px 3px;
+            border-radius: 3px;
+            margin-left: 3px;
+            vertical-align: middle;
+        }
+        .badge-brilliant { background: #1baca6; color: white; }
+        .badge-great { background: #5c8bb0; color: white; }
+        .badge-best { background: #96bc4b; color: white; }
+        .badge-excellent { background: #96bc4b; color: white; }
+        .badge-good { background: #7ea43b; color: white; }
+        .badge-inaccuracy { background: #e69d00; color: white; }
+        .badge-mistake { background: #e58f2a; color: white; }
+        .badge-blunder { background: #ca3431; color: white; }
+        #review-panel {
+            background: #f8fafc;
+            border: 1px solid var(--board-border, #ccc);
+            border-radius: 6px;
+            padding: 10px;
+            margin-top: 8px;
+        }
+        #accuracy-bars {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .accuracy-card {
+            flex: 1;
+            background: white;
+            padding: 6px 8px;
+            border-radius: 4px;
+            border: 1px solid #e2e8f0;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
@@ -638,6 +675,7 @@
             <button id="resign" type="button">Resign</button>
             <button id="offer-draw" type="button">Draw</button>
             <button id="undo" type="button">Undo</button>
+            <button id="game-review-btn" type="button">Game Review</button>
         </div>
     </div>
     <div id="history-container">
@@ -657,6 +695,23 @@
             </thead>
             <tbody id="history-body"></tbody>
         </table>
+        <div id="review-panel" class="hidden">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <h3 style="margin: 0; font-size: 0.95rem;">Game Review &amp; Accuracy</h3>
+                <button id="close-review" type="button" style="padding: 2px 8px; font-size: 0.8rem; cursor: pointer;">✕</button>
+            </div>
+            <div id="accuracy-bars">
+                <div class="accuracy-card">
+                    <div style="font-size: 0.75rem; color: #64748b;">White Accuracy</div>
+                    <div id="white-accuracy" style="font-size: 1.3rem; font-weight: bold; color: #2563eb;">--%</div>
+                </div>
+                <div class="accuracy-card">
+                    <div style="font-size: 0.75rem; color: #64748b;">Black Accuracy</div>
+                    <div id="black-accuracy" style="font-size: 1.3rem; font-weight: bold; color: #1e293b;">--%</div>
+                </div>
+            </div>
+            <div id="classification-summary"></div>
+        </div>
     </div>
     <div id="promo-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="promo-title" aria-describedby="promo-description">
         <div id="promo-box">
@@ -680,6 +735,7 @@
     </div>
     <script src="engine.js"></script>
     <script src="pieces.js"></script>
+    <script src="move-review.js"></script>
     <script src="ui.js"></script>
 </body>
 </html>
