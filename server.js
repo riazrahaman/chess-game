@@ -68,16 +68,21 @@ function computeRoomStateHash(roomId = 'default') {
 }
 
 function readRoomStateJson(roomId = 'default') {
+  try {
+    const ref = referee.getReferee(roomId);
+    if (ref) {
+      const flagResult = ref.checkFlagFall();
+      if (flagResult && flagResult.flagged) {
+        broadcastRoomStateToSSEClients(roomId);
+      }
+      return ref.getState();
+    }
+  } catch (_) {}
   const file = getRoomStateFile(roomId);
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (e) {
-    try {
-      const ref = referee.getReferee(roomId);
-      return ref ? ref.getState() : null;
-    } catch (_) {
-      return null;
-    }
+    return null;
   }
 }
 
@@ -448,12 +453,30 @@ function handleResignEndpoint(req, res, roomId = 'default') {
   });
 }
 
-function handleDrawEndpoint(req, res, roomId = 'default') {
-  handleQueueCommand(req, res, 'draw', (parsed) => ({
-    args: {},
-    cmdId: parsed.id !== undefined ? parsed.id : null,
-    expectedRevision: parsed.expectedRevision !== undefined ? Number(parsed.expectedRevision) : undefined
-  }), roomId);
+function handleDrawEndpoint(req, res, roomId = 'default', explicitAction = null) {
+  handleQueueCommand(req, res, 'draw', (parsed, req, authCheck) => {
+    const action = explicitAction || parsed.action || null;
+    const color = parsed.color || (authCheck && authCheck.role && authCheck.role !== 'unseated' ? authCheck.role : null);
+    const isSeated = !!(authCheck && authCheck.role && authCheck.role !== 'unseated');
+    return {
+      args: { action, color, isSeated },
+      cmdId: parsed.id !== undefined ? parsed.id : null,
+      expectedRevision: parsed.expectedRevision !== undefined ? Number(parsed.expectedRevision) : undefined
+    };
+  }, roomId);
+}
+
+function handleFlagEndpoint(req, res, roomId = 'default') {
+  const query = new URL(req.url, 'http://127.0.0.1').searchParams;
+  const targetRoom = query.get('room') || roomId || 'default';
+  const ref = referee.getReferee(targetRoom);
+  const result = ref.checkFlagFall();
+  if (result.flagged) {
+    broadcastRoomStateToSSEClients(targetRoom);
+    sendJson(res, 200, { ok: true, flagged: true, color: result.color, result: ref.state.result });
+  } else {
+    sendJson(res, 200, { ok: false, error: 'Clock has not expired', remainingClock: result.remainingClock });
+  }
 }
 
 function handleUndoEndpoint(req, res, roomId = 'default') {
@@ -634,6 +657,26 @@ function createServer() {
       }
       if (req.method === 'POST' && urlPath === '/api/draw') {
         handleDrawEndpoint(req, res, roomId);
+        return;
+      }
+      if (req.method === 'POST' && urlPath === '/api/draw/offer') {
+        handleDrawEndpoint(req, res, roomId, 'offer');
+        return;
+      }
+      if (req.method === 'POST' && urlPath === '/api/draw/accept') {
+        handleDrawEndpoint(req, res, roomId, 'accept');
+        return;
+      }
+      if (req.method === 'POST' && urlPath === '/api/draw/decline') {
+        handleDrawEndpoint(req, res, roomId, 'decline');
+        return;
+      }
+      if (req.method === 'POST' && (urlPath === '/api/draw-claim' || urlPath === '/api/draw/claim')) {
+        handleDrawEndpoint(req, res, roomId, 'claim');
+        return;
+      }
+      if ((req.method === 'POST' || req.method === 'GET') && urlPath === '/api/flag') {
+        handleFlagEndpoint(req, res, roomId);
         return;
       }
       if (req.method === 'POST' && urlPath === '/api/undo') {
