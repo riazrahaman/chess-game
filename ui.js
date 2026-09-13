@@ -724,6 +724,91 @@ function handleSquareClick(squareId) {
   renderBoard();
 }
 
+// A6: CSS-only theming system. Applies [data-theme] and [data-mode] on the
+// root element and persists preferences in localStorage (guarded try/catch).
+// This is purely presentational — no rendering logic, poll, or clock changes.
+const THEME_BOARD_KEY = 'chess.theme.board';
+const THEME_MODE_KEY = 'chess.theme.mode';
+const themeBoardSelect = document.getElementById('theme-board-select');
+const themeModeToggle = document.getElementById('theme-mode-toggle');
+
+function applyBoardTheme(themeId) {
+  if (!themeId || !isValidBoardTheme(themeId)) return;
+  try {
+    document.documentElement.setAttribute('data-theme', themeId);
+  } catch (e) {
+    // DOM may be unavailable in non-browser contexts
+  }
+}
+
+function applyDarkMode(isDark) {
+  try {
+    if (isDark) {
+      document.documentElement.setAttribute('data-mode', 'dark');
+    } else {
+      document.documentElement.removeAttribute('data-mode');
+    }
+  } catch (e) {
+    // DOM may be unavailable
+  }
+}
+
+function persistTheme(key, value) {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(key, value);
+    }
+  } catch (e) {
+    // Storage is optional; theme still applies for the session
+  }
+}
+
+function loadThemePreference(key, fallback) {
+  try {
+    if (typeof localStorage === 'undefined') return fallback;
+    const val = localStorage.getItem(key);
+    return val !== null ? val : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function updateModeToggleLabel(isDark) {
+  if (themeModeToggle) themeModeToggle.textContent = isDark ? 'Light mode' : 'Dark mode';
+}
+
+function initThemeBar() {
+  if (themeBoardSelect) {
+    const savedBoard = loadThemePreference(THEME_BOARD_KEY, getDefaultBoardTheme());
+    if (isValidBoardTheme(savedBoard)) {
+      themeBoardSelect.value = savedBoard;
+      applyBoardTheme(savedBoard);
+    } else {
+      applyBoardTheme(getDefaultBoardTheme());
+    }
+    themeBoardSelect.onchange = () => {
+      const val = themeBoardSelect.value;
+      applyBoardTheme(val);
+      persistTheme(THEME_BOARD_KEY, val);
+    };
+  }
+  if (themeModeToggle) {
+    const savedMode = loadThemePreference(THEME_MODE_KEY, 'light');
+    const isDark = savedMode === 'dark';
+    applyDarkMode(isDark);
+    updateModeToggleLabel(isDark);
+    themeModeToggle.onclick = () => {
+      const currentlyDark = document.documentElement.getAttribute('data-mode') === 'dark';
+      const nextDark = !currentlyDark;
+      applyDarkMode(nextDark);
+      updateModeToggleLabel(nextDark);
+      persistTheme(THEME_MODE_KEY, nextDark ? 'dark' : 'light');
+    };
+  }
+}
+
+initThemeBar();
+
 function initGame() {
   // Do not construct or reset a local board. The next referee poll supplies
   // every rendered game value, including the board and clocks.

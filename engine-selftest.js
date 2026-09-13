@@ -17,7 +17,11 @@ const {
   classifySound,
   serializeRefereeState,
   deserializeRefereeState,
-  formatClockTick
+  formatClockTick,
+  getBoardThemes,
+  isColorblindTheme,
+  isValidBoardTheme,
+  getDefaultBoardTheme
 } = require('./engine.js');
 
 let passed = 0;
@@ -784,6 +788,46 @@ runC3Transport().then(() => {
   assert(moveAfterDraw.ok === false && moveAfterDraw.error === 'game over',
     'E8: post-draw moves are rejected');
   refereeCli('reset');
+
+  // A6: Theme helper tests (pure functions, hermetic — no DOM required)
+  const themeList = getBoardThemes();
+  assert(Array.isArray(themeList) && themeList.length >= 4,
+    'A6: getBoardThemes returns an array with at least 4 board themes');
+  assert(themeList.indexOf('classic') !== -1,
+    'A6: getBoardThemes includes classic');
+  assert(themeList.indexOf('slate') !== -1,
+    'A6: getBoardThemes includes slate');
+  assert(themeList.indexOf('walnut') !== -1,
+    'A6: getBoardThemes includes walnut');
+  assert(getDefaultBoardTheme() === 'classic',
+    'A6: getDefaultBoardTheme returns classic');
+  assert(isValidBoardTheme('classic') === true,
+    'A6: isValidBoardTheme accepts classic');
+  assert(isValidBoardTheme('slate') === true,
+    'A6: isValidBoardTheme accepts slate');
+  assert(isValidBoardTheme('walnut') === true,
+    'A6: isValidBoardTheme accepts walnut');
+  assert(isValidBoardTheme('colorblind') === true,
+    'A6: isValidBoardTheme accepts colorblind');
+  assert(isValidBoardTheme('colorblind-dark') === true,
+    'A6: isValidBoardTheme accepts colorblind-dark');
+  assert(isValidBoardTheme('nonexistent') === false,
+    'A6: isValidBoardTheme rejects unknown theme');
+  assert(isValidBoardTheme('') === false,
+    'A6: isValidBoardTheme rejects empty string');
+  assert(isColorblindTheme('colorblind') === true,
+    'A6: isColorblindTheme identifies colorblind');
+  assert(isColorblindTheme('colorblind-dark') === true,
+    'A6: isColorblindTheme identifies colorblind-dark');
+  assert(isColorblindTheme('classic') === false,
+    'A6: isColorblindTheme rejects non-colorblind theme');
+  assert(isColorblindTheme('slate') === false,
+    'A6: isColorblindTheme rejects slate');
+  // Ensure theme list is a fresh copy (immutability)
+  const themeListCopy = getBoardThemes();
+  themeListCopy.push('injected');
+  assert(getBoardThemes().indexOf('injected') === -1,
+    'A6: getBoardThemes returns a fresh copy each call');
 
   console.log('\n--- Self-Test Summary ---');
   console.log(`Passed: ${passed}`);

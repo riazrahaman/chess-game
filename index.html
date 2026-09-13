@@ -5,12 +5,93 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chess UI</title>
     <style>
+        /* A6: Theme system — CSS custom properties on :root.
+           Default = current light look (no visual regression for existing users).
+           [data-theme=...] overrides square colors, background, panels, borders.
+           [data-mode=dark] switches the page-level dark palette. */
+        :root {
+            --bg-page: #f0f0f0;
+            --board-border: #333;
+            --sq-white: #eeeed2;
+            --sq-black: #769656;
+            --highlight: #f7f769;
+            --label-color: #333;
+            --panel-bg: white;
+            --panel-border: #ccc;
+            --panel-row-border: #ddd;
+            --modal-bg: white;
+            --modal-border: #333;
+            --card-bg: white;
+            --card-border: #333;
+            --text-color: inherit;
+            --timer-border: #333;
+            --active-timer-bg: #f7f769;
+            --active-timer-border: #ffcc00;
+            --drop-hint-bg: #bcd4ff;
+            --overlay-bg: rgba(17, 24, 39, 0.7);
+        }
+
+        /* ---- Dark mode ---- */
+        [data-mode="dark"] {
+            --bg-page: #1a1a2e;
+            --board-border: #0d0d1a;
+            --label-color: #ccc;
+            --panel-bg: #16213e;
+            --panel-border: #0d1b2a;
+            --panel-row-border: #1c2a4a;
+            --modal-bg: #16213e;
+            --modal-border: #456;
+            --card-bg: #16213e;
+            --card-border: #456;
+            --text-color: #e0e0e0;
+            --timer-border: #456;
+            --overlay-bg: rgba(5, 5, 15, 0.85);
+        }
+
+        /* ---- Board theme: classic-dark (lichess green, dark page pairing) ---- */
+        [data-theme="classic-dark"] {
+            --sq-white: #ebecd0;
+            --sq-black: #779556;
+            --highlight: #f6f669;
+        }
+
+        /* ---- Board theme: slate ---- */
+        [data-theme="slate"] {
+            --sq-white: #c8d2dc;
+            --sq-black: #6b7f8e;
+            --highlight: #ffd54f;
+        }
+
+        /* ---- Board theme: walnut ---- */
+        [data-theme="walnut"] {
+            --sq-white: #e8d5b7;
+            --sq-black: #8b5e3c;
+            --highlight: #f0d77a;
+        }
+
+        /* ---- Colorblind-safe palette (light) ---- */
+        [data-theme="colorblind"] {
+            --sq-white: #f2f2f2;
+            --sq-black: #b0b0b0;
+            --highlight: #ff8c00;
+            --board-border: #555;
+        }
+
+        /* ---- Colorblind-safe palette (dark) ---- */
+        [data-theme="colorblind-dark"] {
+            --sq-white: #2a2a2a;
+            --sq-black: #555555;
+            --highlight: #ff8c00;
+            --board-border: #444;
+        }
+
         body {
             font-family: sans-serif;
             display: flex;
             flex-direction: column;
             align-items: center;
-            background-color: #f0f0f0;
+            background-color: var(--bg-page);
+            color: var(--text-color);
         }
         #game-container {
             margin-top: 20px;
@@ -21,7 +102,7 @@
             aspect-ratio: 1;
             grid-template-columns: repeat(8, minmax(0, 1fr));
             grid-template-rows: repeat(8, minmax(0, 1fr));
-            border: 2px solid #333;
+            border: 2px solid var(--board-border);
         }
         .square {
             width: 100%;
@@ -53,9 +134,9 @@
             .piece-animating { transition: none !important; }
             .piece-captured { transition: none !important; }
         }
-        .white-sq { background-color: #eeeed2; }
-        .black-sq { background-color: #769656; }
-        .highlight { background-color: #f7f769 !important; }
+        .white-sq { background-color: var(--sq-white); }
+        .black-sq { background-color: var(--sq-black); }
+        .highlight { background-color: var(--highlight) !important; }
         .king-in-check, .king-mate {
             box-shadow: inset 0 0 0 4px #d97706, 0 0 10px rgba(217, 119, 6, 0.85);
         }
@@ -64,7 +145,7 @@
         }
         .drop-hint {
             box-shadow: inset 0 0 0 4px #2563eb, 0 0 12px rgba(37, 99, 235, 0.65);
-            background-color: #bcd4ff !important;
+            background-color: var(--drop-hint-bg) !important;
         }
         .dragging-source {
             opacity: 0.4;
@@ -82,7 +163,7 @@
             align-items: stretch;
         }
         #rank-labels, #file-labels {
-            color: #333;
+            color: var(--label-color);
             font-size: 0.8em;
             font-weight: bold;
             user-select: none;
@@ -111,13 +192,13 @@
         }
         .timer-badge {
             padding: 5px 10px;
-            border: 2px solid #333;
+            border: 2px solid var(--timer-border);
             border-radius: 4px;
             font-weight: bold;
         }
         .active-timer {
-            background-color: #f7f769;
-            border-color: #ffcc00;
+            background-color: var(--active-timer-bg);
+            border-color: var(--active-timer-border);
         }
         /* A8: low-time warning. Pulsing red style applied to the active
            player's clock when their interpolated time drops below 60s.
@@ -163,8 +244,9 @@
             max-height: 200px;
             overflow-y: auto;
             width: 300px;
-            border: 1px solid #ccc;
-            background: white;
+            border: 1px solid var(--panel-border);
+            background: var(--panel-bg);
+            color: var(--text-color);
         }
         table {
             width: 100%;
@@ -173,7 +255,7 @@
         th, td {
             padding: 5px;
             text-align: center;
-            border-bottom: 1px solid #ddd;
+            border-bottom: 1px solid var(--panel-row-border);
             font-size: 0.9em;
         }
         button {
@@ -194,11 +276,12 @@
             display: none;
         }
         #promo-box {
-            background: white;
-            border: 2px solid #333;
+            background: var(--modal-bg);
+            border: 2px solid var(--modal-border);
             border-radius: 6px;
             padding: 16px;
             text-align: center;
+            color: var(--text-color);
         }
         #promo-title {
             font-weight: bold;
@@ -225,7 +308,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            background: rgba(17, 24, 39, 0.7);
+            background: var(--overlay-bg);
             z-index: 200;
         }
         #game-end-overlay.hidden { display: none; }
@@ -233,15 +316,47 @@
             min-width: min(80vw, 360px);
             padding: 28px;
             text-align: center;
-            background: white;
-            border: 2px solid #333;
+            background: var(--card-bg);
+            border: 2px solid var(--card-border);
             border-radius: 8px;
+            color: var(--text-color);
         }
         #game-end-banner { margin: 0 0 18px; }
+
+        /* A6: Theme selector bar */
+        #theme-bar {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            margin-bottom: 12px;
+            font-size: 0.85em;
+        }
+        #theme-bar label {
+            font-weight: bold;
+        }
+        #theme-board-select, #theme-mode-toggle {
+            padding: 4px 8px;
+            font-size: 0.9em;
+        }
+        #theme-mode-toggle {
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
     <h1>Chess UI</h1>
+    <div id="theme-bar">
+        <label for="theme-board-select">Board:</label>
+        <select id="theme-board-select">
+            <option value="classic">Classic</option>
+            <option value="classic-dark">Classic Dark</option>
+            <option value="slate">Slate</option>
+            <option value="walnut">Walnut</option>
+            <option value="colorblind">Colorblind-Safe</option>
+            <option value="colorblind-dark">Colorblind-Safe (Dark)</option>
+        </select>
+        <button id="theme-mode-toggle">Dark mode</button>
+    </div>
     <div id="game-container">
         <div id="board-shell">
             <div id="rank-labels" aria-hidden="true"></div>
