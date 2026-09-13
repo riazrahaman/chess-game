@@ -547,9 +547,17 @@ function createReconcileHarness(initial) {
     selectedSquare: null,
     legalMoves: [],
     kingStatus: { kingSquare: null, check: false, mate: false },
-    pieceGlyphs: {
-      white: { k: 'K', q: 'Q', r: 'R', b: 'B', n: 'N', p: 'P' },
-      black: { k: 'k', q: 'q', r: 'r', b: 'b', n: 'n', p: 'p' }
+    renderPieceSvg(el, color, type) {
+      let child = el.firstElementChild;
+      if (!child) {
+        child = document.createElement('span');
+        child.className = 'chess-piece';
+        child.dataset.svg = color + type;
+        el.appendChild(child);
+      } else if (child.dataset.svg !== color + type) {
+        child.dataset.svg = color + type;
+      }
+      return child;
     },
     getKingStatus,
     getBoardRenderOrder,

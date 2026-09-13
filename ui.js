@@ -121,15 +121,14 @@ function createPieceElement(piece) {
   pieceElement.className = 'piece';
   pieceElement.dataset.type = piece.type;
   pieceElement.dataset.color = piece.color;
-  pieceElement.textContent = pieceGlyphs[piece.color][piece.type] || '';
+  renderPieceSvg(pieceElement, piece.color, piece.type);
   return pieceElement;
 }
 
 function updatePieceElement(pieceElement, piece) {
-  const glyph = pieceGlyphs[piece.color][piece.type] || '';
   if (pieceElement.dataset.type !== piece.type) pieceElement.dataset.type = piece.type;
   if (pieceElement.dataset.color !== piece.color) pieceElement.dataset.color = piece.color;
-  if (pieceElement.textContent !== glyph) pieceElement.textContent = glyph;
+  renderPieceSvg(pieceElement, piece.color, piece.type);
 }
 
 function reconcilePiece(squareDiv, nextPiece) {
