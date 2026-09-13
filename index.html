@@ -38,6 +38,21 @@
             height: 86%;
             pointer-events: none;
         }
+        .piece-animating {
+            transition: transform 200ms ease-out;
+            z-index: 10;
+            position: relative;
+        }
+        .piece-captured {
+            transition: opacity 200ms ease-out;
+            opacity: 0;
+            z-index: 5;
+            position: relative;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .piece-animating { transition: none !important; }
+            .piece-captured { transition: none !important; }
+        }
         .white-sq { background-color: #eeeed2; }
         .black-sq { background-color: #769656; }
         .highlight { background-color: #f7f769 !important; }
