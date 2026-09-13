@@ -367,6 +367,9 @@ execFileSync(process.execPath, [require('path').join(__dirname, 'pieces-selftest
 });
 const originalStateFile = fs.existsSync(stateFile) ? fs.readFileSync(stateFile) : null;
 process.env.CHESS_STATE_FILE = stateFile;
+// D1: short heartbeat/interval so SSE tests resolve quickly (hermetic).
+process.env.CHESS_SSE_HEARTBEAT_MS = '200';
+process.env.CHESS_SSE_WATCH_INTERVAL_MS = '50';
 process.once('exit', () => {
   if (originalStateFile === null) {
     try { fs.unlinkSync(stateFile); } catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -668,7 +671,103 @@ async function runC3Transport() {
     }
 }
 
-runC3Transport().then(() => {
+// D1: hermetic SSE transport tests. Creates a server with listen(0), connects
+// via raw http.request to /api/events, parses SSE frames, POSTs /api/move, and
+// asserts a state event arrives with the new referee snapshot. Also asserts a
+// heartbeat comment arrives within a short window (env-tuned heartbeat interval).
+async function runD1SSETransport() {
+  const http = require('http');
+  const { createServer, stopStateWatcher } = require('./server.js');
+  const server = createServer();
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const port = server.address().port;
+  try {
+    refereeCli('reset');
+
+    // Connect to SSE endpoint with raw http.request (no EventSource in Node).
+    let sseBuf = '';
+    const sseRes = await new Promise((resolve, reject) => {
+      const req = http.request({
+        host: '127.0.0.1', port, method: 'GET', path: '/api/events'
+      }, (res) => {
+        res.on('data', (chunk) => { sseBuf += chunk.toString(); });
+        resolve(res);
+      });
+      req.on('error', reject);
+      req.end();
+    });
+
+    // Wait for the initial state event (server pushes current state on connect).
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('initial SSE event timeout')), 5000);
+      const check = () => {
+        if (sseBuf.includes('event: state')) { clearTimeout(timeout); resolve(); return; }
+        setTimeout(check, 30);
+      };
+      check();
+    });
+    assert(true, 'D1: SSE endpoint sends initial state event on connection');
+
+    // POST a move and wait for the SSE event reflecting the new referee state.
+    sseBuf = '';
+    const moveResult = await httpMoveOverServer(server, 'e2e4');
+    assert(moveResult.ok === true && moveResult.applied === 'e2e4',
+      'D1: SSE test move e2e4 accepted by referee');
+
+    let sseStateEvent = null;
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('SSE move event timeout')), 5000);
+      const check = () => {
+        const frames = sseBuf.split('\n\n');
+        for (const frame of frames) {
+          if (frame.startsWith('event: state')) {
+            const dataLine = frame.split('\n').find(l => l.startsWith('data: '));
+            if (dataLine) {
+              try {
+                const data = JSON.parse(dataLine.slice(6));
+                if (data.history && data.history.includes('e2e4')) {
+                  sseStateEvent = data;
+                  clearTimeout(timeout);
+                  resolve();
+                  return;
+                }
+              } catch (e) { /* partial frame, keep waiting */ }
+            }
+          }
+        }
+        setTimeout(check, 30);
+      };
+      check();
+    });
+    assert(sseStateEvent !== null && sseStateEvent.history[0] === 'e2e4',
+      'D1: SSE pushes referee state event after move (history contains e2e4)');
+    assert(sseStateEvent.board && sseStateEvent.board.pieces.e2 === null &&
+      sseStateEvent.board.pieces.e4?.type === 'p' && sseStateEvent.board.pieces.e4?.color === 'white',
+      'D1: SSE state event carries the updated board (pawn on e4, e2 empty)');
+    assert(sseStateEvent.board.turn === 'black',
+      'D1: SSE state event carries the next turn from the referee');
+
+    // Heartbeat: with short CHESS_SSE_HEARTBEAT_MS, a heartbeat comment arrives.
+    sseBuf = '';
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('heartbeat timeout')), 3000);
+      const check = () => {
+        if (sseBuf.includes(': heartbeat')) { clearTimeout(timeout); resolve(); return; }
+        setTimeout(check, 30);
+      };
+      check();
+    });
+    assert(true, 'D1: SSE heartbeat comment arrives within timeout window');
+
+    sseRes.destroy();
+    refereeCli('reset');
+  } finally {
+    await new Promise(r => server.close(r));
+    stopStateWatcher();
+  }
+}
+
+runC3Transport().then(() => runD1SSETransport()).then(() => {
   // 15. C4 Referee timing and flagging — hermetic CLI tests with no network.
   refereeCli('reset');
   const timedStart = JSON.parse(require('fs').readFileSync(stateFile, 'utf8'));
