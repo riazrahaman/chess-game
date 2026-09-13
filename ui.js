@@ -21,6 +21,13 @@ let gameOver = false;
 let result = null;
 let kingStatus = { kingSquare: null, check: false, mate: false };
 let boardFlipped = false;
+// Gate 4 view state. Focus, dialogs, request progress, and connectivity are
+// presentation concerns only; none of these values can change chess state.
+let focusedSquareId = null;
+let modalReturnFocus = null;
+let gameEndReturnFocus = null;
+let commandPending = false;
+let retryCommand = null;
 // C3: drag-and-drop state. dragFromSquare holds the source square while a
 // drag is in progress; dragLegalMoves caches the legal targets so dragover
 // can validate without re-computing on every mousemove. Both are view-only.
@@ -54,6 +61,65 @@ const undoButton = document.getElementById('undo');
 const promoModal = document.getElementById('promo-modal');
 const promoButtons = document.querySelectorAll('.promo-btn');
 const promoCancel = document.getElementById('promo-cancel');
+const connectionStatusElement = document.getElementById('connection-status');
+const commandStatusElement = document.getElementById('command-status');
+const retryCommandButton = document.getElementById('retry-command');
+const commandButtons = Array.from(document.querySelectorAll('#command-controls button'));
+
+function setConnectionState(state, message) {
+  if (!connectionStatusElement) return;
+  connectionStatusElement.dataset.state = state;
+  connectionStatusElement.textContent = message;
+}
+
+function setCommandState(state, message, retry) {
+  commandPending = state === 'pending';
+  retryCommand = typeof retry === 'function' ? retry : null;
+  if (commandStatusElement) {
+    commandStatusElement.dataset.state = state;
+    commandStatusElement.textContent = message || '';
+  }
+  if (retryCommandButton) {
+    retryCommandButton.classList.toggle('hidden', !retryCommand);
+    retryCommandButton.disabled = commandPending;
+  }
+  commandButtons.forEach(button => { button.disabled = commandPending; });
+  if (boardElement && boardElement.setAttribute) {
+    boardElement.setAttribute('aria-busy', commandPending || !board ? 'true' : 'false');
+  }
+  document.querySelectorAll('.square').forEach(square => {
+    if (square.setAttribute) square.setAttribute('aria-disabled', commandPending || gameOver ? 'true' : 'false');
+  });
+}
+
+function readableError(error, fallback) {
+  const value = error && typeof error.message === 'string' ? error.message.trim() : '';
+  return value || fallback;
+}
+
+async function runRefereeCommand(label, request) {
+  if (commandPending) return false;
+  const retry = () => runRefereeCommand(label, request);
+  setCommandState('pending', `${label}…`, null);
+  try {
+    const response = await request();
+    let payload = null;
+    try { payload = await response.json(); } catch (e) { payload = null; }
+    if (!response.ok || (payload && payload.ok === false)) {
+      throw new Error(payload && payload.error ? payload.error : `referee returned ${response.status}`);
+    }
+    setCommandState('success', `${label} accepted. Waiting for referee update.`, null);
+    return true;
+  } catch (error) {
+    setCommandState('error', `${label} failed: ${readableError(error, 'connection error')}.`, retry);
+    return false;
+  }
+}
+
+if (retryCommandButton) retryCommandButton.onclick = () => {
+  const action = retryCommand;
+  if (action) action();
+};
 
 function formatTime(seconds) {
   const clamped = Math.max(0, Math.floor(seconds));
@@ -84,8 +150,14 @@ function renderTimers() {
   const whiteDisplay = (turn === 'white' && active !== null) ? active : whiteTime;
   const blackDisplay = (turn === 'black' && active !== null) ? active : blackTime;
 
-  if (timerWhite) timerWhite.textContent = `White: ${formatClockTick(whiteDisplay)}`;
-  if (timerBlack) timerBlack.textContent = `Black: ${formatClockTick(blackDisplay)}`;
+  if (timerWhite) {
+    timerWhite.textContent = `White: ${formatClockTick(whiteDisplay)}`;
+    timerWhite.setAttribute('aria-label', `White clock ${formatClockTick(whiteDisplay)}`);
+  }
+  if (timerBlack) {
+    timerBlack.textContent = `Black: ${formatClockTick(blackDisplay)}`;
+    timerBlack.setAttribute('aria-label', `Black clock ${formatClockTick(blackDisplay)}`);
+  }
 
   if (timerWhite) timerWhite.classList.toggle('active-timer', turn === 'white');
   if (timerBlack) timerBlack.classList.toggle('active-timer', turn === 'black');
@@ -158,6 +230,45 @@ function cloneBoardSnapshot(source) {
     pieces[squareId] = piece ? { type: piece.type, color: piece.color } : null;
   }
   return { pieces };
+}
+
+const PIECE_NAMES = { p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen', k: 'king' };
+
+function squareAccessibilityLabel(squareId, piece, options) {
+  const details = [squareId];
+  if (piece && PIECE_NAMES[piece.type] && (piece.color === 'white' || piece.color === 'black')) {
+    details.push(`${piece.color} ${PIECE_NAMES[piece.type]}`);
+  } else {
+    details.push('empty');
+  }
+  if (options.selected) details.push('selected');
+  if (options.legal) details.push(piece ? 'legal capture' : 'legal move');
+  if (options.check) details.push(options.mate ? 'checkmated king' : 'king in check');
+  if (options.lastMove) details.push('last move');
+  details.push(options.gameOver ? 'game over' : `${options.turn} to move`);
+  return details.join(', ');
+}
+
+function syncSquareAccessibility(squareDiv, squareId, visualIndex, piece, classes) {
+  if (!squareDiv || !squareDiv.setAttribute) return;
+  const selected = selectedSquare === squareId;
+  const legal = legalMoves.includes(squareId);
+  const check = kingStatus.kingSquare === squareId && kingStatus.check;
+  squareDiv.setAttribute('role', 'gridcell');
+  squareDiv.setAttribute('aria-rowindex', String(Math.floor(visualIndex / 8) + 1));
+  squareDiv.setAttribute('aria-colindex', String((visualIndex % 8) + 1));
+  squareDiv.setAttribute('aria-selected', selected ? 'true' : 'false');
+  squareDiv.setAttribute('aria-disabled', gameOver || commandPending ? 'true' : 'false');
+  squareDiv.setAttribute('aria-label', squareAccessibilityLabel(squareId, piece, {
+    selected,
+    legal,
+    check,
+    mate: kingStatus.mate,
+    lastMove: classes.includes('last-move'),
+    gameOver,
+    turn
+  }));
+  squareDiv.tabIndex = focusedSquareId === squareId ? 0 : -1;
 }
 
 // A5: render-only move animation. Detects from->to by diffing prev/next
@@ -316,6 +427,9 @@ function renderBoard(lastMove = null, boardBeforeRender = previousBoard) {
   kingStatus = getKingStatus(board, turn);
   const renderOrder = getBoardRenderOrder(boardFlipped);
   const orientationChanged = renderedBoardFlipped !== boardFlipped;
+  if (typeof focusedSquareId !== 'undefined' && (!focusedSquareId || !renderOrder.includes(focusedSquareId))) {
+    focusedSquareId = renderOrder[0];
+  }
   if (orientationChanged) renderCoordinates();
 
   renderOrder.forEach(squareId => {
@@ -323,7 +437,12 @@ function renderBoard(lastMove = null, boardBeforeRender = previousBoard) {
       if (!squareDiv) {
         squareDiv = document.createElement('div');
         squareDiv.id = squareId;
-        squareDiv.onclick = () => handleSquareClick(squareId);
+        squareDiv.onclick = () => {
+          setRovingSquare(squareId);
+          handleSquareClick(squareId);
+        };
+        squareDiv.onkeydown = event => handleSquareKeydown(event, squareId);
+        squareDiv.onfocus = () => setRovingSquare(squareId, false);
         // C3: attach drag-and-drop handlers once per square. The draggable
         // attribute is toggled on every render based on the side to move,
         // so only the side-to-move's pieces are ever draggable.
@@ -403,8 +522,53 @@ function renderBoard(lastMove = null, boardBeforeRender = previousBoard) {
       if (!piecesMatch(beforePiece, nextPiece) || !squareDiv.firstElementChild) {
         reconcilePiece(squareDiv, nextPiece);
       }
+      syncSquareAccessibility(squareDiv, squareId, renderOrder.indexOf(squareId), nextPiece, classes);
   });
   renderedBoardFlipped = boardFlipped;
+  if (boardElement && boardElement.setAttribute) {
+    boardElement.setAttribute('aria-busy', commandPending ? 'true' : 'false');
+    boardElement.setAttribute('aria-label', `Chess board, ${boardFlipped ? 'Black' : 'White'} orientation`);
+  }
+}
+
+function setRovingSquare(squareId, moveFocus = true) {
+  const order = getBoardRenderOrder(boardFlipped);
+  if (!order.includes(squareId)) return;
+  focusedSquareId = squareId;
+  order.forEach(id => {
+    const square = document.getElementById(id);
+    if (square) square.tabIndex = id === squareId ? 0 : -1;
+  });
+  const target = document.getElementById(squareId);
+  if (moveFocus && target && target.focus) target.focus();
+}
+
+function keyboardDestination(squareId, key) {
+  const order = getBoardRenderOrder(boardFlipped);
+  const index = order.indexOf(squareId);
+  if (index < 0) return squareId;
+  const row = Math.floor(index / 8);
+  const col = index % 8;
+  if (key === 'ArrowLeft') return order[row * 8 + Math.max(0, col - 1)];
+  if (key === 'ArrowRight') return order[row * 8 + Math.min(7, col + 1)];
+  if (key === 'ArrowUp') return order[Math.max(0, row - 1) * 8 + col];
+  if (key === 'ArrowDown') return order[Math.min(7, row + 1) * 8 + col];
+  if (key === 'Home') return order[row * 8];
+  if (key === 'End') return order[row * 8 + 7];
+  return squareId;
+}
+
+function handleSquareKeydown(event, squareId) {
+  if (!event) return;
+  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
+    event.preventDefault();
+    setRovingSquare(keyboardDestination(squareId, event.key));
+    return;
+  }
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    if (!commandPending) handleSquareClick(squareId);
+  }
 }
 
 // C2: promotion modal flow. The pending move {from, to} is held while the
@@ -425,9 +589,36 @@ function setPromoPieces(color) {
   });
 }
 
+function trapDialogFocus(event, controls) {
+  if (!event || event.key !== 'Tab' || controls.length === 0) return;
+  const first = controls[0];
+  const last = controls[controls.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function openPromotionDialog(from, to, color) {
+  pendingPromo = { from, to };
+  modalReturnFocus = document.activeElement && document.activeElement.focus
+    ? document.activeElement
+    : document.getElementById(from);
+  setPromoPieces(color);
+  if (promoModal) promoModal.classList.remove('hidden');
+  const firstButton = promoButtons[0];
+  if (firstButton && firstButton.focus) firstButton.focus();
+}
+
 function closePromoModal() {
   if (promoModal) promoModal.classList.add('hidden');
   pendingPromo = null;
+  const returnTarget = modalReturnFocus;
+  modalReturnFocus = null;
+  if (returnTarget && returnTarget.focus) returnTarget.focus();
 }
 
 function choosePromotion(piece) {
@@ -442,24 +633,24 @@ promoButtons.forEach(btn => {
 });
 if (promoCancel) promoCancel.onclick = () => closePromoModal();
 if (promoModal) promoModal.onclick = e => { if (e.target === promoModal) closePromoModal(); };
+if (promoModal) promoModal.onkeydown = event => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closePromoModal();
+    return;
+  }
+  trapDialogFocus(event, [...promoButtons, promoCancel].filter(Boolean));
+};
 
 // C2: submit a move through the referee; the confirmed move string (with
 // promo suffix when applicable) is validated server-side and lands in
 // .referee-state.json. The poll picks it up and re-renders from that truth.
 async function submitMoveToReferee(moveStr) {
-  try {
-    const res = await fetch('/api/move', {
+  return runRefereeCommand('Submitting move', () => fetch('/api/move', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ move: moveStr })
-    });
-    const result = await res.json();
-    if (!result.ok) {
-      console.warn('referee rejected move:', result.error);
-    }
-  } catch (e) {
-    console.error('submitMoveToReferee error:', e);
-  }
+    }));
 }
 
 function updateStatus() {
@@ -487,9 +678,31 @@ function updateHistoryUI() {
 function renderGameEnd(state) {
   const presentation = gameEndPresentation(state);
   if (!gameEndOverlay) return;
+  const wasHidden = gameEndOverlay.classList.contains('hidden');
   gameEndOverlay.classList.toggle('hidden', !presentation);
-  if (presentation && gameEndBanner) gameEndBanner.textContent = presentation.banner;
+  if (presentation && gameEndBanner) {
+    gameEndBanner.textContent = presentation.banner;
+    if (wasHidden) {
+      gameEndReturnFocus = document.activeElement && document.activeElement.focus
+        ? document.activeElement
+        : null;
+      if (rematchButton && rematchButton.focus) rematchButton.focus();
+    }
+  } else if (!wasHidden && gameEndReturnFocus) {
+    gameEndReturnFocus.focus();
+    gameEndReturnFocus = null;
+  }
 }
+
+if (gameEndOverlay) gameEndOverlay.onkeydown = event => {
+  if (event.key === 'Escape') {
+    // A terminal result cannot be dismissed independently of referee state.
+    event.preventDefault();
+    if (rematchButton && rematchButton.focus) rematchButton.focus();
+    return;
+  }
+  trapDialogFocus(event, rematchButton ? [rematchButton] : []);
+};
 
 function cacheRefereeState(state) {
   try {
@@ -511,12 +724,46 @@ function restoreCachedRefereeState() {
   }
 }
 
+function refereeStateValidationError(state) {
+  if (!state || typeof state !== 'object') return 'snapshot is not an object';
+  if (!state.board || typeof state.board !== 'object' || !state.board.pieces ||
+      typeof state.board.pieces !== 'object') return 'board is missing';
+  if (state.board.turn !== 'white' && state.board.turn !== 'black') return 'turn is invalid';
+  const validTypes = ['p', 'n', 'b', 'r', 'q', 'k'];
+  for (const square of getBoardRenderOrder(false)) {
+    if (!Object.prototype.hasOwnProperty.call(state.board.pieces, square)) return `square ${square} is missing`;
+    const piece = state.board.pieces[square];
+    if (piece !== null && (!piece || !validTypes.includes(piece.type) ||
+        (piece.color !== 'white' && piece.color !== 'black'))) return `square ${square} is invalid`;
+  }
+  if (state.history !== undefined && (!Array.isArray(state.history) ||
+      state.history.some(move => typeof move !== 'string' || !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(move)))) {
+    return 'history is invalid';
+  }
+  if (state.clocks !== undefined && (!state.clocks ||
+      !Number.isFinite(state.clocks.white) || !Number.isFinite(state.clocks.black) ||
+      state.clocks.white < 0 || state.clocks.black < 0)) return 'clocks are invalid';
+  try {
+    historyToSan(state.history || []);
+    getKingStatus(state.board, state.board.turn);
+  } catch (error) {
+    return 'board or history cannot be rendered';
+  }
+  return null;
+}
+
 function applyRefereeState(state) {
+  const validationError = refereeStateValidationError(state);
+  if (validationError) {
+    setConnectionState('reconnecting', `Invalid referee data (${validationError}). Waiting for a valid update…`);
+    return false;
+  }
   const nextTurn = state.board ? state.board.turn : 'white';
   turn = nextTurn;
   refereeStatus = state.status || getGameStatus(state.board, nextTurn);
   gameOver = state.gameOver === true;
   result = state.result || null;
+  if (pendingPromo) closePromoModal();
   renderGameEnd(state);
   if (state.clocks && typeof state.clocks.white === 'number') {
     whiteTime = state.clocks.white;
@@ -553,6 +800,7 @@ function applyRefereeState(state) {
   renderCaptured();
   updateStatus();
   updateHistoryUI();
+  return true;
 }
 
 function pgnResultToken() {
@@ -579,6 +827,10 @@ async function pollReferee() {
     const stateJson = JSON.stringify(state);
 
     if (stateJson !== lastKnownStateJson) {
+      if (refereeStateValidationError(state)) {
+        applyRefereeState(state);
+        throw new Error('invalid referee snapshot');
+      }
       playSound(classifySound(previousRefereeState, state));
       previousRefereeState = state;
       cacheRefereeState(state);
@@ -589,8 +841,10 @@ async function pollReferee() {
       applyRefereeState(state);
       lastKnownStateJson = stateJson;
     }
+    setConnectionState('connected', 'Connected to referee.');
   } catch (e) {
     console.error('pollReferee error:', e);
+    setConnectionState('disconnected', 'Connection lost. Reconnecting…');
   }
   setTimeout(pollReferee, 600);
 }
@@ -599,8 +853,12 @@ async function pollReferee() {
 // applyRefereeState path as pollReferee — board/clocks/history come ONLY from
 // the referee. This is just a fresher transport; no local board mutation ever.
 function handleSSEStateEvent(state) {
+  if (refereeStateValidationError(state)) {
+    applyRefereeState(state);
+    return false;
+  }
   const stateJson = JSON.stringify(state);
-  if (stateJson === lastKnownStateJson) return;
+  if (stateJson === lastKnownStateJson) return true;
   playSound(classifySound(previousRefereeState, state));
   previousRefereeState = state;
   cacheRefereeState(state);
@@ -608,6 +866,8 @@ function handleSSEStateEvent(state) {
   legalMoves = [];
   applyRefereeState(state);
   lastKnownStateJson = stateJson;
+  setConnectionState('connected', 'Connected to referee.');
+  return true;
 }
 
 // D1: Prefer EventSource('/api/events') for near-instant referee-state push.
@@ -619,6 +879,7 @@ function startSSE() {
   sseStarted = true;
   try {
     sseEventSource = new EventSource('/api/events');
+    sseEventSource.onopen = () => setConnectionState('connected', 'Connected to referee.');
     sseEventSource.addEventListener('state', (event) => {
       try {
         const state = JSON.parse(event.data);
@@ -629,10 +890,12 @@ function startSSE() {
     });
     sseEventSource.onerror = (e) => {
       console.warn('SSE connection error; pollReferee fallback remains active');
+      setConnectionState('reconnecting', 'Live updates interrupted. Reconnecting; polling remains active…');
     };
   } catch (e) {
     console.warn('EventSource unavailable; falling back to polling only');
     sseEventSource = null;
+    setConnectionState('reconnecting', 'Live updates unavailable. Polling referee…');
   }
 }
 
@@ -642,7 +905,7 @@ function startSSE() {
 // board locally; it only reads `board` (the latest referee snapshot) to
 // decide what is draggable and where it may be dropped.
 function isSquareDraggable(squareId) {
-  if (!board || gameOver) return false;
+  if (!board || gameOver || commandPending) return false;
   const pieceData = board.pieces[squareId];
   return !!pieceData && pieceData.color === turn;
 }
@@ -704,9 +967,7 @@ function submitDragMove(fromSquare, toSquare) {
   // click-to-move flow exactly. The pending move is resolved by
   // choosePromotion -> submitMoveToReferee.
   if (isPromotionMove(fromSquare, toSquare)) {
-    pendingPromo = { from: fromSquare, to: toSquare };
-    setPromoPieces(board.pieces[fromSquare].color);
-    if (promoModal) promoModal.classList.remove('hidden');
+    openPromotionDialog(fromSquare, toSquare, board.pieces[fromSquare].color);
   } else {
     submitMoveToReferee(fromSquare + toSquare);
   }
@@ -740,7 +1001,7 @@ function handleDragEnd() {
 
 function handleSquareClick(squareId) {
   // Until a referee snapshot exists, there is no board for the UI to act on.
-  if (!board || gameOver) return;
+  if (!board || gameOver || commandPending) return;
 
   if (legalMoves.includes(squareId)) {
     const fromSquare = selectedSquare;
@@ -749,9 +1010,7 @@ function handleSquareClick(squareId) {
     // C2: promotion opens the piece modal BEFORE finalizing; every confirmed
     // move is submitted through the referee so the state file stays authoritative.
     if (isPromotionMove(fromSquare, squareId)) {
-      pendingPromo = { from: fromSquare, to: squareId };
-      setPromoPieces(board.pieces[fromSquare].color);
-      if (promoModal) promoModal.classList.remove('hidden');
+      openPromotionDialog(fromSquare, squareId, board.pieces[fromSquare].color);
     } else {
       submitMoveToReferee(fromSquare + squareId);
     }
@@ -888,13 +1147,11 @@ function initGame() {
 }
 
 async function resetReferee() {
-  try {
-    const response = await fetch('/api/reset', { method: 'POST' });
-    if (!response.ok) throw new Error('referee reset failed');
+  const accepted = await runRefereeCommand('Starting new game', () =>
+    fetch('/api/reset', { method: 'POST' }));
+  if (accepted) {
     // The board is still changed only by the subsequent referee poll.
     lastKnownStateJson = '';
-  } catch (e) {
-    console.error('resetReferee error:', e);
   }
 }
 if (newGameButton) newGameButton.onclick = resetReferee;
@@ -908,20 +1165,15 @@ if (flipBoardButton) flipBoardButton.onclick = () => {
 };
 const resignButton = document.getElementById('resign');
 if (resignButton) resignButton.onclick = async () => {
-  try {
-    await fetch(`/api/resign?${turn === 'white' ? 'w' : 'b'}`, { method: 'POST' });
-  } catch (e) { console.error('resign error:', e); }
+  await runRefereeCommand('Submitting resignation', () =>
+    fetch(`/api/resign?${turn === 'white' ? 'w' : 'b'}`, { method: 'POST' }));
 };
 const drawButton = document.getElementById('offer-draw');
 if (drawButton) drawButton.onclick = async () => {
-  try {
-    await fetch('/api/draw', { method: 'POST' });
-  } catch (e) { console.error('draw error:', e); }
+  await runRefereeCommand('Offering draw', () => fetch('/api/draw', { method: 'POST' }));
 };
 if (undoButton) undoButton.onclick = async () => {
-  try {
-    await fetch('/api/undo', { method: 'POST' });
-  } catch (e) { console.error('undo error:', e); }
+  await runRefereeCommand('Requesting undo', () => fetch('/api/undo', { method: 'POST' }));
 };
 
 initGame();
