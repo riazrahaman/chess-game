@@ -25,75 +25,145 @@ function getAllowedOrigins() {
   return DEFAULT_ALLOWED_ORIGINS;
 }
 
-// D1: SSE client registry. Each connected client holds its res object and a
-// per-connection heartbeat timer. A shared watcher (fs.watchFile) pushes state
-// JSON to every client whenever the referee-state file content hash changes.
-const sseClients = new Set();
-let lastStateHash = '';
-let watcherStarted = false;
-let watcherRef = null;
+// D1 & P3: Multi-tenant SSE client registry and file watchers per room.
+// Each connected client holds its res object and heartbeat timer.
+// State broadcast queues are isolated per room so room A events never leak to room B.
+const roomSseClients = new Map();
+const roomWatchers = new Map();
 
-function computeStateHash() {
+function extractRoomId(req) {
+  let roomId = null;
   try {
-    const raw = fs.readFileSync(STATE_FILE, 'utf8');
+    const urlObj = new URL(req.url, 'http://127.0.0.1');
+    const param = urlObj.searchParams.get('room');
+    if (param) roomId = param;
+  } catch (_) {}
+  if (!roomId) {
+    const header = req.headers['x-room-id'] || req.headers['room'] || req.headers['x-chess-room'];
+    if (typeof header === 'string' && header.trim()) {
+      roomId = header.trim();
+    }
+  }
+  return roomId || 'default';
+}
+
+function isValidRoomId(roomId) {
+  return typeof roomId === 'string' && /^[a-zA-Z0-9_-]+$/.test(roomId);
+}
+
+function getRoomStateFile(roomId = 'default') {
+  return referee.getRoomStateFile(roomId);
+}
+
+function computeRoomStateHash(roomId = 'default') {
+  try {
+    const file = getRoomStateFile(roomId);
+    const raw = fs.readFileSync(file, 'utf8');
     return crypto.createHash('sha256').update(raw).digest('hex');
   } catch (e) {
     return '';
   }
 }
 
-function readStateJson() {
+function readRoomStateJson(roomId = 'default') {
+  const file = getRoomStateFile(roomId);
   try {
-    return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (e) {
-    return null;
-  }
-}
-
-function broadcastStateToSSEClients() {
-  const hash = computeStateHash();
-  if (hash === lastStateHash) return;
-  lastStateHash = hash;
-  const state = readStateJson();
-  if (!state) return;
-  const data = JSON.stringify(state);
-  for (const client of sseClients) {
     try {
-      client.res.write(`event: state\ndata: ${data}\n\n`);
-    } catch (e) {
-      removeSSEClient(client);
+      const ref = referee.getReferee(roomId);
+      return ref ? ref.getState() : null;
+    } catch (_) {
+      return null;
     }
   }
 }
 
-function startStateWatcher() {
-  if (watcherStarted) return;
-  watcherStarted = true;
-  lastStateHash = computeStateHash();
-  try {
-    fs.watchFile(STATE_FILE, { interval: SSE_WATCH_INTERVAL_MS }, () => {
-      broadcastStateToSSEClients();
-    });
-    watcherRef = () => fs.unwatchFile(STATE_FILE);
-  } catch (e) {
-    // fs.watchFile may not be available on all platforms; fall back to interval.
-    const intervalId = setInterval(broadcastStateToSSEClients, SSE_WATCH_INTERVAL_MS);
-    watcherRef = () => clearInterval(intervalId);
+// Backward compatibility helpers
+function computeStateHash() {
+  return computeRoomStateHash('default');
+}
+
+function readStateJson() {
+  return readRoomStateJson('default');
+}
+
+function getClientsForRoom(roomId) {
+  if (!roomSseClients.has(roomId)) {
+    roomSseClients.set(roomId, new Set());
+  }
+  return roomSseClients.get(roomId);
+}
+
+function broadcastRoomStateToSSEClients(roomId = 'default') {
+  const hash = computeRoomStateHash(roomId);
+  const watcher = roomWatchers.get(roomId);
+  if (watcher && hash && hash === watcher.lastHash) return;
+  if (watcher && hash) watcher.lastHash = hash;
+
+  const state = readRoomStateJson(roomId);
+  if (!state) return;
+  const data = JSON.stringify(state);
+  const clients = roomSseClients.get(roomId);
+  if (!clients) return;
+  for (const client of Array.from(clients)) {
+    try {
+      client.res.write(`event: state\ndata: ${data}\n\n`);
+    } catch (e) {
+      removeRoomSSEClient(roomId, client);
+    }
   }
 }
 
-function stopStateWatcher() {
-  if (watcherRef) { watcherRef(); watcherRef = null; }
-  watcherStarted = false;
+function broadcastStateToSSEClients() {
+  broadcastRoomStateToSSEClients('default');
 }
 
-function removeSSEClient(client) {
-  sseClients.delete(client);
+function startStateWatcher(roomId = 'default') {
+  if (roomWatchers.has(roomId)) return;
+  const file = getRoomStateFile(roomId);
+  const lastHash = computeRoomStateHash(roomId);
+  let unwatch;
+  try {
+    fs.watchFile(file, { interval: SSE_WATCH_INTERVAL_MS }, () => {
+      broadcastRoomStateToSSEClients(roomId);
+    });
+    unwatch = () => fs.unwatchFile(file);
+  } catch (e) {
+    const intervalId = setInterval(() => broadcastRoomStateToSSEClients(roomId), SSE_WATCH_INTERVAL_MS);
+    unwatch = () => clearInterval(intervalId);
+  }
+  roomWatchers.set(roomId, { unwatch, lastHash });
+}
+
+function stopStateWatcher(roomId) {
+  if (roomId) {
+    const watcher = roomWatchers.get(roomId);
+    if (watcher) {
+      try { watcher.unwatch(); } catch (_) {}
+      roomWatchers.delete(roomId);
+    }
+  } else {
+    for (const watcher of roomWatchers.values()) {
+      try { watcher.unwatch(); } catch (_) {}
+    }
+    roomWatchers.clear();
+  }
+}
+
+function removeRoomSSEClient(roomId, client) {
+  const clients = roomSseClients.get(roomId);
+  if (clients) {
+    clients.delete(client);
+    if (clients.size === 0) {
+      roomSseClients.delete(roomId);
+    }
+  }
   if (client.heartbeatTimer) clearInterval(client.heartbeatTimer);
   try { client.res.end(); } catch (e) { /* already closed */ }
 }
 
-function handleSSEEndpoint(req, res) {
+function handleSSEEndpoint(req, res, roomId = 'default') {
   const origin = req.headers.origin;
   const headers = {
     'Content-Type': 'text/event-stream',
@@ -108,27 +178,28 @@ function handleSSEEndpoint(req, res) {
   res.write('\n');
 
   const client = { res, heartbeatTimer: null };
-  sseClients.add(client);
+  const clients = getClientsForRoom(roomId);
+  clients.add(client);
 
   // Heartbeat: SSE comment lines keep the connection alive through proxies.
   client.heartbeatTimer = setInterval(() => {
     try {
       res.write(': heartbeat\n\n');
     } catch (e) {
-      removeSSEClient(client);
+      removeRoomSSEClient(roomId, client);
     }
   }, SSE_HEARTBEAT_MS);
 
   // Immediately push the current state so the client doesn't wait for a change.
-  const state = readStateJson();
+  const state = readRoomStateJson(roomId);
   if (state) {
     try {
       res.write(`event: state\ndata: ${JSON.stringify(state)}\n\n`);
     } catch (e) { /* ignore */ }
   }
 
-  req.on('close', () => removeSSEClient(client));
-  req.on('error', () => removeSSEClient(client));
+  req.on('close', () => removeRoomSSEClient(roomId, client));
+  req.on('error', () => removeRoomSSEClient(roomId, client));
 }
 
 const MIME = {
@@ -231,7 +302,7 @@ function isDotfile(relPath) {
 // C2/C4: move submission goes through the in-process referee service
 // (long-lived, serialized command queue). moveStr: 4-5 chars (e2e4, e7e8q).
 // The body-cap + CORS/origin checks happen BEFORE queue entry (gate1 + d1).
-function handleMoveEndpoint(req, res) {
+function handleMoveEndpoint(req, res, roomId = 'default') {
   let body = '';
   let oversized = false;
   req.on('data', chunk => {
@@ -263,8 +334,11 @@ function handleMoveEndpoint(req, res) {
       args: { move: moveStr },
       expectedRevision
     };
-    referee.getReferee().enqueue(command).then(result => {
+    referee.getReferee(roomId).enqueue(command).then(result => {
       sendJson(res, result.httpStatus || (result.ok ? 200 : 409), result);
+      if (result.ok) {
+        broadcastRoomStateToSSEClients(roomId);
+      }
     });
   });
   req.on('error', () => {
@@ -292,7 +366,7 @@ function readBody(req, maxBytes) {
   });
 }
 
-function handleQueueCommand(req, res, commandType, argsExtractor) {
+function handleQueueCommand(req, res, commandType, argsExtractor, roomId = 'default') {
   readBody(req, MAX_BODY_BYTES).then(body => {
     let parsed = {};
     try { parsed = body ? JSON.parse(body) : {}; } catch (e) { parsed = {}; }
@@ -303,46 +377,49 @@ function handleQueueCommand(req, res, commandType, argsExtractor) {
       args,
       expectedRevision
     };
-    referee.getReferee().enqueue(command).then(result => {
+    referee.getReferee(roomId).enqueue(command).then(result => {
       sendJson(res, result.httpStatus || (result.ok ? 200 : 409), result);
+      if (result.ok) {
+        broadcastRoomStateToSSEClients(roomId);
+      }
     });
   }).catch(() => {
     if (!res.headersSent) sendJsonError(res, 413, 'request body too large');
   });
 }
 
-function handleResetEndpoint(req, res) {
+function handleResetEndpoint(req, res, roomId = 'default') {
   handleQueueCommand(req, res, 'reset', (parsed) => ({
     args: {},
     cmdId: parsed.id !== undefined ? parsed.id : null,
     expectedRevision: parsed.expectedRevision !== undefined ? Number(parsed.expectedRevision) : undefined
-  }));
+  }), roomId);
 }
 
-function handleResignEndpoint(req, res) {
+function handleResignEndpoint(req, res, roomId = 'default') {
   const query = new URL(req.url, 'http://127.0.0.1').searchParams;
   const color = query.has('w') ? 'white' : query.has('b') ? 'black' : query.get('color');
   handleQueueCommand(req, res, 'resign', (parsed) => ({
     args: { color: color || '' },
     cmdId: parsed.id !== undefined ? parsed.id : null,
     expectedRevision: parsed.expectedRevision !== undefined ? Number(parsed.expectedRevision) : undefined
-  }));
+  }), roomId);
 }
 
-function handleDrawEndpoint(req, res) {
+function handleDrawEndpoint(req, res, roomId = 'default') {
   handleQueueCommand(req, res, 'draw', (parsed) => ({
     args: {},
     cmdId: parsed.id !== undefined ? parsed.id : null,
     expectedRevision: parsed.expectedRevision !== undefined ? Number(parsed.expectedRevision) : undefined
-  }));
+  }), roomId);
 }
 
-function handleUndoEndpoint(req, res) {
+function handleUndoEndpoint(req, res, roomId = 'default') {
   handleQueueCommand(req, res, 'undo', (parsed) => ({
     args: {},
     cmdId: parsed.id !== undefined ? parsed.id : null,
     expectedRevision: parsed.expectedRevision !== undefined ? Number(parsed.expectedRevision) : undefined
-  }));
+  }), roomId);
 }
 
 function isApiRequest(urlPath) {
@@ -374,50 +451,78 @@ function createServer() {
 
     if (!checkCors(req, res)) return;
 
-    if (req.method === 'GET' && urlPath === '/api/state') {
-      const state = readStateJson();
-      if (!state) { sendJsonError(res, 404, 'no state'); return; }
-      const origin = req.headers.origin;
-      res.statusCode = 200;
-      res.setHeader('Content-Type', 'application/json');
-      if (origin && isOriginAllowed(origin)) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-        res.setHeader('Vary', 'Origin');
-      }
-      res.end(JSON.stringify(state));
-      return;
-    }
-    if (req.method === 'GET' && urlPath === '/api/events') { startStateWatcher(); handleSSEEndpoint(req, res); return; }
-    if (req.method === 'POST' && urlPath === '/api/move') { handleMoveEndpoint(req, res); return; }
-    if (req.method === 'POST' && urlPath === '/api/reset') { handleResetEndpoint(req, res); return; }
-    if ((req.method === 'GET' || req.method === 'POST') && urlPath === '/api/resign') {
-      handleResignEndpoint(req, res);
-      return;
-    }
-    if (req.method === 'POST' && urlPath === '/api/draw') {
-      handleDrawEndpoint(req, res);
-      return;
-    }
-    if (req.method === 'POST' && urlPath === '/api/draw-claim') {
-      handleRefereeCommand(res, 'draw-claim');
-      return;
-    }
-    if (req.method === 'POST' && urlPath === '/api/undo') {
-      handleUndoEndpoint(req, res);
-      return;
-    }
-
     if (isApiRequest(urlPath)) {
+      const roomId = extractRoomId(req);
+      if (!isValidRoomId(roomId)) {
+        sendJsonError(res, 400, 'invalid room id');
+        return;
+      }
+
+      if (req.method === 'GET' && urlPath === '/api/state') {
+        const state = readRoomStateJson(roomId);
+        if (!state) { sendJsonError(res, 404, 'no state'); return; }
+        const origin = req.headers.origin;
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'application/json');
+        if (origin && isOriginAllowed(origin)) {
+          res.setHeader('Access-Control-Allow-Origin', origin);
+          res.setHeader('Vary', 'Origin');
+        }
+        res.end(JSON.stringify(state));
+        return;
+      }
+      if (req.method === 'GET' && urlPath === '/api/events') {
+        startStateWatcher(roomId);
+        handleSSEEndpoint(req, res, roomId);
+        return;
+      }
+      if (req.method === 'POST' && urlPath === '/api/move') {
+        handleMoveEndpoint(req, res, roomId);
+        return;
+      }
+      if (req.method === 'POST' && urlPath === '/api/reset') {
+        handleResetEndpoint(req, res, roomId);
+        return;
+      }
+      if ((req.method === 'GET' || req.method === 'POST') && urlPath === '/api/resign') {
+        handleResignEndpoint(req, res, roomId);
+        return;
+      }
+      if (req.method === 'POST' && urlPath === '/api/draw') {
+        handleDrawEndpoint(req, res, roomId);
+        return;
+      }
+      if (req.method === 'POST' && urlPath === '/api/undo') {
+        handleUndoEndpoint(req, res, roomId);
+        return;
+      }
+
       sendJsonError(res, 404, 'not found');
       return;
     }
 
-    let reqPath = urlPath;
-    if (reqPath === '/') reqPath = '/index.html';
+    let decodedPath = '';
+    try {
+      decodedPath = decodeURIComponent(urlPath);
+    } catch (_) {
+      sendJsonError(res, 400, 'bad request');
+      return;
+    }
 
-    reqPath = decodeURIComponent(reqPath);
+    let reqPath = decodedPath;
+    const gameMatch = reqPath.match(/^\/game\/([a-zA-Z0-9_-]+)(?:\/(.*))?$/);
+    if (gameMatch) {
+      const subPath = gameMatch[2];
+      if (!subPath || subPath === '') {
+        reqPath = '/index.html';
+      } else {
+        reqPath = '/' + subPath;
+      }
+    } else if (reqPath === '/') {
+      reqPath = '/index.html';
+    }
 
-    if (isDotfile(reqPath)) {
+    if (isDotfile(reqPath) || isDotfile(decodedPath)) {
       sendJsonError(res, 403, 'forbidden');
       return;
     }
@@ -440,7 +545,14 @@ function createServer() {
   });
 }
 
-module.exports = { createServer, stopStateWatcher };
+module.exports = {
+  createServer,
+  stopStateWatcher,
+  readRoomStateJson,
+  getRoomStateFile,
+  extractRoomId,
+  isValidRoomId
+};
 
 if (require.main === module) {
   const port = process.env.CHESS_PORT ? Number(process.env.CHESS_PORT) : PORT;

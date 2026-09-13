@@ -48,6 +48,46 @@ function clearPremove() {
 function getPremoveQueue() {
   return premoveQueue;
 }
+
+// Phase 3: Room-scoped routing and referee integration (/game/:roomId)
+function getCurrentRoomId() {
+  if (typeof window !== 'undefined' && window.location) {
+    if (window.location.pathname) {
+      const match = window.location.pathname.match(/\/game\/([^/]+)/);
+      if (match && match[1]) {
+        return decodeURIComponent(match[1]);
+      }
+    }
+    if (window.location.search) {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const room = params.get('room');
+        if (room && /^[a-zA-Z0-9_-]+$/.test(room)) {
+          return room;
+        }
+      } catch (_) {}
+    }
+  }
+  return 'default';
+}
+
+function withRoomParam(url) {
+  const room = getCurrentRoomId();
+  if (!room || room === 'default') {
+    return url;
+  }
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}room=${encodeURIComponent(room)}`;
+}
+
+function updateRoomBadge() {
+  if (typeof document === 'undefined') return;
+  const roomId = getCurrentRoomId();
+  const badge = document.getElementById('room-badge');
+  if (badge) {
+    badge.textContent = `Room: ${roomId}`;
+  }
+}
 // Snapshot of the last referee board painted into the DOM. It is comparison
 // data only: the current board still comes exclusively from applyRefereeState.
 let previousBoard = null;
@@ -776,7 +816,8 @@ if (promoModal) promoModal.onkeydown = event => {
 // promo suffix when applicable) is validated server-side and lands in
 // .referee-state.json. The poll picks it up and re-renders from that truth.
 async function submitMoveToReferee(moveStr) {
-  return runRefereeCommand('Submitting move', () => fetch('/api/move', {
+  const roomParam = getCurrentRoomId() !== 'default' ? `?room=${encodeURIComponent(getCurrentRoomId())}` : '';
+  return runRefereeCommand('Submitting move', () => fetch('/api/move' + roomParam, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ move: moveStr })
@@ -1495,7 +1536,11 @@ async function copyPgn() {
 
 async function pollReferee() {
   try {
-    const response = await fetch(`.referee-state.json?_t=${Date.now()}`);
+    const stateUrl = withRoomParam('/api/state') + `&_t=${Date.now()}`;
+    let response = await fetch(stateUrl);
+    if (!response.ok && getCurrentRoomId() === 'default') {
+      response = await fetch(`.referee-state.json?_t=${Date.now()}`);
+    }
     if (!response.ok) throw new Error("Fetch failed");
     const state = await response.json();
     const stateJson = JSON.stringify(state);
@@ -1552,7 +1597,7 @@ function startSSE() {
   if (sseStarted) return;
   sseStarted = true;
   try {
-    sseEventSource = new EventSource('/api/events');
+    sseEventSource = new EventSource(withRoomParam('/api/events'));
     sseEventSource.onopen = () => setConnectionState('connected', 'Connected to referee.');
     sseEventSource.addEventListener('state', (event) => {
       try {
@@ -1859,7 +1904,7 @@ function initGame() {
 
 async function resetReferee() {
   const accepted = await runRefereeCommand('Starting new game', () =>
-    fetch('/api/reset', { method: 'POST' }));
+    fetch(withRoomParam('/api/reset'), { method: 'POST' }));
   if (accepted) {
     // The board is still changed only by the subsequent referee poll.
     lastKnownStateJson = '';
@@ -1877,14 +1922,14 @@ if (flipBoardButton) flipBoardButton.onclick = () => {
 const resignButton = document.getElementById('resign');
 if (resignButton) resignButton.onclick = async () => {
   await runRefereeCommand('Submitting resignation', () =>
-    fetch(`/api/resign?${turn === 'white' ? 'w' : 'b'}`, { method: 'POST' }));
+    fetch(withRoomParam(`/api/resign?${turn === 'white' ? 'w' : 'b'}`), { method: 'POST' }));
 };
 const drawButton = document.getElementById('offer-draw');
 if (drawButton) drawButton.onclick = async () => {
-  await runRefereeCommand('Offering draw', () => fetch('/api/draw', { method: 'POST' }));
+  await runRefereeCommand('Offering draw', () => fetch(withRoomParam('/api/draw'), { method: 'POST' }));
 };
 if (undoButton) undoButton.onclick = async () => {
-  await runRefereeCommand('Requesting undo', () => fetch('/api/undo', { method: 'POST' }));
+  await runRefereeCommand('Requesting undo', () => fetch(withRoomParam('/api/undo'), { method: 'POST' }));
 };
 
 const btnScrubStart = document.getElementById('scrub-start');
@@ -1983,7 +2028,26 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.getLatestGameReview = () => latestGameReview;
   window.getEvalHistory = () => evalHistory;
   window.setEvalHistory = (h) => { evalHistory = h; };
+  window.getCurrentRoomId = getCurrentRoomId;
+  window.withRoomParam = withRoomParam;
+  window.updateRoomBadge = updateRoomBadge;
 }
+
+const copyRoomButton = document.getElementById('copy-room-link');
+if (copyRoomButton) {
+  copyRoomButton.onclick = () => {
+    const roomId = getCurrentRoomId();
+    const url = typeof window !== 'undefined' && window.location
+      ? (roomId === 'default' ? window.location.origin + '/' : window.location.origin + '/game/' + encodeURIComponent(roomId))
+      : '';
+    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(() => {
+        if (statusElement) statusElement.textContent = 'Room link copied to clipboard';
+      }).catch(() => {});
+    }
+  };
+}
+updateRoomBadge();
 
 initGame();
 const cachedState = restoreCachedRefereeState();
