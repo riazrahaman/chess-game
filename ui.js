@@ -33,6 +33,12 @@ let retryCommand = null;
 // can validate without re-computing on every mousemove. Both are view-only.
 let dragFromSquare = null;
 let dragLegalMoves = [];
+let queuedPremove = null;
+let touchDragState = null;
+
+function clearPremove() {
+  queuedPremove = null;
+}
 // Snapshot of the last referee board painted into the DOM. It is comparison
 // data only: the current board still comes exclusively from applyRefereeState.
 let previousBoard = null;
@@ -502,6 +508,11 @@ function renderBoard(lastMove = null, boardBeforeRender = previousBoard) {
         }
       }
 
+      if (typeof queuedPremove !== 'undefined' && queuedPremove) {
+        if (queuedPremove.from === squareId) classes.push('premove-source');
+        if (queuedPremove.to === squareId) classes.push('premove-target');
+      }
+
       const nextClassName = classes.join(' ');
       if (squareDiv.className !== nextClassName) squareDiv.className = nextClassName;
 
@@ -560,6 +571,14 @@ function keyboardDestination(squareId, key) {
 
 function handleSquareKeydown(event, squareId) {
   if (!event) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    clearPremove();
+    selectedSquare = null;
+    legalMoves = [];
+    renderBoard();
+    return;
+  }
   if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
     event.preventDefault();
     setRovingSquare(keyboardDestination(squareId, event.key));
@@ -794,6 +813,22 @@ function applyRefereeState(state) {
   }
   const boardBeforeRender = previousBoard;
   board = state.board;
+  if (typeof queuedPremove !== 'undefined' && queuedPremove && state.board) {
+    if (state.board.turn === queuedPremove.color) {
+      const pFrom = queuedPremove.from;
+      const pTo = queuedPremove.to;
+      const pColor = queuedPremove.color;
+      const validLegal = getLegalMoves(state.board, pFrom, pColor);
+      queuedPremove = null;
+      if (validLegal.includes(pTo)) {
+        if (isPromotionMove(pFrom, pTo)) {
+          openPromotionDialog(pFrom, pTo, pColor);
+        } else {
+          submitMoveToReferee(pFrom + pTo);
+        }
+      }
+    }
+  }
   renderBoard(lastMove, boardBeforeRender);
   previousBoard = cloneBoardSnapshot(board);
   renderTimers();
@@ -1005,14 +1040,18 @@ function handleSquareClick(squareId) {
 
   if (legalMoves.includes(squareId)) {
     const fromSquare = selectedSquare;
+    const pieceColor = (board.pieces[fromSquare] && board.pieces[fromSquare].color) || turn;
     selectedSquare = null;
     legalMoves = [];
-    // C2: promotion opens the piece modal BEFORE finalizing; every confirmed
-    // move is submitted through the referee so the state file stays authoritative.
-    if (isPromotionMove(fromSquare, squareId)) {
-      openPromotionDialog(fromSquare, squareId, board.pieces[fromSquare].color);
+    if (pieceColor === turn) {
+      clearPremove();
+      if (isPromotionMove(fromSquare, squareId)) {
+        openPromotionDialog(fromSquare, squareId, pieceColor);
+      } else {
+        submitMoveToReferee(fromSquare + squareId);
+      }
     } else {
-      submitMoveToReferee(fromSquare + squareId);
+      queuedPremove = { from: fromSquare, to: squareId, color: pieceColor };
     }
     renderBoard();
     return;
@@ -1022,13 +1061,21 @@ function handleSquareClick(squareId) {
   if (pieceData) {
     const pTurn = pieceData.color;
     if (pTurn === turn) {
+      clearPremove();
       selectedSquare = squareId;
       legalMoves = getLegalMoves(board, squareId, turn);
+      renderBoard();
+      return;
+    } else {
+      clearPremove();
+      selectedSquare = squareId;
+      legalMoves = getLegalMoves(board, squareId, pTurn);
       renderBoard();
       return;
     }
   }
 
+  clearPremove();
   selectedSquare = null;
   legalMoves = [];
   renderBoard();
@@ -1126,6 +1173,8 @@ function initGame() {
   turn = 'white';
   selectedSquare = null;
   legalMoves = [];
+  clearPremove();
+  touchDragState = null;
   whiteTime = null;
   blackTime = null;
   refereeClockAt = null;
