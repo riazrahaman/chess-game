@@ -31,6 +31,7 @@
             align-items: center;
             cursor: pointer;
             user-select: none;
+            position: relative;
         }
         .chess-piece {
             display: block;
@@ -56,6 +57,30 @@
         .white-sq { background-color: #eeeed2; }
         .black-sq { background-color: #769656; }
         .highlight { background-color: #f7f769 !important; }
+        /* A3: chess-standard legal-move indicators. Quiet moves show a small
+           centered dot via ::after; captures show a ring around the piece. */
+        .legal-move::after {
+            content: '';
+            position: absolute;
+            width: 30%;
+            height: 30%;
+            border-radius: 50%;
+            background-color: rgba(0, 0, 0, 0.22);
+            pointer-events: none;
+        }
+        .legal-capture::after {
+            content: '';
+            position: absolute;
+            inset: 6%;
+            border-radius: 50%;
+            border: 4px solid rgba(0, 0, 0, 0.22);
+            box-sizing: border-box;
+            pointer-events: none;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .legal-move::after,
+            .legal-capture::after { transition: none !important; }
+        }
         .king-in-check, .king-mate {
             box-shadow: inset 0 0 0 4px #d97706, 0 0 10px rgba(217, 119, 6, 0.85);
         }

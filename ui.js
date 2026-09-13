@@ -370,7 +370,15 @@ function renderBoard(lastMove = null, boardBeforeRender = previousBoard) {
       if (selectedSquare === squareId) {
         if (!classes.includes('highlight')) classes.push('highlight');
       } else if (legalMoves.includes(squareId)) {
-        if (!classes.includes('highlight')) classes.push('highlight');
+        // A3: chess-standard legal-move indicators instead of full-square
+        // yellow. Quiet moves get a centered dot; captures get a ring around
+        // the target piece. Selection highlight (above) and last-move accent
+        // (highlight class from lastMove) remain untouched.
+        if (board.pieces[squareId]) {
+          classes.push('legal-capture');
+        } else {
+          classes.push('legal-move');
+        }
       }
 
       const nextClassName = classes.join(' ');
