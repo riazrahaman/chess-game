@@ -705,7 +705,7 @@ function moveToSan(board, moveStr) {
     if (ambiguous.length) {
       const sameFile = ambiguous.some(square => square[0] === from[0]);
       const sameRank = ambiguous.some(square => square[1] === from[1]);
-      san += sameFile ? from[1] : sameRank ? from[0] : from;
+      san += sameFile ? from[1] : sameRank ? from[0] : from[0];
     }
   }
 

@@ -2,3 +2,4 @@
 .referee-state.json
 .referee-state.json.lock
 opencode.json
+node_modules/
