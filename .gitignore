@@ -3,3 +3,4 @@
 .referee-state.json.lock
 opencode.json
 node_modules/
+.referee-journal.jsonl

@@ -1,6 +1,0 @@
-{"seq":1,"id":1,"type":"move","args":{"move":"e2e4"},"ts":1789282739378}
-{"seq":2,"id":2,"type":"reset","args":{},"ts":1789282739429}
-{"seq":3,"id":3,"type":"move","args":{"move":"e2e4"},"ts":1789282739430}
-{"seq":4,"id":4,"type":"reset","args":{},"ts":1789282739433}
-{"seq":5,"id":5,"type":"reset","args":{},"ts":1789282739434}
-{"seq":2,"id":2,"type":"move","args":{"move":"e2e4"},"ts":1789282739446}
