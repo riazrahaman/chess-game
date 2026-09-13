@@ -17,10 +17,19 @@ function defaultClocks() {
   return { white: CLOCK_START_SECONDS, black: CLOCK_START_SECONDS };
 }
 
+function defaultElapsed() {
+  return { white: 0, black: 0 };
+}
+
 function ensureClocks(s) {
   if (!s.clocks || typeof s.clocks.white !== 'number' || typeof s.clocks.black !== 'number') {
     s.clocks = defaultClocks();
   }
+  if (!s.elapsed || typeof s.elapsed.white !== 'number' || typeof s.elapsed.black !== 'number') {
+    s.elapsed = defaultElapsed();
+  }
+  if (typeof s.moveStartTs !== 'number') s.moveStartTs = 0;
+  if (!Array.isArray(s.moveTimestamps)) s.moveTimestamps = [];
   if (typeof s.gameOver !== 'boolean') s.gameOver = false;
   if (!s.status) s.status = 'ongoing';
   if (!Object.prototype.hasOwnProperty.call(s, 'result')) s.result = null;
@@ -39,6 +48,9 @@ function newGame() {
     board,
     history: [],
     clocks: defaultClocks(),
+    elapsed: defaultElapsed(),
+    moveStartTs: 0,
+    moveTimestamps: [],
     gameOver: false,
     status: 'ongoing',
     result: null,
@@ -95,19 +107,30 @@ function historyStr(history) {
   return out.trim();
 }
 
-function rebuildState(history) {
+function rebuildState(history, moveTimestamps) {
   const s = newGame();
   s.history = [];
-  for (const moveStr of history) {
+  s.moveTimestamps = [];
+  let prevTs = 0;
+  for (let i = 0; i < history.length; i++) {
+    const moveStr = history[i];
     const from = moveStr.slice(0, 2);
     const to = moveStr.slice(2, 4);
     const promo = moveStr[4];
     const mover = s.board.turn;
+    const moveTs = (moveTimestamps && typeof moveTimestamps[i] === 'number') ? moveTimestamps[i] : 0;
+    if (moveTs && prevTs) {
+      const delta = Math.max(0, (moveTs - prevTs) / 1000);
+      s.elapsed[mover] = s.elapsed[mover] + delta;
+    }
     s.clocks[mover] = Math.max(0, s.clocks[mover] - MOVE_TIME_COST_SECONDS);
     s.board = engine.makeMove(s.board, from, to, promo);
     s.history.push(moveStr);
+    s.moveTimestamps.push(moveTs);
     s.clocks[mover] = Math.min(CLOCK_START_SECONDS, s.clocks[mover] + CLOCK_INCREMENT_SECONDS);
+    prevTs = moveTs;
   }
+  s.moveStartTs = prevTs;
   const status = engine.getGameStatus(s.board, s.board.turn);
   s.status = status;
   s.gameOver = status === 'checkmate' || status === 'stalemate';
@@ -159,14 +182,19 @@ function normalizeMove(moveStr, s) {
   return { normalized, moves };
 }
 
-function applyMove(s, moveStr) {
+function applyMove(s, moveStr, moveTs) {
   const turn = s.board.turn;
+  if (typeof moveTs === 'number' && moveTs > 0 && s.moveStartTs > 0) {
+    const delta = Math.max(0, (moveTs - s.moveStartTs) / 1000);
+    s.elapsed[turn] = s.elapsed[turn] + delta;
+  }
   s.clocks[turn] = Math.max(0, s.clocks[turn] - MOVE_TIME_COST_SECONDS);
   if (s.clocks[turn] <= 0) {
     s.gameOver = true;
     s.status = 'timeout';
     s.flagged = turn;
     s.result = turn === 'white' ? '0-1 on time' : '1-0 on time';
+    s.moveStartTs = 0;
     return { flagged: true };
   }
   const from = moveStr.slice(0, 2);
@@ -174,7 +202,9 @@ function applyMove(s, moveStr) {
   const promo = moveStr.length > 4 ? moveStr[4] : undefined;
   s.board = engine.makeMove(s.board, from, to, promo);
   s.history.push(moveStr);
+  s.moveTimestamps.push(typeof moveTs === 'number' ? moveTs : 0);
   s.clocks[turn] = Math.min(CLOCK_START_SECONDS, s.clocks[turn] + CLOCK_INCREMENT_SECONDS);
+  s.moveStartTs = typeof moveTs === 'number' ? moveTs : 0;
   const nextTurn = s.board.turn;
   const status = engine.getGameStatus(s.board, nextTurn);
   s.status = status;
@@ -194,6 +224,7 @@ function stateView(s) {
     resigned: s.resigned,
     draw: s.draw,
     clocks: s.clocks,
+    elapsed: s.elapsed,
     board: renderAscii(s.board),
     history: historyStr(s.history),
     plyCount: s.history.length
@@ -280,11 +311,11 @@ class RefereeService {
       const { normalized } = normalizeMove(entry.args.move, this.state);
       const moves = allLegalMoves(this.state.board, this.state.board.turn);
       if (moves.includes(normalized) && !this.state.gameOver) {
-        applyMove(this.state, normalized);
+        applyMove(this.state, normalized, entry.ts);
       }
     } else if (entry.type === 'undo') {
       if (this.state.history.length > 0) {
-        this.state = rebuildState(this.state.history.slice(0, -1));
+        this.state = rebuildState(this.state.history.slice(0, -1), this.state.moveTimestamps.slice(0, -1));
       }
     } else if (entry.type === 'resign') {
       const color = entry.args.color;
@@ -360,9 +391,10 @@ class RefereeService {
     }
   }
 
-  _journalAndSnapshot(type, args) {
+  _journalAndSnapshot(type, args, moveTs) {
     this._journalSeq++;
-    appendJournal({ seq: this._journalSeq, id: this._journalSeq, type, args, ts: Date.now() });
+    const entry = { seq: this._journalSeq, id: this._journalSeq, type, args, ts: (typeof moveTs === 'number' ? moveTs : Date.now()) };
+    appendJournal(entry);
     atomicSaveSnapshot(this.state);
     try { this._lastSnapshotMtime = fs.statSync(STATE_FILE).mtimeMs; } catch (_) {}
     this.revision = this._computeRevision();
@@ -377,8 +409,9 @@ class RefereeService {
     if (!moves.includes(normalized)) {
       return { ok: false, error: 'illegal move', moveStr: String(args.move || ''), legalMoves: moves, httpStatus: 400 };
     }
-    const r = applyMove(s, normalized);
-    this._journalAndSnapshot('move', { move: normalized });
+    const moveTs = Date.now();
+    const r = applyMove(s, normalized, moveTs);
+    this._journalAndSnapshot('move', { move: normalized }, moveTs);
     if (r.flagged) {
       return Object.assign({ ok: false, error: 'flagged', httpStatus: 409 }, stateView(s));
     }
@@ -390,7 +423,7 @@ class RefereeService {
     if (s.history.length === 0) {
       return Object.assign({ ok: true, undone: false, noOp: true }, stateView(s));
     }
-    this.state = rebuildState(s.history.slice(0, -1));
+    this.state = rebuildState(s.history.slice(0, -1), s.moveTimestamps.slice(0, -1));
     this._journalAndSnapshot('undo', {});
     return Object.assign({ ok: true, undone: true }, stateView(this.state));
   }
