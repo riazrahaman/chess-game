@@ -974,7 +974,15 @@
             <button id="resign" type="button">Resign</button>
             <button id="offer-draw" type="button">Draw</button>
             <button id="undo" type="button">Undo</button>
+            <button id="coach-hint-btn" type="button" style="grid-column: span 2; background: #d97706; border-color: #d97706; color: #fff; font-weight: 600;">Coach Hint 💡</button>
             <button id="rematch-btn" type="button" class="hidden" style="grid-column: span 4; background: #059669; border-color: #059669; color: #fff; font-weight: 600;">Offer Rematch</button>
+        </div>
+        <div id="coach-hint-banner" class="hidden" style="margin-top: 8px; padding: 8px 12px; background: rgba(217, 119, 6, 0.08); border: 1px solid rgba(217, 119, 6, 0.3); border-radius: 6px; font-size: 0.82rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-weight: 600; color: #b45309;">Coach Advice &amp; Hint</span>
+                <button id="close-coach-hint" type="button" style="background: none; border: none; font-size: 0.8rem; cursor: pointer; color: #b45309;">✕</button>
+            </div>
+            <div id="coach-hint-text"></div>
         </div>
     </section>
     <div id="history-container">
@@ -1030,6 +1038,16 @@
                         <button id="puzzle-next-btn" type="button" class="hidden" style="font-size:0.75rem; padding:2px 8px; background:#059669; color:#fff; font-weight:600;">Next Mistake</button>
                         <button id="puzzle-exit-btn" type="button" style="font-size:0.75rem; padding:2px 8px;">Exit Puzzles</button>
                     </div>
+                </div>
+            </div>
+            <div id="why-explanation-section" style="margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--panel-border);">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:0.85rem; font-weight:600;">Move Explanation</span>
+                    <button id="why-move-btn" type="button" style="font-size:0.78rem; padding:3px 10px; background:#7c3aed; color:#fff; border-radius:4px; font-weight:600;">Why? (Explain Move)</button>
+                </div>
+                <div id="why-explanation-card" class="hidden" style="margin-top:8px; padding:8px; background:rgba(124,58,237,0.06); border:1px solid rgba(124,58,237,0.25); border-radius:4px; font-size:0.8rem; line-height:1.4;">
+                    <div id="why-title" style="font-weight:600; color:#6d28d9; margin-bottom:4px;">Tactical &amp; Strategic Explanation</div>
+                    <div id="why-body">Scrub to or select any move to inspect the engine and tactical reasoning.</div>
                 </div>
             </div>
         </div>
@@ -1136,6 +1154,7 @@
     <script src="engine.js"></script>
     <script src="pieces.js"></script>
     <script src="move-review.js"></script>
+    <script src="ai-coach.js"></script>
     <script src="openings-db.js"></script>
     <script src="game-archive.js"></script>
     <script src="ui.js"></script>

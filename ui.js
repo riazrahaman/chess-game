@@ -3290,6 +3290,107 @@ function setupMistakePuzzlesUI() {
   }
 }
 
+// ==========================================
+// C2 & C4: "Why?" Move Explanations & Coach Mode Hints
+// ==========================================
+
+function explainCurrentlyViewedMove() {
+  const coachModule = (typeof window !== 'undefined' && window.AiCoach) || (typeof AiCoach !== 'undefined' ? AiCoach : null);
+  if (!coachModule || typeof coachModule.explainMove !== 'function') return;
+
+  const card = document.getElementById('why-explanation-card');
+  const titleEl = document.getElementById('why-title');
+  const bodyEl = document.getElementById('why-body');
+  if (!card) return;
+
+  const moves = liveHistory || [];
+  if (moves.length === 0) {
+    card.classList.remove('hidden');
+    if (titleEl) titleEl.textContent = 'Starting Position';
+    if (bodyEl) bodyEl.textContent = 'No moves played yet. The board is in the initial starting array.';
+    return;
+  }
+
+  const activePly = viewedPly !== null ? viewedPly + 1 : moves.length;
+  const moveIdx = activePly - 1;
+  const moveStr = moves[moveIdx] || moves[moves.length - 1];
+
+  let review = latestGameReview;
+  if (!review && typeof runGameReview === 'function') {
+    review = runGameReview();
+  }
+
+  const reviewedMove = (review && review.moves && review.moves[moveIdx]) || null;
+  const preCp = (evalHistory && evalHistory[moveIdx] !== undefined) ? evalHistory[moveIdx] : 0;
+  const postCp = (evalHistory && evalHistory[moveIdx + 1] !== undefined) ? evalHistory[moveIdx + 1] : 0;
+  const bestMove = (engineMultiPvLines && engineMultiPvLines[0] && (engineMultiPvLines[0].from + engineMultiPvLines[0].to)) || '';
+
+  const explanation = coachModule.explainMove({
+    move: moveStr,
+    color: moveIdx % 2 === 0 ? 'white' : 'black',
+    key: (reviewedMove && reviewedMove.key) || 'good',
+    preCp,
+    postCp,
+    bestMove
+  });
+
+  card.classList.remove('hidden');
+  if (titleEl) {
+    titleEl.textContent = `Ply ${activePly} (${moveStr}): ${(explanation.classification || 'good').toUpperCase()}`;
+  }
+  if (bodyEl) {
+    bodyEl.textContent = explanation.explanation;
+  }
+}
+
+function showCoachHint() {
+  const coachModule = (typeof window !== 'undefined' && window.AiCoach) || (typeof AiCoach !== 'undefined' ? AiCoach : null);
+  if (!coachModule || typeof coachModule.getCoachHint !== 'function') return;
+
+  const banner = document.getElementById('coach-hint-banner');
+  const textEl = document.getElementById('coach-hint-text');
+  if (!banner || !textEl) return;
+
+  const currentTurn = turn || (board && board.turn) || 'white';
+  const bestCandidate = (engineMultiPvLines && engineMultiPvLines[0] && (engineMultiPvLines[0].from + engineMultiPvLines[0].to)) || 'e2e4';
+  const currentEval = (evalHistory && evalHistory.length > 0) ? evalHistory[evalHistory.length - 1] : 0;
+  const ply = (liveHistory && liveHistory.length) ? liveHistory.length + 1 : 1;
+
+  const hint = coachModule.getCoachHint({
+    turn: currentTurn,
+    bestMove: bestCandidate,
+    evalCp: currentEval,
+    ply
+  });
+
+  banner.classList.remove('hidden');
+  textEl.innerHTML = `
+    <div style="margin-bottom:4px;"><strong>Strategic Guideline:</strong> ${escapeHtml(hint.generalPrinciple)}</div>
+    <div style="margin-bottom:4px; color:#92400e;"><strong>Focus Area:</strong> ${escapeHtml(hint.pieceHint)}</div>
+    <div style="color:#b45309;"><strong>Tactical Concept:</strong> ${escapeHtml(hint.moveHint)}</div>
+  `;
+}
+
+function setupAiCoachUI() {
+  const whyBtn = document.getElementById('why-move-btn');
+  if (whyBtn) {
+    whyBtn.onclick = explainCurrentlyViewedMove;
+  }
+
+  const coachBtn = document.getElementById('coach-hint-btn');
+  if (coachBtn) {
+    coachBtn.onclick = showCoachHint;
+  }
+
+  const closeHintBtn = document.getElementById('close-coach-hint');
+  if (closeHintBtn) {
+    closeHintBtn.onclick = () => {
+      const banner = document.getElementById('coach-hint-banner');
+      if (banner) banner.classList.add('hidden');
+    };
+  }
+}
+
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('keydown', handleGlobalScrubberKeydown);
   window.jumpToPly = jumpToPly;
@@ -3347,6 +3448,9 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.setupMistakePuzzlesUI = setupMistakePuzzlesUI;
   window.getActiveMistakePuzzles = () => activeMistakePuzzles;
   window.isPuzzleModeActive = () => puzzleModeActive;
+  window.explainCurrentlyViewedMove = explainCurrentlyViewedMove;
+  window.showCoachHint = showCoachHint;
+  window.setupAiCoachUI = setupAiCoachUI;
 }
 
 const copyRoomButton = document.getElementById('copy-room-link');
@@ -3372,6 +3476,7 @@ syncNtpClock();
 setupMatchgradeSocialUI();
 setupBotUI();
 setupMistakePuzzlesUI();
+setupAiCoachUI();
 if (typeof setInterval === 'function') {
   setInterval(syncNtpClock, 10000);
 }
