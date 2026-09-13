@@ -4,8 +4,13 @@ let selectedSquare = null;
 let legalMoves = [];
 // C1: clocks are owned by the referee file; UI only renders what it polled.
 // No local constants here — the referee state always carries clocks {white,black}.
+// whiteTime/blackTime hold the LAST referee-reported value (truth, never
+// mutated locally). refereeClockAt is the ms timestamp of that report, used
+// only for render-only interpolation between polls (A8).
 let whiteTime = null;
 let blackTime = null;
+let refereeClockAt = null;
+let clockTickInterval = null;
 let moveHistory = [];
 let lastKnownStateJson = "";
 let pollStarted = false;
@@ -50,15 +55,51 @@ function formatTime(seconds) {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
-// C1: pure render of referee-owned clocks. No ticking, no increments —
-// the referee file is the only place clock values ever change.
+// A8: compute the render-only interpolated value of the active player's clock.
+// Starts from the LAST referee-reported value and subtracts elapsed wall-clock
+// seconds since refereeClockAt. Never mutates whiteTime/blackTime (truth); the
+// next poll snaps back to referee truth (C1 invariant). Returns the raw seconds
+// (possibly fractional) for the active side, or null if clocks aren't loaded.
+function interpolatedActiveSeconds() {
+  if (whiteTime === null || blackTime === null || refereeClockAt === null) return null;
+  if (gameOver) return turn === 'white' ? whiteTime : blackTime;
+  const elapsedMs = Date.now() - refereeClockAt;
+  const elapsed = Math.max(0, elapsedMs / 1000);
+  if (turn === 'white') return Math.max(0, whiteTime - elapsed);
+  return Math.max(0, blackTime - elapsed);
+}
+
+// A8: render the active player's clock with tenths below 10s (display layer
+// interpolation only). The inactive player shows the last referee value verbatim.
 function renderTimers() {
   if (whiteTime === null || blackTime === null) return;
-  if (timerWhite) timerWhite.textContent = `White: ${formatTime(whiteTime)}`;
-  if (timerBlack) timerBlack.textContent = `Black: ${formatTime(blackTime)}`;
+  const active = interpolatedActiveSeconds();
+  const whiteDisplay = (turn === 'white' && active !== null) ? active : whiteTime;
+  const blackDisplay = (turn === 'black' && active !== null) ? active : blackTime;
+
+  if (timerWhite) timerWhite.textContent = `White: ${formatClockTick(whiteDisplay)}`;
+  if (timerBlack) timerBlack.textContent = `Black: ${formatClockTick(blackDisplay)}`;
 
   if (timerWhite) timerWhite.classList.toggle('active-timer', turn === 'white');
   if (timerBlack) timerBlack.classList.toggle('active-timer', turn === 'black');
+
+  // A8: low-time warning. Pulsing red style on the active clock below 60s.
+  // CSS honors prefers-reduced-motion (static red instead of animation).
+  const LOW_TIME_THRESHOLD = 60;
+  const activeLowTime = active !== null && active < LOW_TIME_THRESHOLD;
+  if (timerWhite) timerWhite.classList.toggle('low-time', turn === 'white' && activeLowTime);
+  if (timerBlack) timerBlack.classList.toggle('low-time', turn === 'black' && activeLowTime);
+}
+
+// A8: start the render-only 1s interpolation tick. This never persists and never
+// sends anything — it only re-renders the active clock between referee polls.
+// On each poll, applyRefereeState resets refereeClockAt and snaps back to truth.
+function ensureClockTick() {
+  if (clockTickInterval) return;
+  clockTickInterval = setInterval(() => {
+    if (whiteTime === null || blackTime === null || gameOver) return;
+    renderTimers();
+  }, 1000);
 }
 
 function renderCaptured() {
@@ -343,6 +384,10 @@ function applyRefereeState(state) {
   if (state.clocks && typeof state.clocks.white === 'number') {
     whiteTime = state.clocks.white;
     blackTime = state.clocks.black;
+    // A8: stamp the moment referee truth arrived so render-only interpolation
+    // can subtract elapsed seconds between polls. This never mutates the truth.
+    refereeClockAt = Date.now();
+    ensureClockTick();
   }
   let lastMove = null;
   if (state.history && state.history.length > 0) {
@@ -459,6 +504,7 @@ function initGame() {
   legalMoves = [];
   whiteTime = null;
   blackTime = null;
+  refereeClockAt = null;
   moveHistory = [];
   refereeStatus = 'ongoing';
   gameOver = false;

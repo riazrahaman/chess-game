@@ -16,7 +16,8 @@ const {
   gameEndPresentation,
   classifySound,
   serializeRefereeState,
-  deserializeRefereeState
+  deserializeRefereeState,
+  formatClockTick
 } = require('./engine.js');
 
 let passed = 0;
@@ -67,6 +68,28 @@ function cloneBoardHelper(board) {
 }
 
 console.log('--- Running Chess Engine Self-Tests ---\n');
+
+// A8: hermetic display-only clock formatter tests. formatClockTick is a pure
+// function used by the UI render layer for interpolation; it never mutates or
+// persists. Below 10s it shows tenths (e.g. 0:09.4); otherwise m:ss.
+assert(formatClockTick(600) === '10:00',
+  'A8: formatClockTick renders 600s as 10:00');
+assert(formatClockTick(59.9) === '0:59',
+  'A8: formatClockTick renders 59.9s (whole seconds) as 0:59 at the tenths threshold boundary');
+assert(formatClockTick(9.4) === '0:09.4',
+  'A8: formatClockTick renders 9.4s with tenths below the 10s threshold');
+assert(formatClockTick(9.99) === '0:09.9',
+  'A8: formatClockTick floors tenths (9.99 -> 0:09.9), never rounding up to 0:10.0');
+assert(formatClockTick(0.5) === '0:00.5',
+  'A8: formatClockTick renders half a second as 0:00.5');
+assert(formatClockTick(0) === '0:00.0',
+  'A8: formatClockTick renders zero as 0:00.0 with tenths');
+assert(formatClockTick(-5) === '0:00.0',
+  'A8: formatClockTick clamps negative seconds to 0:00.0');
+assert(formatClockTick(10) === '0:10',
+  'A8: formatClockTick renders exactly 10s without tenths (threshold is exclusive)');
+assert(formatClockTick(9.999) === '0:09.9',
+  'A8: formatClockTick just below 10s still floors tenths (9.999 -> 0:09.9)');
 
 // E5. SAN and PGN conversion stays hermetic and replays only the supplied
 // coordinate history; it does not depend on a server or browser state.
