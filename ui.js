@@ -782,10 +782,11 @@ async function submitMoveToReferee(moveStr) {
   const seatToken = (typeof window !== 'undefined' && window.sessionStorage && window.sessionStorage.getItem('chess_seat_token')) || currentSeatToken;
   if (seatToken) headers['X-Seat-Token'] = seatToken;
 
+  const clientSentAt = Date.now();
   return runRefereeCommand('Submitting move', () => fetch('/api/move', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ move: moveStr })
+      body: JSON.stringify({ move: moveStr, clientSentAt })
     }));
 }
 
@@ -2162,6 +2163,34 @@ if (btnClaimBlack) btnClaimBlack.onclick = () => claimSeat('black');
 const btnLeaveSeat = document.getElementById('leave-seat-btn');
 if (btnLeaveSeat) btnLeaveSeat.onclick = leaveSeat;
 
+let measuredLatency = null;
+let clockOffset = 0;
+
+async function syncNtpClock() {
+  const t0 = Date.now();
+  try {
+    const res = await fetch(`/api/time?t0=${t0}`);
+    if (res.ok) {
+      const data = await res.json();
+      const t3 = Date.now();
+      const t1 = data.serverReceiveTime || data.serverTime || t3;
+      const t2 = data.serverTransmitTime || t1;
+      const rtt = Math.max(0, (t3 - t0) - (t2 - t1));
+      measuredLatency = Math.round(rtt / 2);
+      clockOffset = Math.round(((t1 - t0) + (t2 - t3)) / 2);
+      updatePingUI();
+    }
+  } catch (e) {}
+}
+
+function updatePingUI() {
+  const pingEl = document.getElementById('ping-badge');
+  if (pingEl && measuredLatency !== null) {
+    pingEl.textContent = `${measuredLatency}ms`;
+    pingEl.title = `Latency: ${measuredLatency}ms (Offset: ${clockOffset}ms)`;
+  }
+}
+
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('keydown', handleGlobalScrubberKeydown);
   window.jumpToPly = jumpToPly;
@@ -2187,6 +2216,10 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.getCurrentSeatRole = () => currentSeatRole;
   window.getCurrentSeatToken = () => currentSeatToken;
   window.updateSeatUI = updateSeatUI;
+  window.syncNtpClock = syncNtpClock;
+  window.getMeasuredLatency = () => measuredLatency;
+  window.getClockOffset = () => clockOffset;
+  window.updatePingUI = updatePingUI;
 }
 
 initGame();
