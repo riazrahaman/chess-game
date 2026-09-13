@@ -267,6 +267,39 @@ async function main() {
   context.setConnectionState('connected', 'Connected to referee.');
   assert(elements.get('connection-status').dataset.state === 'connected', 'successful recovery returns connection status to connected');
 
+  // --- UX Polish Tests: Pre-moves, Escape, and Touch ---
+  // On White's turn, select Black piece e7, target e5
+  elements.get('e7').onclick();
+  elements.get('e5').onclick();
+  assert(elements.get('e7').classList.contains('premove-source') && elements.get('e5').classList.contains('premove-target'), 'premove on opponent turn highlights premove source and target');
+
+  // Pressing Escape clears premove highlights
+  const escPremove = keyEvent('Escape');
+  elements.get('e7').onkeydown(escPremove);
+  assert(escPremove.prevented && !elements.get('e7').classList.contains('premove-source') && !elements.get('e5').classList.contains('premove-target'), 'Escape key clears queued premove');
+
+  // Queue premove e7e5 again
+  elements.get('e7').onclick();
+  elements.get('e5').onclick();
+
+  // Simulating move submission on referee state update to Black turn
+  let submittedPremove = null;
+  harness.setFetch(async (url, opts) => {
+    if (url === '/api/move') submittedPremove = JSON.parse(opts.body).move;
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  });
+
+  const nextStateBlack = {
+    ...ongoing,
+    board: {
+      turn: 'black',
+      pieces: { ...ongoing.board.pieces }
+    }
+  };
+  context.applyRefereeState(nextStateBlack);
+  await new Promise(resolve => setImmediate(resolve));
+  assert(submittedPremove === 'e7e5', 'premove automatically submits to referee when turn updates to opponent color');
+
   console.log(`\n--- Gate 4 Self-Test Summary ---\nPassed: ${passed}\nFailed: ${failed}`);
   if (failed > 0) process.exit(1);
   console.log('\nAll Gate 4 accessibility self-tests PASSED successfully!');
