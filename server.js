@@ -138,7 +138,8 @@ const MIME = {
   '.css': 'text/css',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
-  '.ico': 'image/x-icon'
+  '.ico': 'image/x-icon',
+  '.wasm': 'application/wasm'
 };
 
 const MAX_BODY_BYTES = 8192;
@@ -151,6 +152,8 @@ const ALLOWED_FILES = new Set([
   'ui.js',
   'pieces.js',
   'stockfish-worker.js',
+  'stockfish.js',
+  'stockfish.wasm',
   'CBURNETT-LICENSE.txt'
 ]);
 
