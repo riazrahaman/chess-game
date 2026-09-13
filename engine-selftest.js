@@ -371,6 +371,10 @@ execFileSync(process.execPath, [require('path').join(__dirname, 'pieces-selftest
 });
 const originalStateFile = fs.existsSync(stateFile) ? fs.readFileSync(stateFile) : null;
 process.env.CHESS_STATE_FILE = stateFile;
+// gate3: a stale journal from a prior run gets replayed on cold boot — remove it
+const journalFile = require('path').join(__dirname, '.referee-journal.jsonl');
+const originalJournalFile = fs.existsSync(journalFile) ? fs.readFileSync(journalFile) : null;
+try { fs.unlinkSync(journalFile); } catch (error) { if (error.code !== 'ENOENT') throw error; }
 // D1: short heartbeat/interval so SSE tests resolve quickly (hermetic).
 process.env.CHESS_SSE_HEARTBEAT_MS = '200';
 process.env.CHESS_SSE_WATCH_INTERVAL_MS = '50';
@@ -379,6 +383,11 @@ process.once('exit', () => {
     try { fs.unlinkSync(stateFile); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   } else {
     fs.writeFileSync(stateFile, originalStateFile);
+  }
+  if (originalJournalFile === null) {
+    try { fs.unlinkSync(journalFile); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  } else {
+    fs.writeFileSync(journalFile, originalJournalFile);
   }
 });
 
