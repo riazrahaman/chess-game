@@ -2,7 +2,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { execFile } = require('child_process');
+
+const referee = require('./referee-service.js');
 
 const PORT = 39281;
 const DIR = __dirname;
@@ -156,10 +157,14 @@ const ALLOWED_DIRS = new Set([
   'assets'
 ]);
 
-function sendJsonError(res, statusCode, message) {
+function sendJson(res, statusCode, payload) {
   res.statusCode = statusCode;
   res.setHeader('Content-Type', 'application/json');
-  res.end(JSON.stringify({ ok: false, error: message }));
+  res.end(JSON.stringify(payload));
+}
+
+function sendJsonError(res, statusCode, message) {
+  sendJson(res, statusCode, { ok: false, error: message });
 }
 
 function isOriginAllowed(origin) {
@@ -202,9 +207,9 @@ function isDotfile(relPath) {
   return relPath.split('/').some(seg => seg.startsWith('.'));
 }
 
-// C2/C4: move submission goes through the referee helper so the referee file
-// stays the single source of truth. C4 timeout responses retain the helper's
-// JSON body and receive HTTP 409. moveStr: 4-5 chars (e2e4, e7e8q).
+// C2/C4: move submission goes through the in-process referee service
+// (long-lived, serialized command queue). moveStr: 4-5 chars (e2e4, e7e8q).
+// The body-cap + CORS/origin checks happen BEFORE queue entry (gate1 + d1).
 function handleMoveEndpoint(req, res) {
   let body = '';
   let oversized = false;
@@ -219,20 +224,26 @@ function handleMoveEndpoint(req, res) {
   req.on('end', () => {
     if (oversized) return;
     let moveStr = '';
+    let cmdId = null;
+    let expectedRevision = undefined;
     try {
-      moveStr = String(JSON.parse(body).move || '');
+      const parsed = JSON.parse(body);
+      moveStr = String(parsed.move || '');
+      if (parsed.id !== undefined) cmdId = parsed.id;
+      if (parsed.expectedRevision !== undefined) expectedRevision = Number(parsed.expectedRevision);
     } catch (e) { /* fall through */ }
     if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(moveStr)) {
       sendJsonError(res, 400, 'bad move format');
       return;
     }
-    execFile('node', [path.join(DIR, 'referee-helper.cjs'), 'move', moveStr], {
-      cwd: DIR, env: process.env
-    }, (err, stdout) => {
-      res.setHeader('Content-Type', 'application/json');
-      const payload = stdout ? stdout.toString() : JSON.stringify({ ok: false, error: 'referee produced no output' });
-      res.statusCode = err ? 409 : 200;
-      res.end(payload);
+    const command = {
+      id: cmdId !== null ? cmdId : 'move:' + moveStr + ':' + Date.now() + ':' + Math.random().toString(36).slice(2),
+      type: 'move',
+      args: { move: moveStr },
+      expectedRevision
+    };
+    referee.getReferee().enqueue(command).then(result => {
+      sendJson(res, result.httpStatus || (result.ok ? 200 : 409), result);
     });
   });
   req.on('error', () => {
@@ -240,22 +251,77 @@ function handleMoveEndpoint(req, res) {
   });
 }
 
-function handleResetEndpoint(res) {
-  execFile('node', [path.join(DIR, 'referee-helper.cjs'), 'reset'], { cwd: DIR }, (err, stdout) => {
-    res.setHeader('Content-Type', 'application/json');
-    res.statusCode = err ? 500 : 200;
-    res.end(stdout ? stdout.toString() : JSON.stringify({ ok: false, error: 'referee produced no output' }));
+function readBody(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    let oversized = false;
+    req.on('data', chunk => {
+      if (oversized) return;
+      body += chunk;
+      if (Buffer.byteLength(body) > maxBytes) {
+        oversized = true;
+        reject(new Error('request body too large'));
+      }
+    });
+    req.on('end', () => {
+      if (oversized) return;
+      resolve(body);
+    });
+    req.on('error', reject);
   });
 }
 
-function handleRefereeCommand(res, command, args = []) {
-  execFile('node', [path.join(DIR, 'referee-helper.cjs'), command, ...args], {
-    cwd: DIR, env: process.env
-  }, (err, stdout) => {
-    res.setHeader('Content-Type', 'application/json');
-    res.statusCode = err ? 409 : 200;
-    res.end(stdout ? stdout.toString() : JSON.stringify({ ok: false, error: 'referee produced no output' }));
+function handleQueueCommand(req, res, commandType, argsExtractor) {
+  readBody(req, MAX_BODY_BYTES).then(body => {
+    let parsed = {};
+    try { parsed = body ? JSON.parse(body) : {}; } catch (e) { parsed = {}; }
+    const { args, cmdId, expectedRevision } = argsExtractor(parsed, req);
+    const command = {
+      id: cmdId !== null ? cmdId : commandType + ':' + Date.now() + ':' + Math.random().toString(36).slice(2),
+      type: commandType,
+      args,
+      expectedRevision
+    };
+    referee.getReferee().enqueue(command).then(result => {
+      sendJson(res, result.httpStatus || (result.ok ? 200 : 409), result);
+    });
+  }).catch(() => {
+    if (!res.headersSent) sendJsonError(res, 413, 'request body too large');
   });
+}
+
+function handleResetEndpoint(req, res) {
+  handleQueueCommand(req, res, 'reset', (parsed) => ({
+    args: {},
+    cmdId: parsed.id !== undefined ? parsed.id : null,
+    expectedRevision: parsed.expectedRevision !== undefined ? Number(parsed.expectedRevision) : undefined
+  }));
+}
+
+function handleResignEndpoint(req, res) {
+  const query = new URL(req.url, 'http://127.0.0.1').searchParams;
+  const color = query.has('w') ? 'white' : query.has('b') ? 'black' : query.get('color');
+  handleQueueCommand(req, res, 'resign', (parsed) => ({
+    args: { color: color || '' },
+    cmdId: parsed.id !== undefined ? parsed.id : null,
+    expectedRevision: parsed.expectedRevision !== undefined ? Number(parsed.expectedRevision) : undefined
+  }));
+}
+
+function handleDrawEndpoint(req, res) {
+  handleQueueCommand(req, res, 'draw', (parsed) => ({
+    args: {},
+    cmdId: parsed.id !== undefined ? parsed.id : null,
+    expectedRevision: parsed.expectedRevision !== undefined ? Number(parsed.expectedRevision) : undefined
+  }));
+}
+
+function handleUndoEndpoint(req, res) {
+  handleQueueCommand(req, res, 'undo', (parsed) => ({
+    args: {},
+    cmdId: parsed.id !== undefined ? parsed.id : null,
+    expectedRevision: parsed.expectedRevision !== undefined ? Number(parsed.expectedRevision) : undefined
+  }));
 }
 
 function isApiRequest(urlPath) {
@@ -302,15 +368,13 @@ function createServer() {
     }
     if (req.method === 'GET' && urlPath === '/api/events') { startStateWatcher(); handleSSEEndpoint(req, res); return; }
     if (req.method === 'POST' && urlPath === '/api/move') { handleMoveEndpoint(req, res); return; }
-    if (req.method === 'POST' && urlPath === '/api/reset') { handleResetEndpoint(res); return; }
+    if (req.method === 'POST' && urlPath === '/api/reset') { handleResetEndpoint(req, res); return; }
     if ((req.method === 'GET' || req.method === 'POST') && urlPath === '/api/resign') {
-      const query = new URL(req.url, 'http://127.0.0.1').searchParams;
-      const color = query.has('w') ? 'white' : query.has('b') ? 'black' : query.get('color');
-      handleRefereeCommand(res, 'resign', [color || '']);
+      handleResignEndpoint(req, res);
       return;
     }
     if (req.method === 'POST' && urlPath === '/api/draw') {
-      handleRefereeCommand(res, 'draw');
+      handleDrawEndpoint(req, res);
       return;
     }
     if (req.method === 'POST' && urlPath === '/api/draw-claim') {
@@ -318,7 +382,7 @@ function createServer() {
       return;
     }
     if (req.method === 'POST' && urlPath === '/api/undo') {
-      handleRefereeCommand(res, 'undo');
+      handleUndoEndpoint(req, res);
       return;
     }
 
