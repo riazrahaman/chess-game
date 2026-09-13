@@ -10,6 +10,20 @@ const STATE_FILE = process.env.CHESS_STATE_FILE || path.join(DIR, '.referee-stat
 const SSE_HEARTBEAT_MS = Number(process.env.CHESS_SSE_HEARTBEAT_MS) || 15000;
 const SSE_WATCH_INTERVAL_MS = Number(process.env.CHESS_SSE_WATCH_INTERVAL_MS) || 250;
 
+const DEFAULT_ALLOWED_ORIGINS = [
+  `http://localhost:${PORT}`,
+  `http://127.0.0.1:${PORT}`
+];
+
+function getAllowedOrigins() {
+  if (process.env.CHESS_ALLOWED_ORIGIN) {
+    return process.env.CHESS_ALLOWED_ORIGIN.split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+  }
+  return DEFAULT_ALLOWED_ORIGINS;
+}
+
 // D1: SSE client registry. Each connected client holds its res object and a
 // per-connection heartbeat timer. A shared watcher (fs.watchFile) pushes state
 // JSON to every client whenever the referee-state file content hash changes.
@@ -79,12 +93,17 @@ function removeSSEClient(client) {
 }
 
 function handleSSEEndpoint(req, res) {
-  res.writeHead(200, {
+  const origin = req.headers.origin;
+  const headers = {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-store, no-cache, must-revalidate',
-    'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*'
-  });
+    'Connection': 'keep-alive'
+  };
+  if (origin && isOriginAllowed(origin)) {
+    headers['Access-Control-Allow-Origin'] = origin;
+    headers['Vary'] = 'Origin';
+  }
+  res.writeHead(200, headers);
   res.write('\n');
 
   const client = { res, heartbeatTimer: null };
@@ -141,6 +160,24 @@ function sendJsonError(res, statusCode, message) {
   res.statusCode = statusCode;
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify({ ok: false, error: message }));
+}
+
+function isOriginAllowed(origin) {
+  if (!origin) return true;
+  return getAllowedOrigins().includes(origin);
+}
+
+function checkCors(req, res) {
+  const origin = req.headers.origin;
+  if (origin && !isOriginAllowed(origin)) {
+    sendJsonError(res, 403, 'origin not allowed');
+    return false;
+  }
+  if (origin && isOriginAllowed(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+  return true;
 }
 
 function isPathAllowed(reqPath) {
@@ -227,13 +264,28 @@ function isApiRequest(urlPath) {
 
 function createServer() {
   return http.createServer((req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
 
-    if (req.method === 'OPTIONS') { res.statusCode = 204; res.end(); return; }
+    if (req.method === 'OPTIONS') {
+      const origin = req.headers.origin;
+      if (origin && !isOriginAllowed(origin)) {
+        sendJsonError(res, 403, 'origin not allowed');
+        return;
+      }
+      if (origin && isOriginAllowed(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+      }
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+
     const urlPath = req.url.split('?')[0];
+
+    if (!checkCors(req, res)) return;
 
     if (req.method === 'GET' && urlPath === '/api/events') { startStateWatcher(); handleSSEEndpoint(req, res); return; }
     if (req.method === 'POST' && urlPath === '/api/move') { handleMoveEndpoint(req, res); return; }
