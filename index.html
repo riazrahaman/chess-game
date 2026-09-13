@@ -117,9 +117,14 @@
             align-items: center;
             background-color: var(--bg-page);
             color: var(--text-color);
+            margin: 0;
+            min-height: 100vh;
+            padding: 0 1rem 1.5rem;
+            box-sizing: border-box;
         }
         #game-container {
-            margin-top: 20px;
+            margin-top: 8px;
+            width: min(100%, 640px);
         }
         #board {
             display: grid;
@@ -140,6 +145,14 @@
             user-select: none;
             position: relative;
         }
+        .square:focus-visible,
+        button:focus-visible,
+        select:focus-visible {
+            outline: 4px solid #2563eb;
+            outline-offset: -4px;
+            z-index: 20;
+        }
+        .square[aria-disabled="true"] { cursor: not-allowed; }
         .chess-piece {
             display: block;
             width: 86%;
@@ -242,7 +255,29 @@
         #status-panel {
             margin-top: 20px;
             text-align: center;
+            width: min(100%, 680px);
         }
+        #command-controls {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        #connection-status,
+        #command-status {
+            min-height: 1.4em;
+            margin-top: 6px;
+        }
+        #connection-status[data-state="disconnected"],
+        #connection-status[data-state="reconnecting"],
+        #command-status[data-state="error"] {
+            color: #b91c1c;
+            font-weight: 700;
+        }
+        #command-status[data-state="pending"] { font-weight: 700; }
+        #retry-command.hidden { display: none; }
+        #board[aria-busy="true"] { opacity: 0.78; }
         #timers {
             display: flex;
             justify-content: center;
@@ -382,6 +417,18 @@
         }
         #game-end-banner { margin: 0 0 18px; }
 
+        .visually-hidden {
+            position: absolute !important;
+            width: 1px !important;
+            height: 1px !important;
+            padding: 0 !important;
+            margin: -1px !important;
+            overflow: hidden !important;
+            clip: rect(0, 0, 0, 0) !important;
+            white-space: nowrap !important;
+            border: 0 !important;
+        }
+
         /* A6: Theme selector bar */
         #theme-bar {
             display: flex;
@@ -399,6 +446,31 @@
         }
         #theme-mode-toggle {
             cursor: pointer;
+        }
+        @media (max-width: 720px) {
+            body { padding-inline: 0.5rem; }
+            h1 { font-size: 1.5rem; margin-block: 0.7rem; }
+            #theme-bar { flex-wrap: wrap; justify-content: center; }
+            #board-shell { grid-template-columns: 1.1em minmax(0, 1fr); grid-template-rows: auto 1.1em; }
+            #rank-labels, #file-labels { font-size: 0.7em; }
+            #timers { gap: 8px; }
+            .player-tray { min-width: 0; flex: 1; }
+            #history-container { width: min(100%, 420px); }
+            #command-controls button { flex: 1 1 86px; padding: 10px 8px; }
+        }
+        @media (max-height: 760px) and (min-width: 721px) {
+            h1 { font-size: 1.45rem; margin-block: 0.55rem; }
+            #board { width: min(calc(100vw - 2.5em), calc(100vh - 220px), 640px); }
+            #status-panel { margin-top: 10px; }
+            #history-container { max-height: 130px; margin-top: 10px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                scroll-behavior: auto !important;
+                transition-duration: 0.01ms !important;
+            }
         }
     </style>
 </head>
@@ -419,7 +491,7 @@
     <div id="game-container">
         <div id="board-shell">
             <div id="rank-labels" aria-hidden="true"></div>
-            <div id="board"></div>
+            <div id="board" role="grid" aria-label="Chess board" aria-describedby="board-instructions" aria-busy="true"></div>
             <div></div>
             <div id="file-labels" aria-hidden="true"></div>
         </div>
@@ -438,15 +510,20 @@
         <div id="material-advantage">Material even</div>
     </div>
     <div id="status-panel">
+        <p id="board-instructions" class="visually-hidden">Use the arrow keys to move between squares. Press Enter or Space to select a piece or move it.</p>
         <div id="info">Turn: White</div>
-        <div id="status">Status: Ongoing</div>
-        <br>
-        <button id="new-game">New Game</button>
-        <button id="copy-pgn">Copy PGN</button>
-        <button id="flip-board">Flip</button>
-        <button id="resign">Resign</button>
-        <button id="offer-draw">Draw</button>
-        <button id="undo">Undo</button>
+        <div id="status" aria-live="polite">Status: Ongoing</div>
+        <div id="connection-status" role="status" aria-live="polite" data-state="connecting">Connecting to referee…</div>
+        <div id="command-status" role="status" aria-live="assertive" data-state="idle"></div>
+        <button id="retry-command" class="hidden" type="button">Retry last action</button>
+        <div id="command-controls">
+            <button id="new-game" type="button">New Game</button>
+            <button id="copy-pgn" type="button">Copy PGN</button>
+            <button id="flip-board" type="button">Flip</button>
+            <button id="resign" type="button">Resign</button>
+            <button id="offer-draw" type="button">Draw</button>
+            <button id="undo" type="button">Undo</button>
+        </div>
     </div>
     <div id="history-container">
         <table>
@@ -460,22 +537,24 @@
             <tbody id="history-body"></tbody>
         </table>
     </div>
-    <div id="promo-modal" class="hidden">
+    <div id="promo-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="promo-title" aria-describedby="promo-description">
         <div id="promo-box">
-            <div id="promo-title">Promote to</div>
+            <div id="promo-title">Promote pawn</div>
+            <p id="promo-description">Choose the piece for promotion.</p>
             <div id="promo-choices">
-                <button class="promo-btn" data-piece="q"></button>
-                <button class="promo-btn" data-piece="r"></button>
-                <button class="promo-btn" data-piece="b"></button>
-                <button class="promo-btn" data-piece="n"></button>
+                <button class="promo-btn" data-piece="q" type="button" aria-label="Promote to queen"></button>
+                <button class="promo-btn" data-piece="r" type="button" aria-label="Promote to rook"></button>
+                <button class="promo-btn" data-piece="b" type="button" aria-label="Promote to bishop"></button>
+                <button class="promo-btn" data-piece="n" type="button" aria-label="Promote to knight"></button>
             </div>
-            <button id="promo-cancel">Cancel</button>
+            <button id="promo-cancel" type="button">Cancel promotion</button>
         </div>
     </div>
-    <div id="game-end-overlay" class="hidden" role="dialog" aria-live="polite">
+    <div id="game-end-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="game-end-banner" aria-describedby="game-end-description">
         <div id="game-end-card">
             <h2 id="game-end-banner"></h2>
-            <button id="rematch">Rematch</button>
+            <p id="game-end-description">The game has ended. Start a rematch to play again.</p>
+            <button id="rematch" type="button">Start rematch</button>
         </div>
     </div>
     <script src="engine.js"></script>
