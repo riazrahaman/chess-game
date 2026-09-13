@@ -804,6 +804,12 @@ function classifySound(prevRefState, nextRefState) {
   );
   if (captured) return 'capture';
   if (getKingStatus(nextRefState.board, nextRefState.board.turn).check) return 'check';
+
+  const lastMove = nextHistory[nextHistory.length - 1];
+  const fromPiece = prevRefState.board && prevRefState.board.pieces && prevRefState.board.pieces[lastMove.slice(0, 2)];
+  if (fromPiece && fromPiece.type === 'k' && ['e1g1', 'e1c1', 'e8g8', 'e8c8'].includes(lastMove)) {
+    return 'castle';
+  }
   return 'move';
 }
 

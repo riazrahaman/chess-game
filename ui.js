@@ -205,26 +205,116 @@ function renderCoordinates() {
   if (fileLabelsElement) fileLabelsElement.innerHTML = getFileLabels(boardFlipped).map(label => `<span>${label}</span>`).join('');
 }
 
+let soundEnabled = true;
+const SOUND_STORAGE_KEY = 'chess.sound.enabled';
+
+function loadSoundPreference() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem(SOUND_STORAGE_KEY);
+      if (stored !== null) soundEnabled = stored === 'true';
+    }
+  } catch (e) {}
+}
+
+function setSoundEnabled(enabled) {
+  soundEnabled = !!enabled;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(SOUND_STORAGE_KEY, String(soundEnabled));
+    }
+  } catch (e) {}
+  const btn = document.getElementById('sound-toggle');
+  if (btn) btn.textContent = soundEnabled ? 'Sound: On' : 'Sound: Off';
+}
+
 function playSound(kind) {
-  if (!kind) return;
-  const AudioCtor = window.AudioContext || window.webkitAudioContext;
+  if (!kind || !soundEnabled) return;
+  const AudioCtor = (typeof window !== 'undefined') && (window.AudioContext || window.webkitAudioContext);
   if (!AudioCtor) return;
   try {
     if (!audioContext) audioContext = new AudioCtor();
     if (audioContext.state === 'suspended') audioContext.resume().catch(() => {});
-    const frequencies = { move: 440, capture: 330, check: 660, gameEnd: 220 };
-    const oscillator = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-    oscillator.frequency.value = frequencies[kind] || frequencies.move;
-    oscillator.type = 'sine';
-    gain.gain.setValueAtTime(0.0001, audioContext.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.12, audioContext.currentTime + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.14);
-    oscillator.connect(gain).connect(audioContext.destination);
-    oscillator.start();
-    oscillator.stop(audioContext.currentTime + 0.15);
+
+    const now = audioContext.currentTime;
+
+    // Mobile haptic feedback
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      try {
+        if (kind === 'capture') navigator.vibrate([15, 30, 20]);
+        else if (kind === 'check') navigator.vibrate([30, 40, 30]);
+        else if (kind === 'gameEnd') navigator.vibrate([50, 50, 50]);
+        else navigator.vibrate(10);
+      } catch (err) {}
+    }
+
+    if (kind === 'capture') {
+      // Acoustic wood capture
+      const osc = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(160, now);
+      osc.frequency.exponentialRampToValueAtTime(55, now + 0.12);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+      osc.connect(gain).connect(audioContext.destination);
+      osc.start(now);
+      osc.stop(now + 0.15);
+    } else if (kind === 'check') {
+      // Acoustic bell chime
+      [784, 1046].forEach((freq, i) => {
+        const osc = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + i * 0.03);
+        gain.gain.setValueAtTime(0.2, now + i * 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
+        osc.connect(gain).connect(audioContext.destination);
+        osc.start(now + i * 0.03);
+        osc.stop(now + 0.26);
+      });
+    } else if (kind === 'castle') {
+      // Dual staggered piece clicks
+      [now, now + 0.07].forEach(t => {
+        const osc = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(300, t);
+        osc.frequency.exponentialRampToValueAtTime(150, t + 0.06);
+        gain.gain.setValueAtTime(0.22, t);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+        osc.connect(gain).connect(audioContext.destination);
+        osc.start(t);
+        osc.stop(t + 0.08);
+      });
+    } else if (kind === 'gameEnd') {
+      // Harmonious resolution chord
+      [261.63, 329.63, 392.00, 523.25].forEach((freq, i) => {
+        const osc = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + i * 0.05);
+        gain.gain.setValueAtTime(0.18, now + i * 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+        osc.connect(gain).connect(audioContext.destination);
+        osc.start(now + i * 0.05);
+        osc.stop(now + 0.48);
+      });
+    } else {
+      // Standard piece move: wood/felt transient
+      const osc = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(260, now);
+      osc.frequency.exponentialRampToValueAtTime(130, now + 0.08);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+      osc.connect(gain).connect(audioContext.destination);
+      osc.start(now);
+      osc.stop(now + 0.1);
+    }
   } catch (e) {
-    // Audio is optional; a blocked or unavailable context must not affect play.
+    // Audio is optional
   }
 }
 
@@ -1227,6 +1317,14 @@ function initThemeBar() {
       applyDarkMode(nextDark);
       updateModeToggleLabel(nextDark);
       persistTheme(THEME_MODE_KEY, nextDark ? 'dark' : 'light');
+    };
+  }
+  const soundToggleButton = document.getElementById('sound-toggle');
+  if (soundToggleButton) {
+    loadSoundPreference();
+    soundToggleButton.textContent = soundEnabled ? 'Sound: On' : 'Sound: Off';
+    soundToggleButton.onclick = () => {
+      setSoundEnabled(!soundEnabled);
     };
   }
 }
