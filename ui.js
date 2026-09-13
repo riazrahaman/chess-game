@@ -39,6 +39,8 @@ let queuedPremove = null;
 let touchDragState = null;
 let latestGameReview = null;
 let evalHistory = [0];
+let currentSeatRole = null;
+let currentSeatToken = null;
 
 function clearPremove() {
   premoveQueue = [];
@@ -776,9 +778,13 @@ if (promoModal) promoModal.onkeydown = event => {
 // promo suffix when applicable) is validated server-side and lands in
 // .referee-state.json. The poll picks it up and re-renders from that truth.
 async function submitMoveToReferee(moveStr) {
+  const headers = { 'Content-Type': 'application/json' };
+  const seatToken = (typeof window !== 'undefined' && window.sessionStorage && window.sessionStorage.getItem('chess_seat_token')) || currentSeatToken;
+  if (seatToken) headers['X-Seat-Token'] = seatToken;
+
   return runRefereeCommand('Submitting move', () => fetch('/api/move', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ move: moveStr })
     }));
 }
@@ -2076,6 +2082,86 @@ function updateEvalGraphUI() {
   }
 }
 
+function updateSeatUI() {
+  const badge = document.getElementById('seat-badge');
+  const claimWhite = document.getElementById('claim-white-btn');
+  const claimBlack = document.getElementById('claim-black-btn');
+  const leaveBtn = document.getElementById('leave-seat-btn');
+
+  if (badge) {
+    if (currentSeatRole === 'white') {
+      badge.textContent = 'Seated: White';
+      badge.style.background = '#2563eb';
+      badge.style.color = 'white';
+    } else if (currentSeatRole === 'black') {
+      badge.textContent = 'Seated: Black';
+      badge.style.background = '#1e293b';
+      badge.style.color = 'white';
+    } else {
+      badge.textContent = 'Unseated';
+      badge.style.background = '#e2e8f0';
+      badge.style.color = '#334155';
+    }
+  }
+
+  if (leaveBtn) leaveBtn.classList.toggle('hidden', !currentSeatRole);
+  if (claimWhite) claimWhite.disabled = currentSeatRole === 'white';
+  if (claimBlack) claimBlack.disabled = currentSeatRole === 'black';
+}
+
+async function claimSeat(role) {
+  try {
+    const res = await fetch('/api/seat/claim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role })
+    });
+    const data = await res.json();
+    if (res.ok && data.token) {
+      currentSeatRole = role;
+      currentSeatToken = data.token;
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        window.sessionStorage.setItem('chess_seat_token', data.token);
+        window.sessionStorage.setItem('chess_seat_role', role);
+      }
+      updateSeatUI();
+      return true;
+    } else {
+      if (typeof alert === 'function') alert(data.error || 'Failed to claim seat');
+      return false;
+    }
+  } catch (e) {
+    return false;
+  }
+}
+
+async function leaveSeat() {
+  if (!currentSeatToken) return;
+  try {
+    await fetch('/api/seat/release', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Seat-Token': currentSeatToken
+      }
+    });
+  } catch (e) {}
+  currentSeatRole = null;
+  currentSeatToken = null;
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    window.sessionStorage.removeItem('chess_seat_token');
+    window.sessionStorage.removeItem('chess_seat_role');
+  }
+  updateSeatUI();
+}
+
+const btnClaimWhite = document.getElementById('claim-white-btn');
+if (btnClaimWhite) btnClaimWhite.onclick = () => claimSeat('white');
+const btnClaimBlack = document.getElementById('claim-black-btn');
+if (btnClaimBlack) btnClaimBlack.onclick = () => claimSeat('black');
+const btnLeaveSeat = document.getElementById('leave-seat-btn');
+if (btnLeaveSeat) btnLeaveSeat.onclick = leaveSeat;
+
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('keydown', handleGlobalScrubberKeydown);
   window.jumpToPly = jumpToPly;
@@ -2096,6 +2182,11 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.setEvalHistory = (h) => { evalHistory = h; };
   window.updateOpeningExplorerUI = updateOpeningExplorerUI;
   window.updateEvalGraphUI = updateEvalGraphUI;
+  window.claimSeat = claimSeat;
+  window.leaveSeat = leaveSeat;
+  window.getCurrentSeatRole = () => currentSeatRole;
+  window.getCurrentSeatToken = () => currentSeatToken;
+  window.updateSeatUI = updateSeatUI;
 }
 
 initGame();

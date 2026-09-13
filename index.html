@@ -716,6 +716,12 @@
         </select>
         <button id="theme-mode-toggle">Dark mode</button>
         <button id="sound-toggle">Sound: On</button>
+        <div id="seat-bar" style="display:inline-flex; align-items:center; gap:6px; margin-left:12px;">
+            <span id="seat-badge" style="font-size:0.75rem; padding:2px 6px; border-radius:4px; background:#e2e8f0; font-weight:600;">Unseated</span>
+            <button id="claim-white-btn" type="button" style="font-size:0.75rem; padding:2px 8px;">Play White</button>
+            <button id="claim-black-btn" type="button" style="font-size:0.75rem; padding:2px 8px;">Play Black</button>
+            <button id="leave-seat-btn" type="button" class="hidden" style="font-size:0.75rem; padding:2px 8px;">Leave Seat</button>
+        </div>
     </div>
     <div id="game-container">
         <div id="eval-bar-container" role="progressbar" aria-label="Engine Evaluation" aria-valuenow="50" aria-valuemin="0" aria-valuemax="100">
