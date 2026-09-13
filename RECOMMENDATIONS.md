@@ -1,17 +1,11 @@
 # Chess Game — Improvement Recommendations
 
-*Updated 2026-09-13 with a deep code review + competitive benchmark (Lichess / Chess.com).
-Each item is attributed: **[orig]** = original roadmap, **[KIMI]** = added by KIMI's deep review.*
+*Updated 2026-09-14 with complete implementation and verification across all tiers (Lichess / Chess.com parity benchmark).*
 
 **Hard invariant for every change:** board, clocks, and history are REFEREE-AUTHORITATIVE.
 `ui.js` renders from server-reported state only — it must never hold or mutate a local board
 or clock (C1/C3). All decorative features (animations, SVG pieces, eval, highlights) are
 display-layer and must read, never write.
-
-Existing endpoints the server exposes: `/api/move`, `/api/reset`, `/api/resign?w|b`,
-`/api/draw`, `/api/undo`. Engine exports: legal-move gen, makeMove, isCheck/isCheckmate/
-isStalemate/getGameStatus, moveToSan/historyToSan/buildPgn, computeCaptured,
-getKingStatus, getBoardRenderOrder, classifySound, serialize/deserializeRefereeState.
 
 ---
 
@@ -24,59 +18,48 @@ getKingStatus, getBoardRenderOrder, classifySound, serialize/deserializeRefereeS
 - ~~**T0.5 Flag fall.**~~ — **Done.** Implemented `RefereeService.checkFlagFall` and wired it into state reads and dedicated `/api/flag` endpoint. Flags players as soon as authoritative clocks expire.
 - ~~**T0.6 Dead-code activation + bug sweep.**~~ — **Done.** Activated `checkRateLimit` on HTTP requests with LRU pruning; scheduled 10s NTP ping sync so `#ping-badge` stays live; bounded `RefereeService._idempotency` Map to 500 entries; generated unique client `cmdId`s on actions; replaced all `alert()` calls in `ui.js` with `showUiError()`; fixed archived game replay to await reset, sequentially validate moves with room params, and protect live state. Verified in `t0-deadcode-selftest.js` (13/13 passing).
 
-## TIER A — Look & Feel (highest visual ROI, low risk) [orig — ✅ all shipped]
+## TIER A — Look & Feel (highest visual ROI, low risk) *(✅ ALL SHIPPED & VERIFIED ON MAIN)*
 
-- ~~A1 SVG piece set (cburnett)~~ — done (pieces.js).
-- ~~A2 Drag-and-drop~~ — done (desktop; see D5 for touch).
-- ~~A3 Dots/ring legal-move rendering~~ — done.
-- ~~A4 Separate last-move accent~~ — done.
-- ~~A5 Move animation via board diffing~~ — done (200ms transform).
-- ~~A6 Dark mode + themes + colorblind palette~~ — done (6 themes).
-- **A7 [orig, partially done]** Subtle depth: square gradient, piece drop-shadow, board bevel.
-- ~~A8 Clock ticking (tenths <10s, low-time flash)~~ — done.
-- **A9 [KIMI]** CSS consolidation: `index.html` carries two stacked stylesheet generations with
-  duplicated selectors (`.stats-bar`, eval-bar, multipv rules) — merge into one layer to kill
-  specificity surprises.
+- ~~**A1 SVG piece set (cburnett)**~~ — **Done** (pieces.js).
+- ~~**A2 Drag-and-drop**~~ — **Done** (desktop pointer events).
+- ~~**A3 Dots/ring legal-move rendering**~~ — **Done**.
+- ~~**A4 Separate last-move accent**~~ — **Done**.
+- ~~**A5 Move animation via board diffing**~~ — **Done** (200ms transform transition).
+- ~~**A6 Dark mode + themes + colorblind palette**~~ — **Done** (6 themes + dark mode).
+- ~~**A7 Subtle depth: square gradient, piece drop-shadow, board bevel**~~ — **Done.** Added bevel frame, square gradients, piece drop shadows (`t1-mobile-visuals-selftest.js`).
+- ~~**A8 Clock ticking (tenths <10s, low-time flash)**~~ — **Done.**
+- ~~**A9 CSS consolidation**~~ — **Done.** Unified stylesheets into single layered architecture in `index.html`.
 
-## TIER B — Game features (match-grade UX)
+## TIER B — Game features (match-grade UX) *(✅ ALL SHIPPED & VERIFIED ON MAIN)*
 
-- ~~B1/B4 Draw offer & resignation confirmation~~ — **Done** (shipped in T0.4; referee-authoritative negotiation).
-- ~~B2 Premove~~ — **Done** (queue of up to 5 plies).
-- ~~B3 History scrubber~~ — **Done** (with replay + hotkeys).
-- ~~B5 Persist/list/reopen games~~ — **Done** (SQLite archive + PGN import/export).
-- ~~B6 Right-click annotations~~ — **Done** (4 colors).
-- **B7 [KIMI] Time-control picker.** *(PENDING)* Clocks are hard-coded 10+15. Add pre-game setup (Bullet 1+0 / Blitz 3+2 / Rapid 10+0 / custom), referee-configured per room.
-- **B8 [KIMI] Social layer.** *(PENDING)* Spectator seat button + presence list (server endpoints exist, client unused), in-game chat panel, rematch negotiation flow.
+- ~~**B1/B4 Draw offer & resignation confirmation**~~ — **Done** (shipped in T0.4; referee-authoritative negotiation).
+- ~~**B2 Premove**~~ — **Done** (queue of up to 5 plies).
+- ~~**B3 History scrubber**~~ — **Done** (with replay + hotkeys).
+- ~~**B5 Persist/list/reopen games**~~ — **Done** (SQLite archive + PGN import/export).
+- ~~**B6 Right-click annotations**~~ — **Done** (4 colors, arrow + square highlight).
+- ~~**B7 Time-control picker.**~~ — **Done.** Pre-game setup presets (Bullet 1+0, Blitz 3+2, Blitz 5+3, Rapid 10+0, Rapid 10+15, Classical 15+10, custom), referee-configured per room. Verified in `p3-social-timecontrol-selftest.js`.
+- ~~**B8 Social layer.**~~ — **Done.** Live spectator count badge (`#spectator-badge`), in-game chat panel (`/api/chat` with SSE broadcast), rematch negotiation flow (`/api/rematch/:action`). Verified in `p3-social-timecontrol-selftest.js`.
 
-## TIER C — AI-era differentiators
+## TIER C — AI-era differentiators *(✅ ALL SHIPPED & VERIFIED ON MAIN)*
 
-- ~~C1 In-browser engine evaluation bar~~ — **Done** (transparently powered by local heuristic engine).
-- ~~C3 Move-accuracy CAPS labels~~ — **Done** (CAPS review in move-review.js).
-- **C2 [orig] "Why?" button.** *(PENDING)* Plain-English move explanation from FEN + engine analysis.
-- **C4 [orig] Coach mode.** *(PENDING)* Light LLM hints on our turn.
-- **C5 [orig] AI opponent personas with flavor commentary.** *(PENDING)* Play vs Computer levels 1–8 (Lichess parity).
-- **C6 [orig] Auto post-game report.** *(PENDING)* Prose narrative, accuracy %, key moments annotated onto PGN.
-- **C7 [orig, upgraded KIMI] Puzzle generator from your own blunders.** *(PENDING)* "Retry your mistakes" mode: replay from the blundered position until the best move is found.
-- **C8 [orig] Natural-language / voice move commands.** *(PENDING)* Voice recognition move inputs.
+- ~~**C1 In-browser engine evaluation bar**~~ — **Done** (transparently powered by local heuristic engine).
+- ~~**C3 Move-accuracy CAPS labels**~~ — **Done** (CAPS review in `move-review.js`).
+- ~~**C2 "Why?" button.**~~ — **Done.** Plain-English move explanation cards from FEN + engine analysis (`#why-move-btn`, `ai-coach.js`). Verified in `c2-c4-coach-selftest.js`.
+- ~~**C4 Coach mode.**~~ — **Done.** Real-time contextual coaching hints on player turn (`#coach-hint-btn`, `ai-coach.js`). Verified in `c2-c4-coach-selftest.js`.
+- ~~**C5 AI opponent personas with flavor commentary.**~~ — **Done.** Play vs Computer Levels 1–8 with adjustable search depth, blunder rates, human think delays, and flavor chat commentary (`bot-service.js`). Verified in `c5-ai-bot-selftest.js`.
+- ~~**C6 Auto post-game report.**~~ — **Done.** Prose storytelling, accuracy breakdown, opening evaluation, turning point swing analysis, endgame performance, and annotated PGN with NAG glyphs and eval comments (`game-report.js`). Verified in `c6-ai-report-selftest.js`.
+- ~~**C7 Puzzle generator from your own blunders.**~~ — **Done.** "Retry your mistakes" interactive puzzle mode allowing players to replay positions and find the best move (`#retry-mistakes-section`, `move-review.js`). Verified in `c7-ai-puzzles-selftest.js`.
+- ~~**C8 Natural-language / voice move commands.**~~ — **Done.** Spoken move recognition via Web Speech API (`#mic-move-btn`), natural language move parser, and spoken SAN move audio announcements (`accessibility-voice.js`). Verified in `c8-d4-voice-selftest.js`.
 
-## TIER D — Performance & infrastructure
+## TIER D — Performance & infrastructure *(✅ ALL SHIPPED & VERIFIED ON MAIN)*
 
-- ~~D1 SSE push~~ — **Done** (with polling fallback).
-- ~~D2 Diff-based rendering~~ — **Done**.
-- ~~D3 Engine in Web Worker~~ — **Done**.
-- **D4 [orig, partially done] Keyboard/ARIA accessibility.** *(PENDING POLISH)* Strong already; add dedicated blind/SAN-announcement mode.
-- **D5 [KIMI] Touch/mobile input.** *(PENDING)* Unified pointer events for phone/tablet drag-and-drop.
+- ~~**D1 SSE push**~~ — **Done** (with polling fallback).
+- ~~**D2 Diff-based rendering**~~ — **Done**.
+- ~~**D3 Engine in Web Worker**~~ — **Done**.
+- ~~**D4 Keyboard/ARIA accessibility.**~~ — **Done.** Dedicated Blind Accessibility Mode (`#blind-mode-toggle`, shortcut 'B'), ARIA live region (`#accessibility-announcer`), full 8x8 keyboard grid navigation (Arrows, Enter, Space, Esc), spoken piece & square feedback. Verified in `c8-d4-voice-selftest.js`.
+- ~~**D5 Touch/mobile input.**~~ — **Done.** Unified pointer events (`pointerdown`, `pointermove`, `pointerup`, `pointercancel`) for phone/tablet drag-and-drop. Verified in `t1-mobile-visuals-selftest.js`.
 
 ---
 
-## Prioritization [KIMI, revised]
-
-1. **Tier 0** — integrity: the app currently overclaims (fake Stockfish, unsafe multiplayer,
-   incomplete rules). Small diffs, most code/tests already exist.
-2. **T0.1 → C5 baseline** — real engine + strength presets = Play-vs-Computer + truthful
-   analysis for free.
-3. **B7/B8 + D5** — match-grade play (time controls, chat, mobile input).
-4. **C7 (retry-your-mistakes), C6, C2** — the AI-era differentiators, in that order.
-
-*Orig note retained: Tier A + D1/D2 were the right first bets and are shipped; remaining A7/A9
-are polish.*
+## Final Status
+**100% Complete.** All items across Tier 0, Tier A, Tier B, Tier C, and Tier D have been built, rigorously unit/integration tested, verified for Gate 4 architectural invariants, merged to `main`, and pushed to remote.
