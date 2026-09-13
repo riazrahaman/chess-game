@@ -14,6 +14,10 @@ let gameOver = false;
 let result = null;
 let kingStatus = { kingSquare: null, check: false, mate: false };
 let boardFlipped = false;
+// Snapshot of the last referee board painted into the DOM. It is comparison
+// data only: the current board still comes exclusively from applyRefereeState.
+let previousBoard = null;
+let renderedBoardFlipped = null;
 let previousRefereeState = null;
 let audioContext = null;
 const REFEREE_CACHE_KEY = 'chess.referee.latest';
@@ -117,45 +121,126 @@ function playSound(kind) {
   }
 }
 
-function renderBoard(lastMove = null) {
+function cloneBoardSnapshot(source) {
+  if (!source) return null;
+  const pieces = {};
+  for (const squareId of getBoardRenderOrder(false)) {
+    const piece = source.pieces[squareId];
+    pieces[squareId] = piece ? { type: piece.type, color: piece.color } : null;
+  }
+  return { pieces };
+}
+
+function piecesMatch(left, right) {
+  return left === right || (!!left && !!right && left.type === right.type && left.color === right.color);
+}
+
+function createPieceElement(piece) {
+  const pieceElement = document.createElement('span');
+  pieceElement.className = 'piece';
+  pieceElement.dataset.type = piece.type;
+  pieceElement.dataset.color = piece.color;
+  pieceElement.textContent = pieceGlyphs[piece.color][piece.type] || '';
+  return pieceElement;
+}
+
+function updatePieceElement(pieceElement, piece) {
+  const glyph = pieceGlyphs[piece.color][piece.type] || '';
+  if (pieceElement.dataset.type !== piece.type) pieceElement.dataset.type = piece.type;
+  if (pieceElement.dataset.color !== piece.color) pieceElement.dataset.color = piece.color;
+  if (pieceElement.textContent !== glyph) pieceElement.textContent = glyph;
+}
+
+function reconcilePiece(squareDiv, nextPiece) {
+  const pieceElement = squareDiv.firstElementChild;
+  if (!nextPiece) {
+    if (pieceElement) pieceElement.remove();
+    return;
+  }
+  if (!pieceElement) {
+    squareDiv.appendChild(createPieceElement(nextPiece));
+    return;
+  }
+  updatePieceElement(pieceElement, nextPiece);
+}
+
+function reuseMovedPiece(lastMove, boardBeforeRender) {
+  if (!lastMove || !boardBeforeRender) return;
+  const beforeFrom = boardBeforeRender.pieces[lastMove.from];
+  const afterFrom = board.pieces[lastMove.from];
+  const afterTo = board.pieces[lastMove.to];
+  const promotion = beforeFrom && beforeFrom.type === 'p' && afterTo &&
+    afterTo.color === beforeFrom.color && (lastMove.to[1] === '1' || lastMove.to[1] === '8');
+  if (!beforeFrom || afterFrom || !afterTo ||
+      (!piecesMatch(beforeFrom, afterTo) && !promotion)) return;
+
+  const fromSquare = document.getElementById(lastMove.from);
+  const toSquare = document.getElementById(lastMove.to);
+  const movingPiece = fromSquare && fromSquare.firstElementChild;
+  if (!movingPiece || !toSquare) return;
+
+  const capturedPiece = toSquare.firstElementChild;
+  if (capturedPiece && capturedPiece !== movingPiece) capturedPiece.remove();
+  updatePieceElement(movingPiece, afterTo);
+  toSquare.appendChild(movingPiece);
+}
+
+function renderBoard(lastMove = null, boardBeforeRender = previousBoard) {
   if (!board) return;
   // The board and turn are the latest referee snapshot. Check status is
   // derived from that snapshot for presentation only; it is never stored as
   // an independent game state by the UI.
   kingStatus = getKingStatus(board, turn);
-  boardElement.innerHTML = '';
-  renderCoordinates();
-  getBoardRenderOrder(boardFlipped).forEach(squareId => {
+  const renderOrder = getBoardRenderOrder(boardFlipped);
+  const orientationChanged = renderedBoardFlipped !== boardFlipped;
+  if (orientationChanged) renderCoordinates();
+
+  renderOrder.forEach(squareId => {
+      let squareDiv = document.getElementById(squareId);
+      if (!squareDiv) {
+        squareDiv = document.createElement('div');
+        squareDiv.id = squareId;
+        squareDiv.onclick = () => handleSquareClick(squareId);
+        boardElement.appendChild(squareDiv);
+      } else if (orientationChanged) {
+        // appendChild reorders an existing node without destroying it.
+        boardElement.appendChild(squareDiv);
+      }
+  });
+
+  reuseMovedPiece(lastMove, boardBeforeRender);
+
+  renderOrder.forEach(squareId => {
       const file = squareId[0];
       const rank = Number(squareId[1]);
-      const squareDiv = document.createElement('div');
+      const squareDiv = document.getElementById(squareId);
       const fileIndex = file.charCodeAt(0) - 97;
-      squareDiv.className = `square ${(fileIndex + rank) % 2 === 0 ? 'white-sq' : 'black-sq'}`;
-      squareDiv.id = squareId;
+      const classes = ['square', (fileIndex + rank) % 2 === 0 ? 'white-sq' : 'black-sq'];
 
       if (kingStatus.kingSquare === squareId && kingStatus.check) {
-        squareDiv.classList.add(kingStatus.mate ? 'king-mate' : 'king-in-check');
+        classes.push(kingStatus.mate ? 'king-mate' : 'king-in-check');
       }
 
       if (lastMove && (lastMove.from === squareId || lastMove.to === squareId)) {
-        squareDiv.classList.add('highlight');
-      }
-
-      const pieceData = board.pieces[squareId];
-      if (pieceData) {
-        const { type, color } = pieceData;
-        squareDiv.textContent = pieceGlyphs[color][type] || '';
+        classes.push('highlight');
       }
 
       if (selectedSquare === squareId) {
-        squareDiv.classList.add('highlight');
+        if (!classes.includes('highlight')) classes.push('highlight');
       } else if (legalMoves.includes(squareId)) {
-        squareDiv.classList.add('highlight');
+        if (!classes.includes('highlight')) classes.push('highlight');
       }
 
-      squareDiv.onclick = () => handleSquareClick(squareId);
-      boardElement.appendChild(squareDiv);
+      const nextClassName = classes.join(' ');
+      if (squareDiv.className !== nextClassName) squareDiv.className = nextClassName;
+
+      const beforePiece = boardBeforeRender && boardBeforeRender.pieces[squareId];
+      const nextPiece = board.pieces[squareId];
+      if (!piecesMatch(beforePiece, nextPiece) || !squareDiv.firstElementChild) {
+        reconcilePiece(squareDiv, nextPiece);
+      }
   });
+  renderedBoardFlipped = boardFlipped;
 }
 
 // C2: promotion modal flow. The pending move {from, to} is held while the
@@ -292,8 +377,10 @@ function applyRefereeState(state) {
   } else {
     moveHistory = [];
   }
+  const boardBeforeRender = previousBoard;
   board = state.board;
-  renderBoard(lastMove);
+  renderBoard(lastMove, boardBeforeRender);
+  previousBoard = cloneBoardSnapshot(board);
   renderTimers();
   renderCaptured();
   updateStatus();
@@ -391,6 +478,8 @@ function initGame() {
   gameOver = false;
   result = null;
   kingStatus = { kingSquare: null, check: false, mate: false };
+  previousBoard = null;
+  renderedBoardFlipped = null;
   lastKnownStateJson = "";
   if (!pollStarted) {
     pollStarted = true;
