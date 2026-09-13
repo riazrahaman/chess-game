@@ -37,6 +37,8 @@ let premoveQueue = [];
 const MAX_PREMOVES = 5;
 let queuedPremove = null;
 let touchDragState = null;
+let latestGameReview = null;
+let evalHistory = [0];
 
 function clearPremove() {
   premoveQueue = [];
@@ -940,6 +942,16 @@ function updateHistoryUI() {
     whiteTd.className = 'history-ply';
     whiteTd.dataset.ply = String(whitePly);
     if (currentActivePly === whitePly) whiteTd.classList.add('active-ply');
+    if (latestGameReview && Array.isArray(latestGameReview.moves)) {
+      const whiteRev = latestGameReview.moves[whitePly - 1];
+      if (whiteRev) {
+        const badge = document.createElement('span');
+        badge.className = `move-badge ${whiteRev.badgeClass}`;
+        badge.textContent = whiteRev.symbol;
+        badge.title = `${whiteRev.label} (Accuracy: ${whiteRev.accuracy}%)`;
+        whiteTd.appendChild(badge);
+      }
+    }
     whiteTd.onclick = () => jumpToPly(whitePly);
     row.appendChild(whiteTd);
 
@@ -950,6 +962,16 @@ function updateHistoryUI() {
       blackTd.className = 'history-ply';
       blackTd.dataset.ply = String(blackPly);
       if (currentActivePly === blackPly) blackTd.classList.add('active-ply');
+      if (latestGameReview && Array.isArray(latestGameReview.moves)) {
+        const blackRev = latestGameReview.moves[blackPly - 1];
+        if (blackRev) {
+          const badge = document.createElement('span');
+          badge.className = `move-badge ${blackRev.badgeClass}`;
+          badge.textContent = blackRev.symbol;
+          badge.title = `${blackRev.label} (Accuracy: ${blackRev.accuracy}%)`;
+          blackTd.appendChild(badge);
+        }
+      }
       blackTd.onclick = () => jumpToPly(blackPly);
     }
     row.appendChild(blackTd);
@@ -1160,6 +1182,10 @@ function updateEvalUI(data) {
 
   if (fill && fill.style) fill.style.width = `${percent}%`;
   if (scoreText) scoreText.textContent = cp >= 0 ? `+${cp.toFixed(1)}` : `${cp.toFixed(1)}`;
+
+  const cpScore = typeof data.eval === 'number' ? data.eval : (typeof data.evalCp === 'number' ? Math.round(data.evalCp * 100) : 0);
+  const currentPly = liveHistory ? liveHistory.length : 0;
+  evalHistory[currentPly] = cpScore;
 
   if (data.multipv && Array.isArray(data.multipv) && data.multipv.length > 0) {
     engineMultiPvLines = data.multipv.map((item, idx) => {
@@ -1870,6 +1896,75 @@ if (btnScrubNext) btnScrubNext.onclick = scrubNext;
 const btnScrubEnd = document.getElementById('scrub-end');
 if (btnScrubEnd) btnScrubEnd.onclick = scrubLast;
 
+function runGameReview() {
+  const reviewModule = (typeof window !== 'undefined' && window.MoveReview) || (typeof MoveReview !== 'undefined' ? MoveReview : null);
+  if (!reviewModule) return null;
+  const moves = liveHistory || [];
+  while (evalHistory.length <= moves.length) {
+    const last = evalHistory.length > 0 ? evalHistory[evalHistory.length - 1] : 0;
+    evalHistory.push(last);
+  }
+  latestGameReview = reviewModule.reviewGame(moves, evalHistory);
+  renderReviewPanel();
+  updateHistoryUI();
+  return latestGameReview;
+}
+
+function renderReviewPanel() {
+  const panel = document.getElementById('review-panel');
+  if (!panel || !latestGameReview) return;
+  panel.classList.remove('hidden');
+
+  const whiteAccEl = document.getElementById('white-accuracy');
+  const blackAccEl = document.getElementById('black-accuracy');
+  if (whiteAccEl) whiteAccEl.textContent = `${latestGameReview.whiteAccuracy}%`;
+  if (blackAccEl) blackAccEl.textContent = `${latestGameReview.blackAccuracy}%`;
+
+  const summaryEl = document.getElementById('classification-summary');
+  if (summaryEl) {
+    summaryEl.innerHTML = '';
+    const table = document.createElement('table');
+    table.style.width = '100%';
+    table.style.fontSize = '0.8rem';
+    table.style.borderCollapse = 'collapse';
+
+    const headerRow = document.createElement('tr');
+    headerRow.innerHTML = '<th style="text-align:left;padding:2px 4px;">Classification</th><th style="text-align:center;padding:2px 4px;">White</th><th style="text-align:center;padding:2px 4px;">Black</th>';
+    table.appendChild(headerRow);
+
+    const classes = [
+      { key: 'brilliant', label: 'Brilliant (!!)', color: '#1baca6' },
+      { key: 'best', label: 'Best (★)', color: '#96bc4b' },
+      { key: 'excellent', label: 'Excellent', color: '#96bc4b' },
+      { key: 'good', label: 'Good', color: '#7ea43b' },
+      { key: 'inaccuracy', label: 'Inaccuracy (?!)', color: '#e69d00' },
+      { key: 'mistake', label: 'Mistake (?)', color: '#e58f2a' },
+      { key: 'blunder', label: 'Blunder (??)', color: '#ca3431' }
+    ];
+
+    classes.forEach(c => {
+      const row = document.createElement('tr');
+      const wCount = (latestGameReview.counts && latestGameReview.counts.white && latestGameReview.counts.white[c.key]) || 0;
+      const bCount = (latestGameReview.counts && latestGameReview.counts.black && latestGameReview.counts.black[c.key]) || 0;
+      row.innerHTML = `
+        <td style="padding:2px 4px;color:${c.color};font-weight:600;">${c.label}</td>
+        <td style="text-align:center;padding:2px 4px;">${wCount}</td>
+        <td style="text-align:center;padding:2px 4px;">${bCount}</td>
+      `;
+      table.appendChild(row);
+    });
+    summaryEl.appendChild(table);
+  }
+}
+
+const gameReviewButton = document.getElementById('game-review-btn');
+if (gameReviewButton) gameReviewButton.onclick = runGameReview;
+const closeReviewButton = document.getElementById('close-review');
+if (closeReviewButton) closeReviewButton.onclick = () => {
+  const panel = document.getElementById('review-panel');
+  if (panel) panel.classList.add('hidden');
+};
+
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('keydown', handleGlobalScrubberKeydown);
   window.jumpToPly = jumpToPly;
@@ -1884,6 +1979,10 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.setMultiPvCount = setMultiPvCount;
   window.clearEngineMultiPvLines = clearEngineMultiPvLines;
   window.renderMultiPvBreakdown = renderMultiPvBreakdown;
+  window.runGameReview = runGameReview;
+  window.getLatestGameReview = () => latestGameReview;
+  window.getEvalHistory = () => evalHistory;
+  window.setEvalHistory = (h) => { evalHistory = h; };
 }
 
 initGame();
