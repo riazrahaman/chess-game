@@ -387,21 +387,37 @@ function readBody(req, maxBytes) {
   });
 }
 
-function handleQueueCommand(req, res, commandType, argsExtractor, roomId = 'default') {
+function handleQueueCommand(req, res, commandType, argsExtractor, roomId = 'default', requiredRoleExtractor = null) {
   readBody(req, MAX_BODY_BYTES).then(body => {
     let parsed = {};
     try { parsed = body ? JSON.parse(body) : {}; } catch (e) { parsed = {}; }
-    const { args, cmdId, expectedRevision } = argsExtractor(parsed, req);
+
+    const queryString = req.url.includes('?') ? req.url.slice(req.url.indexOf('?') + 1) : '';
+    const queryParams = new URLSearchParams(queryString);
+    const targetRoom = roomId || queryParams.get('room') || parsed.room || 'default';
+
+    const seatToken = req.headers['x-seat-token'] ||
+      (req.headers.authorization && req.headers.authorization.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null) ||
+      parsed.token || parsed.seatToken || null;
+
+    const requiredRole = requiredRoleExtractor ? requiredRoleExtractor(parsed, req, queryParams) : null;
+    const authCheck = seatAuthManager.validateMutation(targetRoom, seatToken, requiredRole);
+    if (!authCheck.ok) {
+      sendJsonError(res, authCheck.status || 403, authCheck.error);
+      return;
+    }
+
+    const { args, cmdId, expectedRevision } = argsExtractor(parsed, req, authCheck);
     const command = {
       id: cmdId !== null ? cmdId : commandType + ':' + Date.now() + ':' + Math.random().toString(36).slice(2),
       type: commandType,
       args,
       expectedRevision
     };
-    referee.getReferee(roomId).enqueue(command).then(result => {
+    referee.getReferee(targetRoom).enqueue(command).then(result => {
       sendJson(res, result.httpStatus || (result.ok ? 200 : 409), result);
       if (result.ok) {
-        broadcastRoomStateToSSEClients(roomId);
+        broadcastRoomStateToSSEClients(targetRoom);
       }
     });
   }).catch(() => {
@@ -419,12 +435,17 @@ function handleResetEndpoint(req, res, roomId = 'default') {
 
 function handleResignEndpoint(req, res, roomId = 'default') {
   const query = new URL(req.url, 'http://127.0.0.1').searchParams;
-  const color = query.has('w') ? 'white' : query.has('b') ? 'black' : query.get('color');
-  handleQueueCommand(req, res, 'resign', (parsed) => ({
-    args: { color: color || '' },
-    cmdId: parsed.id !== undefined ? parsed.id : null,
-    expectedRevision: parsed.expectedRevision !== undefined ? Number(parsed.expectedRevision) : undefined
-  }), roomId);
+  const color = query.has('w') ? 'white' : query.has('b') ? 'black' : (query.get('color') || null);
+  handleQueueCommand(req, res, 'resign', (parsed, req, authCheck) => {
+    const finalColor = color || parsed.color || (authCheck && authCheck.role && authCheck.role !== 'unseated' ? authCheck.role : '');
+    return {
+      args: { color: finalColor },
+      cmdId: parsed.id !== undefined ? parsed.id : null,
+      expectedRevision: parsed.expectedRevision !== undefined ? Number(parsed.expectedRevision) : undefined
+    };
+  }, roomId, (parsed, req, queryParams) => {
+    return color || parsed.color || null;
+  });
 }
 
 function handleDrawEndpoint(req, res, roomId = 'default') {

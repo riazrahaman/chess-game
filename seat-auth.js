@@ -140,6 +140,46 @@ class SeatAuthManager {
   }
 
   /**
+   * Validates if a token is authorized to mutate game state (reset, undo, draw, resign).
+   * In unseated rooms (neither seat occupied), mutations are allowed for backward compatibility.
+   * In seated rooms, mutations require a valid token belonging to an active seated player (white or black).
+   * If requiredRole is specified ('white' or 'black'), the token must match that specific seat.
+   */
+  validateMutation(roomId = 'default', token, requiredRole = null) {
+    const room = this._getRoom(roomId);
+    const whiteActive = !!(room.white && !this._isExpired(room.white));
+    const blackActive = !!(room.black && !this._isExpired(room.black));
+
+    // Backward compatibility: If neither player seat is occupied, allow open mutation
+    if (!whiteActive && !blackActive) {
+      return { ok: true, unseated: true };
+    }
+
+    if (!token) {
+      return { ok: false, status: 401, error: 'Authentication required: game has active player seats.' };
+    }
+
+    let matchedRole = null;
+    if (whiteActive && room.white.token === token) {
+      matchedRole = 'white';
+      room.white.lastSeen = Date.now();
+    } else if (blackActive && room.black.token === token) {
+      matchedRole = 'black';
+      room.black.lastSeen = Date.now();
+    }
+
+    if (!matchedRole) {
+      return { ok: false, status: 403, error: 'Unauthorized mutation: token is not an active seated player.' };
+    }
+
+    if (requiredRole && requiredRole !== matchedRole) {
+      return { ok: false, status: 403, error: `Unauthorized mutation: token belongs to '${matchedRole}', but '${requiredRole}' is required.` };
+    }
+
+    return { ok: true, role: matchedRole };
+  }
+
+  /**
    * Returns current seat occupancy status
    */
   getStatus(roomId = 'default') {

@@ -817,12 +817,16 @@ if (promoModal) promoModal.onkeydown = event => {
 // C2: submit a move through the referee; the confirmed move string (with
 // promo suffix when applicable) is validated server-side and lands in
 // .referee-state.json. The poll picks it up and re-renders from that truth.
-async function submitMoveToReferee(moveStr) {
-  const roomParam = getCurrentRoomId() !== 'default' ? `?room=${encodeURIComponent(getCurrentRoomId())}` : '';
-  const headers = { 'Content-Type': 'application/json' };
+function getAuthHeaders(extraHeaders = {}) {
+  const headers = { 'Content-Type': 'application/json', ...extraHeaders };
   const seatToken = (typeof window !== 'undefined' && window.sessionStorage && window.sessionStorage.getItem('chess_seat_token')) || currentSeatToken;
   if (seatToken) headers['X-Seat-Token'] = seatToken;
+  return headers;
+}
 
+async function submitMoveToReferee(moveStr) {
+  const roomParam = getCurrentRoomId() !== 'default' ? `?room=${encodeURIComponent(getCurrentRoomId())}` : '';
+  const headers = getAuthHeaders();
   const clientSentAt = Date.now();
   return runRefereeCommand('Submitting move', () => fetch('/api/move' + roomParam, {
       method: 'POST',
@@ -1987,7 +1991,7 @@ function initGame() {
 
 async function resetReferee() {
   const accepted = await runRefereeCommand('Starting new game', () =>
-    fetch(withRoomParam('/api/reset'), { method: 'POST' }));
+    fetch(withRoomParam('/api/reset'), { method: 'POST', headers: getAuthHeaders() }));
   if (accepted) {
     // The board is still changed only by the subsequent referee poll.
     lastKnownStateJson = '';
@@ -2004,15 +2008,16 @@ if (flipBoardButton) flipBoardButton.onclick = () => {
 };
 const resignButton = document.getElementById('resign');
 if (resignButton) resignButton.onclick = async () => {
+  const resignRole = currentSeatRole || (turn === 'white' ? 'white' : 'black');
   await runRefereeCommand('Submitting resignation', () =>
-    fetch(withRoomParam(`/api/resign?${turn === 'white' ? 'w' : 'b'}`), { method: 'POST' }));
+    fetch(withRoomParam(`/api/resign?color=${encodeURIComponent(resignRole)}`), { method: 'POST', headers: getAuthHeaders() }));
 };
 const drawButton = document.getElementById('offer-draw');
 if (drawButton) drawButton.onclick = async () => {
-  await runRefereeCommand('Offering draw', () => fetch(withRoomParam('/api/draw'), { method: 'POST' }));
+  await runRefereeCommand('Offering draw', () => fetch(withRoomParam('/api/draw'), { method: 'POST', headers: getAuthHeaders() }));
 };
 if (undoButton) undoButton.onclick = async () => {
-  await runRefereeCommand('Requesting undo', () => fetch(withRoomParam('/api/undo'), { method: 'POST' }));
+  await runRefereeCommand('Requesting undo', () => fetch(withRoomParam('/api/undo'), { method: 'POST', headers: getAuthHeaders() }));
 };
 
 const btnScrubStart = document.getElementById('scrub-start');
@@ -2231,12 +2236,52 @@ function updateSeatUI() {
   if (claimBlack) claimBlack.disabled = currentSeatRole === 'black';
 }
 
+let seatHeartbeatTimer = null;
+
+function startSeatHeartbeat() {
+  if (seatHeartbeatTimer) return;
+  seatHeartbeatTimer = setInterval(sendSeatHeartbeat, 25000);
+}
+
+function stopSeatHeartbeat() {
+  if (seatHeartbeatTimer) {
+    clearInterval(seatHeartbeatTimer);
+    seatHeartbeatTimer = null;
+  }
+}
+
+async function sendSeatHeartbeat() {
+  const token = (typeof window !== 'undefined' && window.sessionStorage && window.sessionStorage.getItem('chess_seat_token')) || currentSeatToken;
+  if (!token) {
+    stopSeatHeartbeat();
+    return;
+  }
+  try {
+    const room = getCurrentRoomId();
+    const res = await fetch('/api/seat/heartbeat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Seat-Token': token
+      },
+      body: JSON.stringify({ room, token })
+    });
+    if (res.status === 404) {
+      // Seat expired on referee or was revoked
+      await leaveSeat();
+    }
+  } catch (e) {
+    // transient network error, retry next cycle
+  }
+}
+
 async function claimSeat(role) {
   try {
+    const room = getCurrentRoomId();
     const res = await fetch('/api/seat/claim', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role })
+      body: JSON.stringify({ role, room })
     });
     const data = await res.json();
     if (res.ok && data.token) {
@@ -2247,9 +2292,11 @@ async function claimSeat(role) {
         window.sessionStorage.setItem('chess_seat_role', role);
       }
       updateSeatUI();
+      startSeatHeartbeat();
       return true;
     } else {
-      if (typeof alert === 'function') alert(data.error || 'Failed to claim seat');
+      if (statusElement) statusElement.textContent = data.error || 'Failed to claim seat';
+      else if (typeof alert === 'function') alert(data.error || 'Failed to claim seat');
       return false;
     }
   } catch (e) {
@@ -2258,14 +2305,17 @@ async function claimSeat(role) {
 }
 
 async function leaveSeat() {
+  stopSeatHeartbeat();
   if (!currentSeatToken) return;
   try {
+    const room = getCurrentRoomId();
     await fetch('/api/seat/release', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Seat-Token': currentSeatToken
-      }
+      },
+      body: JSON.stringify({ room, token: currentSeatToken })
     });
   } catch (e) {}
   currentSeatRole = null;
@@ -2273,6 +2323,22 @@ async function leaveSeat() {
   if (typeof window !== 'undefined' && window.sessionStorage) {
     window.sessionStorage.removeItem('chess_seat_token');
     window.sessionStorage.removeItem('chess_seat_role');
+  }
+  updateSeatUI();
+}
+
+function initSeatAuth() {
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    const savedToken = window.sessionStorage.getItem('chess_seat_token');
+    const savedRole = window.sessionStorage.getItem('chess_seat_role');
+    if (savedToken && savedRole) {
+      currentSeatToken = savedToken;
+      currentSeatRole = savedRole;
+      updateSeatUI();
+      startSeatHeartbeat();
+      sendSeatHeartbeat();
+      return;
+    }
   }
   updateSeatUI();
 }
@@ -2647,6 +2713,10 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.getCurrentSeatRole = () => currentSeatRole;
   window.getCurrentSeatToken = () => currentSeatToken;
   window.updateSeatUI = updateSeatUI;
+  window.startSeatHeartbeat = startSeatHeartbeat;
+  window.stopSeatHeartbeat = stopSeatHeartbeat;
+  window.sendSeatHeartbeat = sendSeatHeartbeat;
+  window.initSeatAuth = initSeatAuth;
   window.syncNtpClock = syncNtpClock;
   window.getMeasuredLatency = () => measuredLatency;
   window.getClockOffset = () => clockOffset;
@@ -2678,6 +2748,7 @@ updateRoomBadge();
 
 initGame();
 setupGameArchiveUI();
+initSeatAuth();
 const cachedState = restoreCachedRefereeState();
 if (cachedState) {
   // This is a paint-only bootstrap. The first referee poll always runs with
