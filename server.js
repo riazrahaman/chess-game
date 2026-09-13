@@ -4,6 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const referee = require('./referee-service.js');
+const { seatAuthManager } = require('./seat-auth.js');
 
 const PORT = 39281;
 const DIR = __dirname;
@@ -258,6 +259,21 @@ function handleMoveEndpoint(req, res) {
       sendJsonError(res, 400, 'bad move format');
       return;
     }
+
+    const seatToken = req.headers['x-seat-token'] || (req.headers.authorization && req.headers.authorization.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null);
+    const queryString = req.url.includes('?') ? req.url.slice(req.url.indexOf('?') + 1) : '';
+    const queryParams = new URLSearchParams(queryString);
+    const roomId = queryParams.get('room') || 'default';
+
+    const currentState = readStateJson();
+    const currentTurn = (currentState && currentState.board && currentState.board.turn) || 'white';
+
+    const authCheck = seatAuthManager.validateMove(roomId, seatToken, currentTurn);
+    if (!authCheck.ok) {
+      sendJsonError(res, authCheck.status || 403, authCheck.error);
+      return;
+    }
+
     const command = {
       id: cmdId !== null ? cmdId : 'move:' + moveStr + ':' + Date.now() + ':' + Math.random().toString(36).slice(2),
       type: 'move',
@@ -407,6 +423,57 @@ function createServer() {
       handleUndoEndpoint(req, res);
       return;
     }
+    if (req.method === 'POST' && urlPath === '/api/seat/claim') {
+      readBody(req, MAX_BODY_BYTES).then(body => {
+        let parsed = {};
+        try { parsed = body ? JSON.parse(body) : {}; } catch (e) { parsed = {}; }
+        const role = parsed.role;
+        const roomId = parsed.room || new URLSearchParams(req.url.split('?')[1] || '').get('room') || 'default';
+        const result = seatAuthManager.claimSeat(roomId, role);
+        if (result.ok) {
+          sendJson(res, 200, result);
+        } else {
+          sendJsonError(res, result.status || 400, result.error);
+        }
+      }).catch(() => sendJsonError(res, 413, 'request body too large'));
+      return;
+    }
+    if (req.method === 'POST' && urlPath === '/api/seat/release') {
+      readBody(req, MAX_BODY_BYTES).then(body => {
+        let parsed = {};
+        try { parsed = body ? JSON.parse(body) : {}; } catch (e) { parsed = {}; }
+        const token = parsed.token || req.headers['x-seat-token'] || (req.headers.authorization && req.headers.authorization.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null);
+        const roomId = parsed.room || new URLSearchParams(req.url.split('?')[1] || '').get('room') || 'default';
+        const result = seatAuthManager.releaseSeat(roomId, token);
+        if (result.ok) {
+          sendJson(res, 200, result);
+        } else {
+          sendJsonError(res, result.status || 404, result.error);
+        }
+      }).catch(() => sendJsonError(res, 413, 'request body too large'));
+      return;
+    }
+    if (req.method === 'POST' && urlPath === '/api/seat/heartbeat') {
+      readBody(req, MAX_BODY_BYTES).then(body => {
+        let parsed = {};
+        try { parsed = body ? JSON.parse(body) : {}; } catch (e) { parsed = {}; }
+        const token = parsed.token || req.headers['x-seat-token'] || (req.headers.authorization && req.headers.authorization.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null);
+        const roomId = parsed.room || new URLSearchParams(req.url.split('?')[1] || '').get('room') || 'default';
+        const result = seatAuthManager.heartbeat(roomId, token);
+        if (result.ok) {
+          sendJson(res, 200, result);
+        } else {
+          sendJsonError(res, result.status || 404, result.error);
+        }
+      }).catch(() => sendJsonError(res, 413, 'request body too large'));
+      return;
+    }
+    if (req.method === 'GET' && urlPath === '/api/seat/status') {
+      const roomId = new URLSearchParams(req.url.split('?')[1] || '').get('room') || 'default';
+      const status = seatAuthManager.getStatus(roomId);
+      sendJson(res, 200, status);
+      return;
+    }
 
     if (isApiRequest(urlPath)) {
       sendJsonError(res, 404, 'not found');
@@ -441,7 +508,7 @@ function createServer() {
   });
 }
 
-module.exports = { createServer, stopStateWatcher };
+module.exports = { createServer, stopStateWatcher, seatAuthManager };
 
 if (require.main === module) {
   const port = process.env.CHESS_PORT ? Number(process.env.CHESS_PORT) : PORT;
