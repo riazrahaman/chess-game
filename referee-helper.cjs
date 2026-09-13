@@ -1,4 +1,5 @@
 const engine = require('./engine.js');
+const rulesEngine = require('./rules-engine.js');
 const fs = require('fs');
 const path = require('path');
 
@@ -39,11 +40,18 @@ function ensureClocks(s) {
   if (!Object.prototype.hasOwnProperty.call(s, 'flagged')) s.flagged = null;
   if (!Object.prototype.hasOwnProperty.call(s, 'resigned')) s.resigned = null;
   if (!Object.prototype.hasOwnProperty.call(s, 'draw')) s.draw = false;
+  // Backfill canonical FEN from the authoritative board for legacy state
+  // files that predate the fen field. The board remains the single source of
+  // truth (C1/C3); fen is a derived, read-only projection.
+  if (typeof s.fen !== 'string' || !s.fen) {
+    try { s.fen = rulesEngine.boardToFen(s.board); } catch (_) { s.fen = null; }
+  }
   return s;
 }
 function newGame() {
+  const board = engine.createInitialBoard();
   const s = {
-    board: engine.createInitialBoard(),
+    board,
     history: [],
     clocks: defaultClocks(),
     gameOver: false,
@@ -51,7 +59,8 @@ function newGame() {
     result: null,
     flagged: null,
     resigned: null,
-    draw: false
+    draw: false,
+    fen: rulesEngine.boardToFen(board)
   };
   saveState(s);
   return s;
@@ -161,6 +170,7 @@ function rebuildState(history) {
   s.gameOver = status === 'checkmate' || status === 'stalemate';
   s.result = status === 'checkmate' ? (s.board.turn === 'white' ? '0-1' : '1-0')
     : status === 'stalemate' ? '½-½' : null;
+  s.fen = rulesEngine.boardToFen(s.board);
   return s;
 }
 
@@ -249,6 +259,7 @@ if (cmd === 'status') {
   s.gameOver = status === 'checkmate' || status === 'stalemate';
   if (status === 'checkmate') s.result = nextTurn === 'white' ? '0-1' : '1-0';
   if (status === 'stalemate') s.result = '½-½';
+  s.fen = rulesEngine.boardToFen(s.board);
   saveState(s);
   console.log(JSON.stringify({
     ok: true, applied: moveStr, nextTurn, status, gameOver: s.gameOver,

@@ -287,6 +287,19 @@ function createServer() {
 
     if (!checkCors(req, res)) return;
 
+    if (req.method === 'GET' && urlPath === '/api/state') {
+      const state = readStateJson();
+      if (!state) { sendJsonError(res, 404, 'no state'); return; }
+      const origin = req.headers.origin;
+      res.statusCode = 200;
+      res.setHeader('Content-Type', 'application/json');
+      if (origin && isOriginAllowed(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+      }
+      res.end(JSON.stringify(state));
+      return;
+    }
     if (req.method === 'GET' && urlPath === '/api/events') { startStateWatcher(); handleSSEEndpoint(req, res); return; }
     if (req.method === 'POST' && urlPath === '/api/move') { handleMoveEndpoint(req, res); return; }
     if (req.method === 'POST' && urlPath === '/api/reset') { handleResetEndpoint(res); return; }
