@@ -6,7 +6,7 @@ const path = require('path');
 // (tier-a..tier-d under .tier-worktrees/) self-contained: a fresh checkout of a
 // tier branch has its OWN .referee-state.json + .lock, independent of the main
 // repo. Never hard-code an absolute path here.
-const STATE_FILE = path.join(__dirname, '.referee-state.json');
+const STATE_FILE = process.env.CHESS_STATE_FILE || path.join(__dirname, '.referee-state.json');
 const LOCK_FILE = STATE_FILE + '.lock';
 
 // Single source of truth for clock constants (C1).

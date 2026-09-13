@@ -43,25 +43,6 @@ const promoModal = document.getElementById('promo-modal');
 const promoButtons = document.querySelectorAll('.promo-btn');
 const promoCancel = document.getElementById('promo-cancel');
 
-const pieceGlyphs = {
-  'white': {
-    'k': '\u2654',
-    'q': '\u2655',
-    'r': '\u2656',
-    'b': '\u2657',
-    'n': '\u2658',
-    'p': '\u2659'
-  },
-  'black': {
-    'k': '\u265A',
-    'q': '\u265B',
-    'r': '\u265C',
-    'b': '\u265D',
-    'n': '\u265E',
-    'p': '\u265F'
-  }
-};
-
 function formatTime(seconds) {
   const clamped = Math.max(0, Math.floor(seconds));
   const m = Math.floor(clamped / 60);
@@ -83,9 +64,9 @@ function renderTimers() {
 function renderCaptured() {
   if (!board) return;
   const material = computeCaptured(board);
-  const glyphs = pieces => pieces.map(piece => pieceGlyphs[piece.color][piece.type]).join(' ');
-  if (capturedWhiteElement) capturedWhiteElement.textContent = glyphs(material.capturedBy.white) || '—';
-  if (capturedBlackElement) capturedBlackElement.textContent = glyphs(material.capturedBy.black) || '—';
+  const piecesMarkup = pieces => pieces.map(piece => pieceSvgMarkup(piece.color, piece.type)).join('');
+  if (capturedWhiteElement) capturedWhiteElement.innerHTML = piecesMarkup(material.capturedBy.white) || '—';
+  if (capturedBlackElement) capturedBlackElement.innerHTML = piecesMarkup(material.capturedBy.black) || '—';
   if (advantageElement) {
     advantageElement.textContent = material.advantage.points
       ? `${material.advantage.side === 'white' ? 'White' : 'Black'} +${material.advantage.points}`
@@ -225,6 +206,12 @@ function renderBoard(lastMove = null, boardBeforeRender = previousBoard) {
         classes.push('highlight');
       }
 
+      const pieceData = board.pieces[squareId];
+      if (pieceData) {
+        const { type, color } = pieceData;
+        renderPieceSvg(squareDiv, color, type);
+      }
+
       if (selectedSquare === squareId) {
         if (!classes.includes('highlight')) classes.push('highlight');
       } else if (legalMoves.includes(squareId)) {
@@ -255,9 +242,9 @@ function isPromotionMove(from, to) {
   return to[1] === lastRank;
 }
 
-function setPromoGlyphs(color) {
+function setPromoPieces(color) {
   promoButtons.forEach(btn => {
-    btn.textContent = pieceGlyphs[color][btn.dataset.piece];
+    renderPieceSvg(btn, color, btn.dataset.piece);
   });
 }
 
@@ -435,11 +422,11 @@ function handleSquareClick(squareId) {
     const fromSquare = selectedSquare;
     selectedSquare = null;
     legalMoves = [];
-    // C2: promotion opens the glyph modal BEFORE finalizing; every confirmed
+    // C2: promotion opens the piece modal BEFORE finalizing; every confirmed
     // move is submitted through the referee so the state file stays authoritative.
     if (isPromotionMove(fromSquare, squareId)) {
       pendingPromo = { from: fromSquare, to: squareId };
-      setPromoGlyphs(board.pieces[fromSquare].color);
+      setPromoPieces(board.pieces[fromSquare].color);
       if (promoModal) promoModal.classList.remove('hidden');
     } else {
       submitMoveToReferee(fromSquare + squareId);

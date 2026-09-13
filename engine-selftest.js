@@ -332,9 +332,25 @@ const pinnedKnightMoves = getLegalMoves(pinBoard, 'e2', 'white');
 assertArrayEquals(pinnedKnightMoves, [], 'Knight pinned to King along e-file has 0 legal moves');
 
 // 12. C1 Clock Reconciliation — referee file is single source of truth
-const { execSync } = require('child_process');
+const { execFileSync, execSync } = require('child_process');
 const stateFile = require('path').join(__dirname, '.referee-state.json');
 const CLOCK_START = 600, CLOCK_INC = 15;
+const fs = require('fs');
+// A1: make the hermetic SVG contract a prerequisite without changing the
+// established 123 engine/referee assertion count reported by this gate.
+execFileSync(process.execPath, [require('path').join(__dirname, 'pieces-selftest.js')], {
+  cwd: __dirname,
+  stdio: 'pipe'
+});
+const originalStateFile = fs.existsSync(stateFile) ? fs.readFileSync(stateFile) : null;
+process.env.CHESS_STATE_FILE = stateFile;
+process.once('exit', () => {
+  if (originalStateFile === null) {
+    try { fs.unlinkSync(stateFile); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  } else {
+    fs.writeFileSync(stateFile, originalStateFile);
+  }
+});
 
 function refereeCli(...args) {
   const out = execSync(`node referee-helper.cjs ${args.join(' ')}`, { cwd: __dirname }).toString();
