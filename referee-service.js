@@ -182,10 +182,11 @@ function normalizeMove(moveStr, s) {
   return { normalized, moves };
 }
 
-function applyMove(s, moveStr, moveTs) {
+function applyMove(s, moveStr, moveTs, lagCompMs = 0) {
   const turn = s.board.turn;
   if (typeof moveTs === 'number' && moveTs > 0 && s.moveStartTs > 0) {
-    const delta = Math.max(0, (moveTs - s.moveStartTs) / 1000);
+    const lagDiscount = Math.max(0, Math.min(1000, Number(lagCompMs) || 0)) / 1000;
+    const delta = Math.max(0, (moveTs - s.moveStartTs) / 1000 - lagDiscount);
     s.elapsed[turn] = s.elapsed[turn] + delta;
   }
   s.clocks[turn] = Math.max(0, s.clocks[turn] - MOVE_TIME_COST_SECONDS);
@@ -410,7 +411,8 @@ class RefereeService {
       return { ok: false, error: 'illegal move', moveStr: String(args.move || ''), legalMoves: moves, httpStatus: 400 };
     }
     const moveTs = Date.now();
-    const r = applyMove(s, normalized, moveTs);
+    const lagCompMs = args.transitDelayMs || (args.clientSentAt ? Math.max(0, Math.min(1000, moveTs - args.clientSentAt)) : 0);
+    const r = applyMove(s, normalized, moveTs, lagCompMs);
     this._journalAndSnapshot('move', { move: normalized }, moveTs);
     if (r.flagged) {
       return Object.assign({ ok: false, error: 'flagged', httpStatus: 409 }, stateView(s));

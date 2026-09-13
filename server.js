@@ -249,11 +249,13 @@ function handleMoveEndpoint(req, res) {
     let moveStr = '';
     let cmdId = null;
     let expectedRevision = undefined;
+    let clientSentAt = undefined;
     try {
       const parsed = JSON.parse(body);
       moveStr = String(parsed.move || '');
       if (parsed.id !== undefined) cmdId = parsed.id;
       if (parsed.expectedRevision !== undefined) expectedRevision = Number(parsed.expectedRevision);
+      if (typeof parsed.clientSentAt === 'number') clientSentAt = parsed.clientSentAt;
     } catch (e) { /* fall through */ }
     if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(moveStr)) {
       sendJsonError(res, 400, 'bad move format');
@@ -277,7 +279,7 @@ function handleMoveEndpoint(req, res) {
     const command = {
       id: cmdId !== null ? cmdId : 'move:' + moveStr + ':' + Date.now() + ':' + Math.random().toString(36).slice(2),
       type: 'move',
-      args: { move: moveStr },
+      args: { move: moveStr, clientSentAt },
       expectedRevision
     };
     referee.getReferee().enqueue(command).then(result => {
@@ -472,6 +474,16 @@ function createServer() {
       const roomId = new URLSearchParams(req.url.split('?')[1] || '').get('room') || 'default';
       const status = seatAuthManager.getStatus(roomId);
       sendJson(res, 200, status);
+      return;
+    }
+    if (req.method === 'GET' && urlPath === '/api/time') {
+      const t0 = req.url.includes('?') ? new URLSearchParams(req.url.split('?')[1]).get('t0') : null;
+      const now = Date.now();
+      sendJson(res, 200, {
+        t0: t0 ? Number(t0) : undefined,
+        serverReceiveTime: now,
+        serverTransmitTime: now
+      });
       return;
     }
 
