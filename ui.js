@@ -833,10 +833,77 @@ function applyRefereeState(state) {
   previousBoard = cloneBoardSnapshot(board);
   renderTimers();
   renderCaptured();
+  if (evalWorker && state.board) {
+    try {
+      const fen = boardToFen(state.board);
+      evalWorker.postMessage({ type: 'position', fen });
+    } catch (e) {}
+  }
   updateStatus();
   updateHistoryUI();
   return true;
 }
+
+let evalWorker = null;
+
+function updateEvalUI(data) {
+  if (!data) return;
+  const scoreText = document.getElementById('eval-score-text');
+  const fill = document.getElementById('eval-bar-fill');
+  const svg = document.getElementById('analysis-arrows');
+
+  const cp = typeof data.evalCp === 'number' ? data.evalCp : 0;
+  const clampedCp = Math.max(-10, Math.min(10, cp));
+  const percent = Math.round(50 + (clampedCp / 10) * 50);
+
+  if (fill && fill.style) fill.style.width = `${percent}%`;
+  if (scoreText) scoreText.textContent = cp >= 0 ? `+${cp.toFixed(1)}` : `${cp.toFixed(1)}`;
+
+  if (svg && data.bestMove && typeof data.bestMove === 'string' && data.bestMove.length >= 4) {
+    drawAnalysisArrow(svg, data.bestMove.slice(0, 2), data.bestMove.slice(2, 4));
+  }
+}
+
+function drawAnalysisArrow(svg, fromSq, toSq) {
+  if (!svg || !fromSq || !toSq) return;
+  const renderOrder = getBoardRenderOrder(boardFlipped);
+  const fromIdx = renderOrder.indexOf(fromSq);
+  const toIdx = renderOrder.indexOf(toSq);
+  if (fromIdx < 0 || toIdx < 0) return;
+
+  const fromCol = fromIdx % 8;
+  const fromRow = Math.floor(fromIdx / 8);
+  const toCol = toIdx % 8;
+  const toRow = Math.floor(toIdx / 8);
+
+  const x1 = (fromCol + 0.5) * 12.5;
+  const y1 = (fromRow + 0.5) * 12.5;
+  const x2 = (toCol + 0.5) * 12.5;
+  const y2 = (toRow + 0.5) * 12.5;
+
+  svg.innerHTML = `
+    <defs>
+      <marker id="arrowhead" markerWidth="6" markerHeight="6" refX="4" refY="3" orient="auto">
+        <polygon points="0 0, 6 3, 0 6" fill="rgba(37, 99, 235, 0.75)" />
+      </marker>
+    </defs>
+    <line x1="${x1}%" y1="${y1}%" x2="${x2}%" y2="${y2}%" stroke="rgba(37, 99, 235, 0.75)" stroke-width="4" marker-end="url(#arrowhead)" />
+  `;
+}
+
+function initEvalWorker() {
+  if (typeof Worker !== 'undefined') {
+    try {
+      evalWorker = new Worker('stockfish-worker.js');
+      evalWorker.onmessage = function (event) {
+        if (!event.data || event.data.type !== 'eval') return;
+        updateEvalUI(event.data);
+      };
+    } catch (e) {}
+  }
+}
+
+initEvalWorker();
 
 function pgnResultToken() {
   const match = result && result.match(/^(1-0|0-1|1\/2-1\/2)$/);

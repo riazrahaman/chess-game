@@ -150,8 +150,25 @@ const ALLOWED_FILES = new Set([
   'engine.js',
   'ui.js',
   'pieces.js',
+  'stockfish-worker.js',
   'CBURNETT-LICENSE.txt'
 ]);
+
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW_MS = 60000;
+const RATE_LIMIT_MAX_REQUESTS = 120;
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip) || { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+  if (now > entry.resetAt) {
+    entry.count = 0;
+    entry.resetAt = now + RATE_LIMIT_WINDOW_MS;
+  }
+  entry.count++;
+  rateLimitMap.set(ip, entry);
+  return entry.count <= RATE_LIMIT_MAX_REQUESTS;
+}
 
 const ALLOWED_DIRS = new Set([
   'assets'
