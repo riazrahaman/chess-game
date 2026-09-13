@@ -513,6 +513,41 @@
             pointer-events: none;
             z-index: 30;
         }
+        .history-ply {
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+            transition: background 0.15s;
+        }
+        .history-ply:hover {
+            background: rgba(59, 130, 246, 0.2);
+        }
+        .history-ply.active-ply {
+            background: #2563eb;
+            color: white;
+            font-weight: bold;
+        }
+        #scrubber-controls {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 8px;
+            justify-content: center;
+        }
+        #scrubber-controls button {
+            padding: 4px 12px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            border-radius: 4px;
+            border: 1px solid var(--board-border, #ccc);
+            background: #f8fafc;
+        }
+        #scrubber-controls button:hover:not(:disabled) {
+            background: #e2e8f0;
+        }
+        #scrubber-controls button:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
@@ -575,6 +610,12 @@
         </div>
     </div>
     <div id="history-container">
+        <div id="scrubber-controls" aria-label="Game history scrubber">
+            <button id="scrub-start" type="button" aria-label="First move" title="First move (|<<)">|&lt;</button>
+            <button id="scrub-prev" type="button" aria-label="Previous move" title="Previous move (<)">&lt;</button>
+            <button id="scrub-next" type="button" aria-label="Next move" title="Next move (>)">&gt;</button>
+            <button id="scrub-end" type="button" aria-label="Last move" title="Last move (>>|)">&gt;|</button>
+        </div>
         <table>
             <thead>
                 <tr>

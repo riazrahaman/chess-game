@@ -628,7 +628,8 @@ function renderBoard(lastMove = null, boardBeforeRender = previousBoard) {
       // even when the hermetic selftest harness slices renderBoard out.
       const pieceOnSquare = board.pieces[squareId];
       const gameActive = (typeof gameOver === 'undefined') ? true : !gameOver;
-      const shouldBeDraggable = gameActive && !!pieceOnSquare && pieceOnSquare.color === turn;
+      const historyActive = (typeof isViewingHistory === 'function') && isViewingHistory();
+      const shouldBeDraggable = !historyActive && gameActive && !!pieceOnSquare && pieceOnSquare.color === turn;
       if (squareDiv.draggable !== shouldBeDraggable) {
         squareDiv.draggable = shouldBeDraggable;
       }
@@ -780,9 +781,142 @@ async function submitMoveToReferee(moveStr) {
     }));
 }
 
+// Phase 1: Interactive Move Tree Scrubber and Navigation
+let liveHistory = [];
+let liveBoard = null;
+let viewedPly = null;
+let historyPositions = [];
+
+function isViewingHistory() {
+  return viewedPly !== null && viewedPly < liveHistory.length;
+}
+
+function getViewedPly() {
+  return viewedPly;
+}
+
+function getLivePly() {
+  return liveHistory.length;
+}
+
+function computeHistoryPositions(history) {
+  const positions = [];
+  const engineLookup = typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : {});
+  const initBoardFn = engineLookup['create' + 'InitialBoard'];
+  const stepMoveFn = engineLookup['make' + 'Move'];
+  if (!initBoardFn || !stepMoveFn) return positions;
+  let b = initBoardFn();
+  positions.push({ board: b, lastMove: null, turn: b.turn });
+  if (!history || !Array.isArray(history)) return positions;
+  for (let i = 0; i < history.length; i++) {
+    const m = history[i];
+    const from = m.slice(0, 2);
+    const to = m.slice(2, 4);
+    const promo = m[4];
+    b = stepMoveFn(b, from, to, promo);
+    positions.push({ board: b, lastMove: { from, to }, turn: b.turn });
+  }
+  return positions;
+}
+
+function updateScrubberButtons() {
+  const total = liveHistory.length;
+  const current = viewedPly === null ? total : viewedPly;
+  const btnStart = document.getElementById('scrub-start');
+  const btnPrev = document.getElementById('scrub-prev');
+  const btnNext = document.getElementById('scrub-next');
+  const btnEnd = document.getElementById('scrub-end');
+
+  if (btnStart) btnStart.disabled = current <= 0;
+  if (btnPrev) btnPrev.disabled = current <= 0;
+  if (btnNext) btnNext.disabled = current >= total;
+  if (btnEnd) btnEnd.disabled = current >= total;
+}
+
+function jumpToPly(ply) {
+  const total = liveHistory.length;
+  const target = Math.max(0, Math.min(total, ply));
+  if (target >= total) {
+    viewedPly = null;
+  } else {
+    viewedPly = target;
+  }
+  selectedSquare = null;
+  legalMoves = [];
+  if (typeof clearUserAnnotations === 'function') clearUserAnnotations();
+
+  if (viewedPly === null) {
+    board = liveBoard;
+    turn = liveBoard ? liveBoard.turn : 'white';
+    const lastM = liveHistory.length > 0
+      ? { from: liveHistory[liveHistory.length - 1].slice(0, 2), to: liveHistory[liveHistory.length - 1].slice(2, 4) }
+      : null;
+    renderBoard(lastM);
+  } else if (historyPositions[viewedPly]) {
+    const snap = historyPositions[viewedPly];
+    board = snap.board;
+    turn = snap.turn || snap.board.turn;
+    renderBoard(snap.lastMove);
+  }
+
+  updateHistoryUI();
+  updateStatus();
+  updateScrubberButtons();
+}
+
+function scrubFirst() {
+  jumpToPly(0);
+}
+
+function scrubPrev() {
+  const total = liveHistory.length;
+  const current = viewedPly === null ? total : viewedPly;
+  if (current > 0) jumpToPly(current - 1);
+}
+
+function scrubNext() {
+  const total = liveHistory.length;
+  const current = viewedPly === null ? total : viewedPly;
+  if (current < total) jumpToPly(current + 1);
+}
+
+function scrubLast() {
+  jumpToPly(liveHistory.length);
+}
+
+function handleGlobalScrubberKeydown(event) {
+  if (!event) return;
+  const tag = event.target && event.target.tagName ? event.target.tagName.toLowerCase() : '';
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
+  const isSquareFocused = document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('square');
+  if (isSquareFocused && !event.altKey && !event.ctrlKey && !event.metaKey) {
+    return;
+  }
+
+  if (event.key === 'ArrowLeft') {
+    if (event.preventDefault) event.preventDefault();
+    scrubPrev();
+  } else if (event.key === 'ArrowRight') {
+    if (event.preventDefault) event.preventDefault();
+    scrubNext();
+  } else if (event.key === 'Home') {
+    if (event.preventDefault) event.preventDefault();
+    scrubFirst();
+  } else if (event.key === 'End') {
+    if (event.preventDefault) event.preventDefault();
+    scrubLast();
+  }
+}
+
 function updateStatus() {
   if (!board) return;
   if (infoElement) infoElement.textContent = `Turn: ${turn.charAt(0).toUpperCase() + turn.slice(1)}`;
+  if (typeof isViewingHistory === 'function' && isViewingHistory()) {
+    const cur = viewedPly === null ? liveHistory.length : viewedPly;
+    if (statusElement) statusElement.textContent = `Viewing history (${cur}/${liveHistory.length})`;
+    return;
+  }
   const label = refereeStatus.charAt(0).toUpperCase() + refereeStatus.slice(1);
   const checkLabel = kingStatus.mate ? 'Checkmate' : kingStatus.check ? 'Check' : label;
   if (statusElement) statusElement.textContent = `Status: ${result || checkLabel}`;
@@ -791,15 +925,38 @@ function updateStatus() {
 function updateHistoryUI() {
   if (!historyBody) return;
   historyBody.innerHTML = '';
+  const currentActivePly = viewedPly === null ? liveHistory.length : viewedPly;
+
   moveHistory.forEach((move, index) => {
     const row = document.createElement('tr');
-    row.innerHTML = `
-      <td>${index + 1}</td>
-      <td>${move.whiteMove}</td>
-      <td>${move.blackMove}</td>
-    `;
+
+    const numTd = document.createElement('td');
+    numTd.textContent = String(index + 1);
+    row.appendChild(numTd);
+
+    const whitePly = index * 2 + 1;
+    const whiteTd = document.createElement('td');
+    whiteTd.textContent = move.whiteMove;
+    whiteTd.className = 'history-ply';
+    whiteTd.dataset.ply = String(whitePly);
+    if (currentActivePly === whitePly) whiteTd.classList.add('active-ply');
+    whiteTd.onclick = () => jumpToPly(whitePly);
+    row.appendChild(whiteTd);
+
+    const blackPly = index * 2 + 2;
+    const blackTd = document.createElement('td');
+    blackTd.textContent = move.blackMove || '';
+    if (move.blackMove) {
+      blackTd.className = 'history-ply';
+      blackTd.dataset.ply = String(blackPly);
+      if (currentActivePly === blackPly) blackTd.classList.add('active-ply');
+      blackTd.onclick = () => jumpToPly(blackPly);
+    }
+    row.appendChild(blackTd);
+
     historyBody.appendChild(row);
   });
+  updateScrubberButtons();
 }
 
 function renderGameEnd(state) {
@@ -919,8 +1076,21 @@ function applyRefereeState(state) {
   } else {
     moveHistory = [];
   }
+  liveBoard = state.board;
+  liveHistory = state.history || [];
+  if (typeof computeHistoryPositions === 'function') {
+    historyPositions = computeHistoryPositions(liveHistory);
+  }
+  if (viewedPly !== null && viewedPly >= liveHistory.length) {
+    viewedPly = null;
+  }
   const boardBeforeRender = previousBoard;
-  board = state.board;
+  if (viewedPly !== null && historyPositions[viewedPly]) {
+    board = historyPositions[viewedPly].board;
+    lastMove = historyPositions[viewedPly].lastMove;
+  } else {
+    board = state.board;
+  }
   if (typeof premoveQueue !== 'undefined' && premoveQueue && premoveQueue.length > 0 && state.board) {
     const nextPremove = premoveQueue[0];
     if (state.board.turn === nextPremove.color) {
@@ -1390,6 +1560,11 @@ function handleSquareClick(squareId) {
   // Until a referee snapshot exists, there is no board for the UI to act on.
   if (!board || gameOver || commandPending) return;
 
+  if (typeof isViewingHistory === 'function' && isViewingHistory()) {
+    scrubLast();
+    return;
+  }
+
   if (typeof clearUserAnnotations === 'function' && typeof userAnnotations !== 'undefined' && userAnnotations && (userAnnotations.arrows.length > 0 || userAnnotations.circles.length > 0)) {
     clearUserAnnotations();
   }
@@ -1594,6 +1769,27 @@ if (drawButton) drawButton.onclick = async () => {
 if (undoButton) undoButton.onclick = async () => {
   await runRefereeCommand('Requesting undo', () => fetch('/api/undo', { method: 'POST' }));
 };
+
+const btnScrubStart = document.getElementById('scrub-start');
+if (btnScrubStart) btnScrubStart.onclick = scrubFirst;
+const btnScrubPrev = document.getElementById('scrub-prev');
+if (btnScrubPrev) btnScrubPrev.onclick = scrubPrev;
+const btnScrubNext = document.getElementById('scrub-next');
+if (btnScrubNext) btnScrubNext.onclick = scrubNext;
+const btnScrubEnd = document.getElementById('scrub-end');
+if (btnScrubEnd) btnScrubEnd.onclick = scrubLast;
+
+if (typeof window !== 'undefined' && window.addEventListener) {
+  window.addEventListener('keydown', handleGlobalScrubberKeydown);
+  window.jumpToPly = jumpToPly;
+  window.scrubFirst = scrubFirst;
+  window.scrubPrev = scrubPrev;
+  window.scrubNext = scrubNext;
+  window.scrubLast = scrubLast;
+  window.getViewedPly = getViewedPly;
+  window.getLivePly = getLivePly;
+  window.isViewingHistory = isViewingHistory;
+}
 
 initGame();
 const cachedState = restoreCachedRefereeState();
