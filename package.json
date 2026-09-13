@@ -1,5 +1,11 @@
 {
   "name": "chess-game",
   "version": "1.0.0",
-  "private": true
+  "private": true,
+  "scripts": {
+    "test:browser": "node scripts/smoke-test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
 }
