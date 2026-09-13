@@ -153,6 +153,100 @@ function cloneBoardSnapshot(source) {
   return { pieces };
 }
 
+// A5: render-only move animation. Detects from->to by diffing prev/next
+// referee snapshots and applies a CSS transform transition on the persistent
+// piece node. Never mutates board/clocks/history — pure presentation.
+const ANIM_DURATION_MS = 200;
+
+function prefersReducedMotion() {
+  try {
+    return typeof window !== 'undefined' && window.matchMedia &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch (e) {
+    return false;
+  }
+}
+
+function canAnimate() {
+  return !prefersReducedMotion() &&
+    typeof document !== 'undefined' &&
+    typeof window !== 'undefined' &&
+    typeof Element !== 'undefined' &&
+    typeof Element.prototype.getBoundingClientRect === 'function' &&
+    typeof requestAnimationFrame === 'function';
+}
+
+function squareCenter(squareDiv) {
+  const rect = squareDiv.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  return { x: cx, y: cy };
+}
+
+// Apply a CSS transform transition from old square position to new square
+// position on the persistent piece node. Falls back to instant if unsupported.
+function animateMovedPiece(pieceElement, fromSquare, toSquare, onComplete) {
+  if (!canAnimate() || !pieceElement || !fromSquare || !toSquare) {
+    if (onComplete) onComplete();
+    return;
+  }
+  const fromCenter = squareCenter(fromSquare);
+  const toCenter = squareCenter(toSquare);
+  const dx = fromCenter.x - toCenter.x;
+  const dy = fromCenter.y - toCenter.y;
+  if (dx === 0 && dy === 0) {
+    if (onComplete) onComplete();
+    return;
+  }
+  pieceElement.classList.add('piece-animating');
+  pieceElement.style.transform = `translate(${dx}px, ${dy}px)`;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      pieceElement.style.transform = '';
+      const finish = () => {
+        pieceElement.classList.remove('piece-animating');
+        pieceElement.style.transform = '';
+        if (onComplete) onComplete();
+      };
+      let finished = false;
+      const onTransitionEnd = (event) => {
+        if (finished || event && event.target !== pieceElement) return;
+        finished = true;
+        pieceElement.removeEventListener('transitionend', onTransitionEnd);
+        finish();
+      };
+      pieceElement.addEventListener('transitionend', onTransitionEnd);
+      setTimeout(() => {
+        if (finished) return;
+        finished = true;
+        pieceElement.removeEventListener('transitionend', onTransitionEnd);
+        finish();
+      }, ANIM_DURATION_MS + 60);
+    });
+  });
+}
+
+function fadeOutCapturedPiece(capturedElement) {
+  if (!canAnimate() || !capturedElement || !capturedElement.style) {
+    if (capturedElement && capturedElement.remove) capturedElement.remove();
+    return;
+  }
+  capturedElement.classList.add('piece-captured');
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    capturedElement.removeEventListener('transitionend', onTransitionEnd);
+    capturedElement.remove();
+  };
+  const onTransitionEnd = (event) => {
+    if (event && event.target !== capturedElement) return;
+    finish();
+  };
+  capturedElement.addEventListener('transitionend', onTransitionEnd);
+  setTimeout(finish, ANIM_DURATION_MS + 60);
+}
+
 function piecesMatch(left, right) {
   return left === right || (!!left && !!right && left.type === right.type && left.color === right.color);
 }
@@ -201,9 +295,10 @@ function reuseMovedPiece(lastMove, boardBeforeRender) {
   if (!movingPiece || !toSquare) return;
 
   const capturedPiece = toSquare.firstElementChild;
-  if (capturedPiece && capturedPiece !== movingPiece) capturedPiece.remove();
+  if (capturedPiece && capturedPiece !== movingPiece) fadeOutCapturedPiece(capturedPiece);
   updatePieceElement(movingPiece, afterTo);
   toSquare.appendChild(movingPiece);
+  animateMovedPiece(movingPiece, fromSquare, toSquare);
 }
 
 function renderBoard(lastMove = null, boardBeforeRender = previousBoard) {
@@ -249,7 +344,14 @@ function renderBoard(lastMove = null, boardBeforeRender = previousBoard) {
       const pieceData = board.pieces[squareId];
       if (pieceData) {
         const { type, color } = pieceData;
-        renderPieceSvg(squareDiv, color, type);
+        const existing = squareDiv.firstElementChild;
+        if (!existing || existing.dataset.type !== type || existing.dataset.color !== color) {
+          renderPieceSvg(squareDiv, color, type);
+          if (squareDiv.firstElementChild) {
+            squareDiv.firstElementChild.dataset.type = type;
+            squareDiv.firstElementChild.dataset.color = color;
+          }
+        }
       }
 
       if (selectedSquare === squareId) {
