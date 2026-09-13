@@ -147,6 +147,28 @@
     return new Chess(fen);
   }
 
+  /**
+   * Create a chess.js instance by replaying a coordinate-history array
+   * (e.g. ['e2e4','e7e5', ...]). This is needed for threefold/fivefold
+   * repetition detection, which requires the full move history to track
+   * position counts. A fresh instance from FEN alone does not carry counts.
+   */
+  function createFromHistory(history) {
+    var instance = new Chess();
+    if (!history) return instance;
+    for (var i = 0; i < history.length; i++) {
+      var moveStr = history[i];
+      var from = moveStr.slice(0, 2);
+      var to = moveStr.slice(2, 4);
+      var promo = moveStr[4];
+      var moveObj = { from: from, to: to };
+      if (promo) moveObj.promotion = promo;
+      var result = instance.move(moveObj);
+      if (!result) break;
+    }
+    return instance;
+  }
+
   function legalMoves(boardOrFen) {
     var instance = create(boardOrFen);
     var verbose = instance.moves({ verbose: true });
@@ -223,6 +245,88 @@
     return 'ongoing';
   }
 
+  function isThreefoldRepetition(boardOrFen, history) {
+    if (history && history.length > 0) {
+      try {
+        var histInstance = createFromHistory(history);
+        if (histInstance.isThreefoldRepetition()) return true;
+      } catch (e) { /* history not replayable from start — fall through */ }
+    }
+    var instance = create(boardOrFen);
+    return instance.isThreefoldRepetition();
+  }
+
+  function isFivefoldRepetition(boardOrFen, history) {
+    if (history && history.length > 0) {
+      try {
+        var histInstance = createFromHistory(history);
+        if (histInstance._getPositionCount(histInstance._hash) >= 5) return true;
+      } catch (e) { /* history not replayable from start — fall through */ }
+    }
+    var instance = create(boardOrFen);
+    return instance._getPositionCount(instance._hash) >= 5;
+  }
+
+  function isDrawByFiftyMoves(boardOrFen) {
+    var instance = create(boardOrFen);
+    return instance.isDrawByFiftyMoves();
+  }
+
+  function isDrawBySeventyfiveMoves(boardOrFen) {
+    var instance = create(boardOrFen);
+    return instance._halfMoves >= 150;
+  }
+
+  function isInsufficientMaterial(boardOrFen) {
+    var instance = create(boardOrFen);
+    return instance.isInsufficientMaterial();
+  }
+
+  /**
+   * Evaluate draw conditions in priority order.
+   * Accepts (boardOrFen, optionalHistory). When history is supplied, repetition
+   * detection uses the replayed move history (position counts require full
+   * history). Halfmove-clock and insufficient-material checks always use the
+   * board/FEN directly.
+   * Returns { draw: true/false, reason: 'threefold'|'fivefold'|'fifty-move'|
+   * 'seventyfive-move'|'insufficient'|null }.
+   */
+  function evaluateDraw(boardOrFen, history) {
+    if (isFivefoldRepetition(boardOrFen, history)) {
+      return { draw: true, reason: 'fivefold' };
+    }
+    if (isDrawBySeventyfiveMoves(boardOrFen)) {
+      return { draw: true, reason: 'seventyfive-move' };
+    }
+    if (isInsufficientMaterial(boardOrFen)) {
+      return { draw: true, reason: 'insufficient' };
+    }
+    if (isThreefoldRepetition(boardOrFen, history)) {
+      return { draw: true, reason: 'threefold' };
+    }
+    if (isDrawByFiftyMoves(boardOrFen)) {
+      return { draw: true, reason: 'fifty-move' };
+    }
+    return { draw: false, reason: null };
+  }
+
+  /**
+   * Check whether a claimable draw condition exists (for draw-claim flow).
+   * Claimable: threefold repetition, 50-move rule.
+   * NOT claimable: fivefold, 75-move (automatic), insufficient (automatic).
+   * Accepts (boardOrFen, optionalHistory).
+   * Returns { claimable: true/false, reason: 'threefold'|'fifty-move'|null }.
+   */
+  function claimableDraw(boardOrFen, history) {
+    if (isThreefoldRepetition(boardOrFen, history)) {
+      return { claimable: true, reason: 'threefold' };
+    }
+    if (isDrawByFiftyMoves(boardOrFen)) {
+      return { claimable: true, reason: 'fifty-move' };
+    }
+    return { claimable: false, reason: null };
+  }
+
   function san(boardOrFen, from, to, promotion) {
     var instance = create(boardOrFen);
     var moveObj = { from: from, to: to };
@@ -284,12 +388,20 @@
     boardToFen: boardToFen,
     fenToBoard: fenToBoard,
     create: create,
+    createFromHistory: createFromHistory,
     legalMoves: legalMoves,
     legalMovesForSquare: legalMovesForSquare,
     makeMove: makeMove,
     isCheck: isCheck,
     isCheckmate: isCheckmate,
     isStalemate: isStalemate,
+    isThreefoldRepetition: isThreefoldRepetition,
+    isFivefoldRepetition: isFivefoldRepetition,
+    isDrawByFiftyMoves: isDrawByFiftyMoves,
+    isDrawBySeventyfiveMoves: isDrawBySeventyfiveMoves,
+    isInsufficientMaterial: isInsufficientMaterial,
+    evaluateDraw: evaluateDraw,
+    claimableDraw: claimableDraw,
     getGameStatus: getGameStatus,
     san: san,
     historyToSan: historyToSan,

@@ -313,6 +313,10 @@ function createServer() {
       handleRefereeCommand(res, 'draw');
       return;
     }
+    if (req.method === 'POST' && urlPath === '/api/draw-claim') {
+      handleRefereeCommand(res, 'draw-claim');
+      return;
+    }
     if (req.method === 'POST' && urlPath === '/api/undo') {
       handleRefereeCommand(res, 'undo');
       return;
