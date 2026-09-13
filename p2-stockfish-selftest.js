@@ -47,7 +47,8 @@ async function main() {
 
   // Test UCI initialization handshake
   engine.processCommand('uci');
-  assert(outputLines.includes('id name Stockfish 17 NNUE WASM'), 'engine responds with id name Stockfish 17 NNUE WASM');
+  assert(outputLines.includes('id name Lightweight Local Engine (PST+Material)'), 'engine responds with honest id name Lightweight Local Engine');
+  assert(outputLines.includes('id alias Stockfish 17 NNUE WASM'), 'engine provides Stockfish 17 NNUE WASM alias for compatibility');
   assert(outputLines.some(l => l.includes('option name MultiPV')), 'engine declares MultiPV option');
   assert(outputLines.some(l => l.includes('option name Threads')), 'engine declares Threads option');
   assert(outputLines[outputLines.length - 1] === 'uciok', 'engine concludes uci command with uciok');
