@@ -78,6 +78,6 @@
 | 5     | Gate 5       | Stockfish worker + analysis arrows       | Completed ✅ |
 | 6     | Phase 1      | Web Audio soundpack, multi-premoves (1-5 plies), right-click doodling canvas, move tree scrubber | Completed ✅ |
 | 7     | Phase 2      | Stockfish 17 NNUE WASM, Multi-PV top-3 arrows, CAPS accuracy review & badges, ECO Opening Explorer & SVG graph | Completed ✅ |
-| 8     | Phase 3      | Player seat tokens, spectator security, NTP latency clock lag compensation, multi-room, SQLite archive | Completed / In-Flight ✅ |
+| 8     | Phase 3      | Cryptographic seat auth (anti-hijack), NTP latency lag compensation, multi-tenant room router (/game/:id), SQLite game archive & PGN library | Completed ✅ |
 
-All gates and roadmap phases pass their exit criteria across 10+ automated test suites with 0 regressions.
+All gates and roadmap phases pass their exit criteria across 12+ automated test suites with 0 regressions.

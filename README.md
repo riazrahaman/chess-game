@@ -25,9 +25,10 @@ A high-performance, accessible, full-featured web chess implementation built wit
 
 ### 3. Server Architecture, Security & Multiplayer
 - **Authoritative Long-Lived Referee**: In-process FIFO command queue, monotonic revision counter, append-only event journal (`.referee-journal.jsonl`), and atomic JSON state snapshots with crash recovery.
-- **Server-Sent Events (SSE)**: Instant real-time state push to connected clients with automatic poll fallback.
 - **Cryptographic Player Seat Tokens**: Session tokens for White, Black, and Spectator roles preventing unauthorized moves or hijacking (`seat-auth.js`).
 - **NTP-Style Latency Compensation**: Ping-pong RTT tracking (`/api/time`) to credit network transit lag back to active player clocks.
+- **Multi-Tenant Room Router**: Isolated game rooms at `/game/:roomId` with isolated referee queues, state files, and SSE channels.
+- **SQLite Game Archive & PGN Library**: Native Node.js `node:sqlite` resilient database with search, pagination, Seven Tag Roster PGN parsing, and PGN export.
 - **Security Boundary**: Strict CORS origin verification, 8KB request payload cap, path traversal protection, dotfile denial, and nosniff/no-store HTTP headers.
 
 ---
@@ -78,9 +79,11 @@ node p2-multipv-selftest.js
 node p2-review-selftest.js
 node p2-opening-selftest.js
 
-# Phase 3: Player Seat Tokens & Latency Compensation
+# Phase 3: Player Seat Tokens, Latency Compensation, Multi-Room & SQLite Archive
 node p3-seat-selftest.js
 node p3-lag-selftest.js
+node p3-multiroom-selftest.js
+node p3-sqlite-selftest.js
 
 # Differential Engine Verification (200 random games vs chess.js, 37,800+ plies)
 node differential-selftest.js

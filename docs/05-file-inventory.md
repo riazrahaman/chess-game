@@ -6,11 +6,12 @@
 - `server.js` — HTTP API + static file server + SSE event stream (`/api/events`), security boundary, rate limiting, and player seat routing.
 - `referee-service.js` — Long-lived referee with serialized FIFO queue, monotonic revision tracking, event journaling, atomic snapshots, and crash recovery.
 - `seat-auth.js` — Cryptographic player seat manager (White, Black, Spectator session tokens) preventing move hijacking.
+- `game-archive.js` — Native Node.js `node:sqlite` resilient game database with fallback JSON storage, Seven Tag Roster PGN parsing, and export.
 - `referee-helper.cjs` — CLI referee wrapper for manual state inspection and move parsing.
 
 ## Client Files (Served by server.js)
-- `index.html` — Semantic HTML5 grid layout, board container, evaluation bar, SVG annotation overlay, move history, opening explorer, evaluation graph, and game review accuracy panel.
-- `ui.js` — Main client UI orchestrator: SSE push receiver, move tree scrubber, multi-premove chaining, board doodling, audio playback, haptics, and seat management.
+- `index.html` — Semantic HTML5 grid layout, board container, evaluation bar, SVG annotation overlay, move history, opening explorer, evaluation graph, game review accuracy panel, and game archive library modal.
+- `ui.js` — Main client UI orchestrator: SSE push receiver, move tree scrubber, multi-premove chaining, board doodling, audio playback, haptics, seat management, and game archive browser.
 - `pieces.js` — Vector inline SVG chess pieces based on Colin M.L. Burnett's standard chess artwork.
 - `stockfish-worker.js` — Web Worker position evaluation engine with UCI protocol support, centipawn scoring, and Multi-PV candidate lines.
 - `move-review.js` — CAPS accuracy scoring engine and win-probability move classification (Brilliant, Great, Best, Excellent, Good, Inaccuracy, Mistake, Blunder).
@@ -35,8 +36,11 @@
 - `p2-opening-selftest.js` — ECO opening database lookups and SVG evaluation graph tests.
 - `p3-seat-selftest.js` — Cryptographic player seat tokens, 409 conflict, and 403 move rejection tests.
 - `p3-lag-selftest.js` — NTP-style latency tracking and move transit clock lag compensation tests.
+- `p3-multiroom-selftest.js` — Multi-tenant room isolation, dynamic routing (/game/:id), and isolated SSE broadcast tests.
+- `p3-sqlite-selftest.js` — SQLite database CRUD, PGN import/export, and API route tests.
 
 ## Runtime Artifacts
 - `.referee-state.json` — Atomic referee game state snapshot.
 - `.referee-journal.jsonl` — Append-only journal of game events for crash recovery.
+- `games.db` — SQLite database for persistent game archive and PGN history.
 - `.worktrees/` — Isolated git worktrees for concurrent feature development.
