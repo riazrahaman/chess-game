@@ -118,7 +118,8 @@ function evaluatePosition(parsed) {
   return score;
 }
 
-function generateCandidateMoves(parsed) {
+function generateCandidateMoves(parsedOrFen) {
+  const parsed = typeof parsedOrFen === 'string' ? parseFen(parsedOrFen) : parsedOrFen;
   if (!parsed || !parsed.pieces) return [];
   const turn = parsed.turn;
   const moves = [];

@@ -939,6 +939,26 @@
             <span id="spectator-badge" style="font-size:0.75rem; padding:2px 6px; border-radius:4px; background:#e0e7ff; color:#3730a3; font-weight:600;" title="Spectators count">👁 0</span>
             <span id="ping-badge" style="font-size:0.72rem; padding:2px 6px; border-radius:4px; background:#f1f5f9; color:#64748b; font-weight:600;" title="Network Latency">--ms</span>
         </div>
+        <div id="vs-computer-bar" style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:8px; padding:6px 10px; background:var(--panel-bg); border:1px solid var(--panel-border); border-radius:6px; font-size:0.8rem;">
+            <label style="display:flex; align-items:center; gap:4px; font-weight:600; cursor:pointer;">
+                <input type="checkbox" id="bot-toggle" /> Play vs Computer
+            </label>
+            <select id="bot-level-select" style="font-size:0.78rem; padding:2px 6px; border-radius:4px;" disabled>
+                <option value="1">Level 1 (Novice 800)</option>
+                <option value="2">Level 2 (Apprentice 1000)</option>
+                <option value="3" selected>Level 3 (Club 1200)</option>
+                <option value="4">Level 4 (Tactician 1400)</option>
+                <option value="5">Level 5 (Expert 1600)</option>
+                <option value="6">Level 6 (Master 1800)</option>
+                <option value="7">Level 7 (IM 2000)</option>
+                <option value="8">Level 8 (GM 2200)</option>
+            </select>
+            <select id="bot-color-select" style="font-size:0.78rem; padding:2px 6px; border-radius:4px;" disabled>
+                <option value="black" selected>Bot plays Black</option>
+                <option value="white">Bot plays White</option>
+            </select>
+            <span id="bot-status-badge" style="font-size:0.72rem; padding:2px 6px; border-radius:4px; background:#f1f5f9; color:#64748b; font-weight:600;">Bot: Off</span>
+        </div>
         <p id="board-instructions" class="visually-hidden">Use the arrow keys to move between squares. Press Enter or Space to select a piece or move it.</p>
         <div id="info">Turn: White</div>
         <div id="status" aria-live="polite">Status: Ongoing</div>

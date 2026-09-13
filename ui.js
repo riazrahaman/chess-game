@@ -3056,6 +3056,93 @@ function setupMatchgradeSocialUI() {
   updateSpectatorBadge();
 }
 
+// ==========================================
+// C5: Play vs Computer (Levels 1–8 Bot)
+// ==========================================
+
+async function fetchBotConfig() {
+  try {
+    const res = await fetch(withRoomParam('/api/bot'));
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.bot) {
+        updateBotUI(data.bot);
+      }
+    }
+  } catch (e) {}
+}
+
+function updateBotUI(botConfig) {
+  if (!botConfig) return;
+  const toggle = document.getElementById('bot-toggle');
+  const levelSelect = document.getElementById('bot-level-select');
+  const colorSelect = document.getElementById('bot-color-select');
+  const badge = document.getElementById('bot-status-badge');
+
+  if (toggle && typeof botConfig.enabled === 'boolean' && document.activeElement !== toggle) {
+    toggle.checked = botConfig.enabled;
+  }
+  if (levelSelect) {
+    levelSelect.disabled = !botConfig.enabled;
+    if (botConfig.level && document.activeElement !== levelSelect) {
+      levelSelect.value = String(botConfig.level);
+    }
+  }
+  if (colorSelect) {
+    colorSelect.disabled = !botConfig.enabled;
+    if (botConfig.color && document.activeElement !== colorSelect) {
+      colorSelect.value = botConfig.color;
+    }
+  }
+  if (badge) {
+    if (botConfig.enabled) {
+      badge.textContent = `Bot: ${botConfig.name || 'Level ' + botConfig.level}`;
+      badge.style.background = '#dcfce7';
+      badge.style.color = '#166534';
+    } else {
+      badge.textContent = 'Bot: Off';
+      badge.style.background = '#f1f5f9';
+      badge.style.color = '#64748b';
+    }
+  }
+}
+
+async function sendBotConfigUpdate() {
+  const toggle = document.getElementById('bot-toggle');
+  const levelSelect = document.getElementById('bot-level-select');
+  const colorSelect = document.getElementById('bot-color-select');
+
+  const enabled = toggle ? toggle.checked : false;
+  const level = levelSelect ? parseInt(levelSelect.value, 10) : 3;
+  const color = colorSelect ? colorSelect.value : 'black';
+
+  try {
+    const res = await fetch(withRoomParam('/api/bot'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled, level, color })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      updateBotUI(data);
+    }
+  } catch (e) {
+    console.error('Failed to update bot config', e);
+  }
+}
+
+function setupBotUI() {
+  const toggle = document.getElementById('bot-toggle');
+  const levelSelect = document.getElementById('bot-level-select');
+  const colorSelect = document.getElementById('bot-color-select');
+
+  if (toggle) toggle.addEventListener('change', sendBotConfigUpdate);
+  if (levelSelect) levelSelect.addEventListener('change', sendBotConfigUpdate);
+  if (colorSelect) colorSelect.addEventListener('change', sendBotConfigUpdate);
+
+  fetchBotConfig();
+}
+
 if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('keydown', handleGlobalScrubberKeydown);
   window.jumpToPly = jumpToPly;
@@ -3105,6 +3192,10 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.sendChatMessage = sendChatMessage;
   window.handleRematchClick = handleRematchClick;
   window.setupMatchgradeSocialUI = setupMatchgradeSocialUI;
+  window.fetchBotConfig = fetchBotConfig;
+  window.updateBotUI = updateBotUI;
+  window.sendBotConfigUpdate = sendBotConfigUpdate;
+  window.setupBotUI = setupBotUI;
 }
 
 const copyRoomButton = document.getElementById('copy-room-link');
@@ -3128,6 +3219,7 @@ setupGameArchiveUI();
 initSeatAuth();
 syncNtpClock();
 setupMatchgradeSocialUI();
+setupBotUI();
 if (typeof setInterval === 'function') {
   setInterval(syncNtpClock, 10000);
 }
