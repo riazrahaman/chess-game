@@ -1050,6 +1050,20 @@
                     <div id="why-body">Scrub to or select any move to inspect the engine and tactical reasoning.</div>
                 </div>
             </div>
+            <div id="game-report-section" style="margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--panel-border);">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <span style="font-size:0.85rem; font-weight:600;">Post-Game Narrative Report</span>
+                    <button id="copy-annotated-pgn-btn" type="button" style="font-size:0.75rem; padding:3px 8px; background:var(--panel-bg); border:1px solid var(--panel-border); border-radius:4px; cursor:pointer;">Copy Annotated PGN</button>
+                </div>
+                <div id="game-report-card" style="padding:10px; background:rgba(0,0,0,0.03); border:1px solid var(--panel-border); border-radius:4px; font-size:0.8rem; line-height:1.5;">
+                    <div id="report-headline" style="font-weight:bold; color:var(--text-color); margin-bottom:4px;">Game Overview</div>
+                    <div id="report-accuracy" style="color:var(--muted); margin-bottom:6px;"></div>
+                    <div id="report-opening" style="margin-bottom:6px;"></div>
+                    <div id="report-turning-point" style="margin-bottom:6px;"></div>
+                    <div id="report-endgame" style="margin-bottom:6px;"></div>
+                    <div id="report-advice" style="padding:6px; background:rgba(37,99,235,0.06); border-radius:4px; border-left:3px solid #2563eb;"></div>
+                </div>
+            </div>
         </div>
         <div id="explorer-panel">
             <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -1155,6 +1169,7 @@
     <script src="pieces.js"></script>
     <script src="move-review.js"></script>
     <script src="ai-coach.js"></script>
+    <script src="game-report.js"></script>
     <script src="openings-db.js"></script>
     <script src="game-archive.js"></script>
     <script src="ui.js"></script>

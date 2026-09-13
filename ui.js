@@ -2245,6 +2245,59 @@ function renderReviewPanel() {
     });
     summaryEl.appendChild(table);
   }
+
+  if (typeof renderPostGameNarrativeReport === 'function') {
+    renderPostGameNarrativeReport();
+  }
+}
+
+function renderPostGameNarrativeReport() {
+  const reportModule = (typeof window !== 'undefined' && window.GameReport) || (typeof GameReport !== 'undefined' ? GameReport : null);
+  if (!reportModule || typeof reportModule.generatePostGameReport !== 'function') return;
+
+  const rawHistory = (moveHistory || []).flatMap(m => [m.raw, m.rawBlack].filter(Boolean));
+  const sanList = historyToSan(rawHistory);
+
+  const report = reportModule.generatePostGameReport({
+    moveHistory: rawHistory,
+    sanHistory: sanList,
+    evalHistory: evalHistory || [],
+    review: latestGameReview || { whiteAccuracy: 85, blackAccuracy: 80 },
+    result: result || '*',
+    reason: (previousRefereeState && previousRefereeState.status) || 'normal'
+  });
+
+  const headlineEl = document.getElementById('report-headline');
+  const accEl = document.getElementById('report-accuracy');
+  const openEl = document.getElementById('report-opening');
+  const turnEl = document.getElementById('report-turning-point');
+  const endEl = document.getElementById('report-endgame');
+  const adviceEl = document.getElementById('report-advice');
+
+  if (headlineEl) headlineEl.textContent = report.headline;
+  if (accEl) accEl.textContent = report.accSummary;
+  if (openEl) openEl.innerHTML = `<strong>Opening:</strong> ${escapeHtml(report.openingNarrative)}`;
+  if (turnEl) turnEl.innerHTML = `<strong>Key Turning Point:</strong> ${escapeHtml(report.turningPointNarrative)}`;
+  if (endEl) endEl.innerHTML = `<strong>Late Game:</strong> ${escapeHtml(report.endgameNarrative)}`;
+  if (adviceEl) {
+    adviceEl.innerHTML = `
+      <div style="margin-bottom:3px;"><strong>White Takeaway:</strong> ${escapeHtml(report.whiteAdvice)}</div>
+      <div><strong>Black Takeaway:</strong> ${escapeHtml(report.blackAdvice)}</div>
+    `;
+  }
+
+  const copyAnnotatedBtn = document.getElementById('copy-annotated-pgn-btn');
+  if (copyAnnotatedBtn) {
+    copyAnnotatedBtn.onclick = async () => {
+      try {
+        if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(report.annotatedPgn);
+          copyAnnotatedBtn.textContent = 'Copied!';
+          setTimeout(() => { copyAnnotatedBtn.textContent = 'Copy Annotated PGN'; }, 1500);
+        }
+      } catch (e) {}
+    };
+  }
 }
 
 const gameReviewButton = document.getElementById('game-review-btn');
@@ -3451,6 +3504,7 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.explainCurrentlyViewedMove = explainCurrentlyViewedMove;
   window.showCoachHint = showCoachHint;
   window.setupAiCoachUI = setupAiCoachUI;
+  window.renderPostGameNarrativeReport = renderPostGameNarrativeReport;
 }
 
 const copyRoomButton = document.getElementById('copy-room-link');
