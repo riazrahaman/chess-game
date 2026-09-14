@@ -18,13 +18,25 @@ const CLASSIFICATIONS = {
 
 /**
  * Calculates winning probability (0 to 100%) from centipawns eval from White's perspective.
- * Uses standard sigmoid model: W(cp) = 50 + 50 * (2 / (1 + exp(-0.00368208 * cp)) - 1)
+ * Uses the Lichess logistic model: W(cp) = 50 + 50 * (2 / (1 + exp(-0.004 * cp)) - 1)
+ * This maps centipawn advantage to expected win percentage, so mistakes are penalized
+ * by expected-points swing rather than raw centipawn loss. Blunders in already-lost
+ * positions produce smaller win-prob deltas and rate less harshly.
  */
 function calculateWinProbability(cp) {
   if (typeof cp !== 'number' || isNaN(cp)) return 50;
   const clampedCp = Math.max(-2000, Math.min(2000, cp));
-  const rawProb = 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * clampedCp)) - 1);
+  const rawProb = 50 + 50 * (2 / (1 + Math.exp(-0.004 * clampedCp)) - 1);
   return Math.max(0, Math.min(100, rawProb));
+}
+
+/**
+ * Alias for calculateWinProbability — converts centipawn eval to win probability (0–100%).
+ * @param {number} cp  Centipawn evaluation from White's perspective.
+ * @returns {number}   Win probability percentage (0–100).
+ */
+function cpToWinProbability(cp) {
+  return calculateWinProbability(cp);
 }
 
 /**
@@ -208,6 +220,7 @@ function generateMistakePuzzles(moveHistory, evalHistory, fenHistory) {
 const MoveReviewModule = {
   CLASSIFICATIONS,
   calculateWinProbability,
+  cpToWinProbability,
   calculateDeltaWinProb,
   calculateMoveAccuracy,
   classifyMove,

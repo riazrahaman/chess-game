@@ -284,5 +284,87 @@ assert(typeof closeBtn.onclick === 'function', 'close-review has click handler')
 closeBtn.onclick();
 assert(reviewPanel.classList.contains('hidden'), 'review-panel is hidden after close click');
 
+// ---------------------------------------------------------------------------
+// Test Suite 3: Lichess Logistic Win-Probability Curve (X2)
+// Formula: W(cp) = 50 + 50 * (2 / (1 + exp(-0.004 * cp)) - 1)
+// ---------------------------------------------------------------------------
+
+console.log('\n=== Test Suite 3: Lichess Logistic Win-Probability Curve (X2) ===');
+
+// 3.1  Alias exists and matches calculateWinProbability
+assert(typeof moveReview.cpToWinProbability === 'function', 'cpToWinProbability is exported');
+assert(
+  Math.abs(moveReview.cpToWinProbability(0) - moveReview.calculateWinProbability(0)) < 1e-10,
+  'cpToWinProbability matches calculateWinProbability for 0 cp'
+);
+
+// 3.2  0 cp -> exactly 50%
+const prob0 = moveReview.cpToWinProbability(0);
+assert(Math.abs(prob0 - 50) < 0.001, `0 cp -> 50% (got ${prob0.toFixed(6)})`);
+
+// 3.3  Positive cp -> >50%, monotonic increasing
+const probPos100 = moveReview.cpToWinProbability(100);
+assert(probPos100 > 50, `+100 cp -> >50% (got ${probPos100.toFixed(4)})`);
+const probPos300 = moveReview.cpToWinProbability(300);
+assert(probPos300 > probPos100, `+300 cp > +100 cp — monotonic increasing (${probPos100.toFixed(4)} → ${probPos300.toFixed(4)})`);
+const probPos500 = moveReview.cpToWinProbability(500);
+assert(probPos500 > probPos300, `+500 cp > +300 cp — monotonic increasing (${probPos300.toFixed(4)} → ${probPos500.toFixed(4)})`);
+
+// 3.4  Negative cp -> <50%
+const probNeg100 = moveReview.cpToWinProbability(-100);
+assert(probNeg100 < 50, `-100 cp -> <50% (got ${probNeg100.toFixed(4)})`);
+const probNeg500 = moveReview.cpToWinProbability(-500);
+assert(probNeg500 < probNeg100, `-500 cp < -100 cp — monotonic decreasing (${probNeg100.toFixed(4)} → ${probNeg500.toFixed(4)})`);
+
+// 3.5  Symmetry: W(-cp) = 100 - W(cp)
+assert(
+  Math.abs(moveReview.cpToWinProbability(-100) - (100 - moveReview.cpToWinProbability(100))) < 0.001,
+  'Symmetry: W(-cp) = 100 - W(cp) for 100 cp'
+);
+assert(
+  Math.abs(moveReview.cpToWinProbability(-500) - (100 - moveReview.cpToWinProbability(500))) < 0.001,
+  'Symmetry: W(-cp) = 100 - W(cp) for 500 cp'
+);
+
+// 3.6  Large |cp| asymptotes near 0 / 100
+const probHuge = moveReview.cpToWinProbability(2000);
+assert(probHuge >= 99, `+2000 cp -> >=99% (got ${probHuge.toFixed(4)})`);
+assert(probHuge < 100, `+2000 cp -> <100% (not flat 100) (got ${probHuge.toFixed(4)})`);
+const probHugeNeg = moveReview.cpToWinProbability(-2000);
+assert(probHugeNeg <= 1, `-2000 cp -> <=1% (got ${probHugeNeg.toFixed(4)})`);
+assert(probHugeNeg > 0, `-2000 cp -> >0% (not flat 0) (got ${probHugeNeg.toFixed(4)})`);
+
+// 3.7  Known reference point: +100 cp ≈ 59.85% with k=0.004
+// W(100) = 50 + 50 * (2/(1+e^(-0.4)) - 1)
+// e^(-0.4) ≈ 0.67032, so W(100) = 50 + 50*(2/1.67032 - 1) = 50 + 50*0.19782 ≈ 59.89
+const ref100 = moveReview.cpToWinProbability(100);
+assert(
+  Math.abs(ref100 - (50 + 50 * (2 / (1 + Math.exp(-0.004 * 100)) - 1))) < 0.001,
+  `+100 cp matches formula exactly (got ${ref100.toFixed(6)})`
+);
+assert(ref100 > 59 && ref100 < 61, `+100 cp ≈ 59.85% in [59,61] (got ${ref100.toFixed(4)})`);
+
+// 3.8  Known reference point: +500 cp ≈ 87.6%
+// e^(-2.0) ≈ 0.13534, W(500) = 50 + 50*(2/1.13534 - 1) = 50 + 50*0.76188 ≈ 88.09
+const ref500 = moveReview.cpToWinProbability(500);
+assert(ref500 > 85 && ref500 < 90, `+500 cp ≈ 87.6% in [85,90] (got ${ref500.toFixed(4)})`);
+
+// 3.9  Invalid input returns 50
+assert(moveReview.cpToWinProbability(NaN) === 50, 'NaN cp -> 50%');
+assert(moveReview.cpToWinProbability(undefined) === 50, 'undefined cp -> 50%');
+assert(moveReview.cpToWinProbability('abc') === 50, 'string cp -> 50%');
+
+// 3.10 Clamping: beyond ±2000 doesn't exceed [0,100]
+assert(moveReview.cpToWinProbability(100000) <= 100, 'Huge positive clamped to <=100%');
+assert(moveReview.cpToWinProbability(-100000) >= 0, 'Huge negative clamped to >=0%');
+
+// 3.11 Win-prob delta is smaller in already-lost positions (key insight of X2)
+// Blundering from -300 to -500 (already lost) should produce smaller deltaW
+// than blundering from +100 to -100 (winning to losing).
+const deltaLost = moveReview.calculateDeltaWinProb(-300, -500, true);
+const deltaWinning = moveReview.calculateDeltaWinProb(100, -100, true);
+assert(deltaLost < deltaWinning,
+  `Blunder in lost position (-300→-500) penalized less than in winning position (+100→-100): ${deltaLost.toFixed(2)} < ${deltaWinning.toFixed(2)}`);
+
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
