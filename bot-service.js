@@ -9,12 +9,13 @@
 
 const stockfishWorker = require('./stockfish-worker.js');
 const rulesEngine = require('./rules-engine.js');
+const openingsDb = require('./openings-db.js');
 
 const BOT_LEVELS = {
-  1: { level: 1, name: 'Novice Bot', rating: 800, depth: 1, blunderRate: 0.50, greeting: 'Hi! Let’s have a fun match!' },
-  2: { level: 2, name: 'Apprentice Bot', rating: 1000, depth: 1, blunderRate: 0.30, greeting: 'Watch out for my knights!' },
-  3: { level: 3, name: 'Club Player Bot', rating: 1200, depth: 2, blunderRate: 0.20, greeting: 'Let’s battle for the center.' },
-  4: { level: 4, name: 'Tactician Bot', rating: 1400, depth: 2, blunderRate: 0.05, greeting: 'I’m watching every tactical pin and fork.' },
+  1: { level: 1, name: 'Novice Bot', rating: 800, depth: 1, blunderRate: 0.35, greeting: 'Hi! Let’s have a fun match!' },
+  2: { level: 2, name: 'Apprentice Bot', rating: 1000, depth: 1, blunderRate: 0.20, greeting: 'Watch out for my knights!' },
+  3: { level: 3, name: 'Club Player Bot', rating: 1200, depth: 2, blunderRate: 0.10, greeting: 'Let’s battle for the center.' },
+  4: { level: 4, name: 'Tactician Bot', rating: 1400, depth: 2, blunderRate: 0.02, greeting: 'I’m watching every tactical pin and fork.' },
   5: { level: 5, name: 'Expert Bot', rating: 1600, depth: 3, blunderRate: 0.00, greeting: 'Solid openings and precise calculation.' },
   6: { level: 6, name: 'Master Bot', rating: 1800, depth: 3, blunderRate: 0.00, greeting: 'Preparing a deep positional strategy.' },
   7: { level: 7, name: 'International Master Bot', rating: 2000, depth: 4, blunderRate: 0.00, greeting: 'Calculation initiated. Every tempo counts.' },
@@ -87,20 +88,51 @@ class BotService {
     };
   }
 
-  computeBotMove(fen, level = 3) {
+  computeBotMove(fen, level = 3, moveHistory = []) {
     const profile = BOT_LEVELS[level] || BOT_LEVELS[3];
     const parsed = typeof fen === 'string' ? stockfishWorker.parseFen(fen) : fen;
+    if (!parsed) return null;
+
     const candidateMoves = stockfishWorker.generateCandidateMoves(parsed);
     if (!candidateMoves || candidateMoves.length === 0) return null;
 
-    // Check blunder roll
+    const fenStr = typeof fen === 'string' ? fen : (rulesEngine ? rulesEngine.boardToFen(fen) : '');
+    const isStartPos = fenStr.startsWith('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR');
+
+    // 1. Opening book check (first 10 plies)
+    if (openingsDb && typeof openingsDb.findOpening === 'function') {
+      const history = Array.isArray(moveHistory) ? moveHistory : [];
+      const canConsultBook = history.length > 0 ? (history.length < 10) : isStartPos;
+      if (canConsultBook) {
+        const opening = openingsDb.findOpening(history);
+        if (opening && opening.popularMoves && opening.popularMoves.length > 0) {
+          const isExactMatch = opening.isExact || (history.length === 0 && isStartPos);
+          if (isExactMatch) {
+            const followBook = profile.blunderRate === 0 || Math.random() > profile.blunderRate;
+            if (followBook) {
+              const bookCandidates = level >= 5
+                ? [opening.popularMoves[0].uci]
+                : opening.popularMoves.map(m => m.uci);
+
+              const chosenBookMove = bookCandidates.find(bm => candidateMoves.some(m => m.uci === bm));
+              if (chosenBookMove) {
+                return chosenBookMove;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Check blunder roll for lower difficulty levels
     if (profile.blunderRate > 0 && Math.random() < profile.blunderRate && candidateMoves.length > 1) {
       const randomIndex = Math.floor(Math.random() * candidateMoves.length);
       return candidateMoves[randomIndex].uci;
     }
 
-    const searchResult = stockfishWorker.findBestMove(fen, { depth: profile.depth });
-    if (searchResult && searchResult.bestMove) {
+    // 3. Engine calculation with profile's configured depth
+    const searchResult = stockfishWorker.findBestMove(parsed, { depth: profile.depth });
+    if (searchResult && searchResult.bestMove && candidateMoves.some(m => m.uci === searchResult.bestMove)) {
       return searchResult.bestMove;
     }
 
@@ -147,7 +179,8 @@ class BotService {
         }
 
         const fen = freshRef.state.fen || rulesEngine.boardToFen(freshRef.state.board);
-        const botMove = this.computeBotMove(fen, config.level);
+        const history = (freshRef.state && Array.isArray(freshRef.state.history)) ? freshRef.state.history : [];
+        const botMove = this.computeBotMove(fen, config.level, history);
 
         if (botMove) {
           const cmdId = 'bot-' + config.color + '-' + Date.now() + '-' + Math.random().toString(36).slice(2);

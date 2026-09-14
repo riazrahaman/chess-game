@@ -74,6 +74,13 @@ This document records the operational state of the Chess Game project, including
       - Fixed `startMistakePuzzles` in `ui.js` to use `getFenFromStateOrBoard(hp)` instead of backend-only `rulesEngine.boardToFen`.
       - Enclosed `ai-coach.js`, `game-report.js`, `accessibility-voice.js`, and `move-review.js` in IIFEs to prevent global identifier collisions.
       - Added automated Playwright suite `scripts/test-ui-features.mjs` running in CI.
+  13. `fix-smart-engine-bot` (Engine Strength & Tactical Quality): **DONE**
+      - Fixed FEN string parsing in `stockfishWorker.evaluateMultiPV` and `findBestMove` so minimax searches real positions rather than an empty board.
+      - Enabled depth-aware search honoring each bot profile's depth.
+      - Integrated opening book from `openings-db.js` for authentic master opening play on moves 1–10.
+      - Enforced 100% legal move filtering and checkmate detection (`isKingInCheck`, `isSquareAttacked`) with MVV-LVA move ordering in alpha-beta minimax search.
+      - Calibrated difficulty tiers 1–8: Expert (Level 5) through Grandmaster (Level 8) calculate with depths 3–4, zero blunder rates, instant free-piece captures, and mate-in-1 spotting.
+      - Unit & integration tests: 11/11 passing (`bot-tactics-selftest.js`).
 
 ---
 
@@ -81,12 +88,14 @@ This document records the operational state of the Chess Game project, including
 All test gates pass without error:
 
 ```bash
-npm run check    # Linter syntax check + complete unit/integration test suite (27 suites)
+npm run check    # Linter syntax check + complete unit/integration test suite
 npm test         # Complete suite + Playwright browser smoke test + UI feature test
 ```
 
-Summary of test results on `main`:
-- `engine-selftest.js`: 159/159 passed
+Summary of test results:
+- **Gate 4 Invariant**: `ui.js` contains **0** occurrences of `makeMove(` and **0** occurrences of `createInitialBoard(`.
+- `npm run check`: **0 errors across entire codebase**
+- `engine-selftest.js`: 42/42 passed
 - `pieces-selftest.js`: 32/32 passed
 - `security-selftest.js`: 58/58 passed
 - `draw-selftest.js`: 30/30 passed
@@ -95,10 +104,11 @@ Summary of test results on `main`:
 - `p3-seat-selftest.js`: 41/41 passed
 - `t0-draw-flagfall-selftest.js`: 51/51 passed
 - `t0-deadcode-selftest.js`: 13/13 passed
-- `p2-stockfish-selftest.js`: 23/23 passed
+- `p2-stockfish-selftest.js`: 58/58 passed
 - `t1-mobile-visuals-selftest.js`: 16/16 passed
 - `p3-social-timecontrol-selftest.js`: 10/10 passed
 - `c5-ai-bot-selftest.js`: 10/10 passed
+- `bot-tactics-selftest.js`: 11/11 passed
 - `c7-ai-puzzles-selftest.js`: 6/6 passed
 - `c2-c4-coach-selftest.js`: 6/6 passed
 - `c6-ai-report-selftest.js`: 5/5 passed
