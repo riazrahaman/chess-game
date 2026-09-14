@@ -118,10 +118,108 @@ function evaluatePosition(parsed) {
   return score;
 }
 
-function generateCandidateMoves(parsedOrFen) {
+function isSquareAttacked(parsed, targetSq, byColor) {
+  if (!parsed || !parsed.pieces || !targetSq) return false;
+  const pieces = parsed.pieces;
+  const targetFile = targetSq.charCodeAt(0) - 97;
+  const targetRank = Number(targetSq[1]);
+
+  // 1. Attacked by pawn?
+  const pawnRank = byColor === 'white' ? targetRank - 1 : targetRank + 1;
+  if (pawnRank >= 1 && pawnRank <= 8) {
+    for (const df of [-1, 1]) {
+      const pf = targetFile + df;
+      if (pf >= 0 && pf <= 7) {
+        const pSq = `${String.fromCharCode(97 + pf)}${pawnRank}`;
+        const p = pieces[pSq];
+        if (p && p.color === byColor && p.type === 'p') return true;
+      }
+    }
+  }
+
+  // 2. Attacked by knight?
+  const knightOffsets = [
+    [-2, -1], [-2, 1], [-1, -2], [-1, 2],
+    [1, -2], [1, 2], [2, -1], [2, 1]
+  ];
+  for (const [df, dr] of knightOffsets) {
+    const nf = targetFile + df;
+    const nr = targetRank + dr;
+    if (nf >= 0 && nf <= 7 && nr >= 1 && nr <= 8) {
+      const p = pieces[`${String.fromCharCode(97 + nf)}${nr}`];
+      if (p && p.color === byColor && p.type === 'n') return true;
+    }
+  }
+
+  // 3. Attacked by king?
+  for (let df = -1; df <= 1; df++) {
+    for (let dr = -1; dr <= 1; dr++) {
+      if (df === 0 && dr === 0) continue;
+      const kf = targetFile + df;
+      const kr = targetRank + dr;
+      if (kf >= 0 && kf <= 7 && kr >= 1 && kr <= 8) {
+        const p = pieces[`${String.fromCharCode(97 + kf)}${kr}`];
+        if (p && p.color === byColor && p.type === 'k') return true;
+      }
+    }
+  }
+
+  // 4. Sliding pieces: bishops, queens (diagonals)
+  const diagDirs = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+  for (const [df, dr] of diagDirs) {
+    let step = 1;
+    while (true) {
+      const f = targetFile + step * df;
+      const r = targetRank + step * dr;
+      if (f < 0 || f > 7 || r < 1 || r > 8) break;
+      const p = pieces[`${String.fromCharCode(97 + f)}${r}`];
+      if (p) {
+        if (p.color === byColor && (p.type === 'b' || p.type === 'q')) return true;
+        break;
+      }
+      step++;
+    }
+  }
+
+  // 5. Sliding pieces: rooks, queens (orthogonals)
+  const straightDirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+  for (const [df, dr] of straightDirs) {
+    let step = 1;
+    while (true) {
+      const f = targetFile + step * df;
+      const r = targetRank + step * dr;
+      if (f < 0 || f > 7 || r < 1 || r > 8) break;
+      const p = pieces[`${String.fromCharCode(97 + f)}${r}`];
+      if (p) {
+        if (p.color === byColor && (p.type === 'r' || p.type === 'q')) return true;
+        break;
+      }
+      step++;
+    }
+  }
+
+  return false;
+}
+
+function isKingInCheck(parsed, color) {
+  if (!parsed || !parsed.pieces) return false;
+  let kingSq = null;
+  for (const sq of Object.keys(parsed.pieces)) {
+    const p = parsed.pieces[sq];
+    if (p && p.type === 'k' && p.color === color) {
+      kingSq = sq;
+      break;
+    }
+  }
+  if (!kingSq) return false;
+  return isSquareAttacked(parsed, kingSq, color === 'white' ? 'black' : 'white');
+}
+
+function generateCandidateMoves(parsedOrFen, options = {}) {
   const parsed = typeof parsedOrFen === 'string' ? parseFen(parsedOrFen) : parsedOrFen;
   if (!parsed || !parsed.pieces) return [];
   const turn = parsed.turn;
+  const oppColor = turn === 'white' ? 'black' : 'white';
   const moves = [];
   const pieces = parsed.pieces;
 
@@ -229,19 +327,42 @@ function generateCandidateMoves(parsedOrFen) {
         }
       }
 
-      // Castling
+      // Castling rules: King cannot be in check, transit square cannot be attacked, destination cannot be attacked
       const castling = parsed.castling || '';
-      if (turn === 'white' && sq === 'e1') {
-        if (castling.includes('K') && isSquareEmpty('f1') && isSquareEmpty('g1')) addMove('e1', 'g1');
-        if (castling.includes('Q') && isSquareEmpty('d1') && isSquareEmpty('c1') && isSquareEmpty('b1')) addMove('e1', 'c1');
-      } else if (turn === 'black' && sq === 'e8') {
-        if (castling.includes('k') && isSquareEmpty('f8') && isSquareEmpty('g8')) addMove('e8', 'g8');
-        if (castling.includes('q') && isSquareEmpty('d8') && isSquareEmpty('c8') && isSquareEmpty('b8')) addMove('e8', 'c8');
+      const inCheck = isKingInCheck(parsed, turn);
+      if (!inCheck) {
+        if (turn === 'white' && sq === 'e1') {
+          if (castling.includes('K') && isSquareEmpty('f1') && isSquareEmpty('g1') && !isSquareAttacked(parsed, 'f1', oppColor) && !isSquareAttacked(parsed, 'g1', oppColor)) {
+            addMove('e1', 'g1');
+          }
+          if (castling.includes('Q') && isSquareEmpty('d1') && isSquareEmpty('c1') && isSquareEmpty('b1') && !isSquareAttacked(parsed, 'd1', oppColor) && !isSquareAttacked(parsed, 'c1', oppColor)) {
+            addMove('e1', 'c1');
+          }
+        } else if (turn === 'black' && sq === 'e8') {
+          if (castling.includes('k') && isSquareEmpty('f8') && isSquareEmpty('g8') && !isSquareAttacked(parsed, 'f8', oppColor) && !isSquareAttacked(parsed, 'g8', oppColor)) {
+            addMove('e8', 'g8');
+          }
+          if (castling.includes('q') && isSquareEmpty('d8') && isSquareEmpty('c8') && isSquareEmpty('b8') && !isSquareAttacked(parsed, 'd8', oppColor) && !isSquareAttacked(parsed, 'c8', oppColor)) {
+            addMove('e8', 'c8');
+          }
+        }
       }
     }
   }
 
-  return moves;
+  if (options && options.pseudo === true) return moves;
+
+  // Filter candidate moves to strictly legal moves (king must not remain in check)
+  const legalMoves = [];
+  for (const m of moves) {
+    const sim = cloneParsed(parsed);
+    applyUciMoveToParsed(sim, m.uci);
+    if (!isKingInCheck(sim, turn)) {
+      legalMoves.push(m);
+    }
+  }
+
+  return legalMoves;
 }
 
 function applyUciMoveToParsed(parsed, moveUci) {
@@ -257,6 +378,12 @@ function applyUciMoveToParsed(parsed, moveUci) {
     parsed.pieces[to] = { type: promo.toLowerCase(), color: movingPiece.color };
   } else {
     parsed.pieces[to] = movingPiece;
+  }
+
+  // En-passant capture: remove captured pawn behind target square
+  if (movingPiece.type === 'p' && to === parsed.enPassant && from[0] !== to[0]) {
+    const capRank = movingPiece.color === 'white' ? 5 : 4;
+    delete parsed.pieces[`${to[0]}${capRank}`];
   }
 
   // Castling rook move
@@ -289,14 +416,24 @@ function search(parsed, depth, alpha, beta, isWhite) {
 
   const moves = generateCandidateMoves(parsed);
   if (moves.length === 0) {
-    return evaluatePosition(parsed);
+    // Checkmate or Stalemate
+    if (isKingInCheck(parsed, parsed.turn)) {
+      return parsed.turn === 'white' ? (-100000 - depth) : (100000 + depth);
+    }
+    return 0; // Stalemate
   }
 
-  // Move ordering: evaluate captures first
+  // Move ordering: MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
   moves.sort((a, b) => {
-    const capA = parsed.pieces[a.to] ? PIECE_VALUES[parsed.pieces[a.to].type] : 0;
-    const capB = parsed.pieces[b.to] ? PIECE_VALUES[parsed.pieces[b.to].type] : 0;
-    return capB - capA;
+    const victimA = parsed.pieces[a.to] ? PIECE_VALUES[parsed.pieces[a.to].type] : 0;
+    const attackerA = parsed.pieces[a.from] ? PIECE_VALUES[parsed.pieces[a.from].type] : 0;
+    const scoreA = victimA > 0 ? (victimA * 10 - attackerA) : 0;
+
+    const victimB = parsed.pieces[b.to] ? PIECE_VALUES[parsed.pieces[b.to].type] : 0;
+    const attackerB = parsed.pieces[b.from] ? PIECE_VALUES[parsed.pieces[b.from].type] : 0;
+    const scoreB = victimB > 0 ? (victimB * 10 - attackerB) : 0;
+
+    return scoreB - scoreA;
   });
 
   if (isWhite) {
@@ -325,8 +462,9 @@ function search(parsed, depth, alpha, beta, isWhite) {
 }
 
 // Multi-PV candidate evaluator
-function evaluateMultiPV(parsed, depth = 3, multiPvCount = 1) {
-  if (!parsed) return [];
+function evaluateMultiPV(parsedOrFen, depth = 3, multiPvCount = 1) {
+  const parsed = typeof parsedOrFen === 'string' ? parseFen(parsedOrFen) : parsedOrFen;
+  if (!parsed || !parsed.pieces) return [];
   const moves = generateCandidateMoves(parsed);
   if (moves.length === 0) return [];
 
@@ -364,8 +502,11 @@ function evaluateMultiPV(parsed, depth = 3, multiPvCount = 1) {
   return results;
 }
 
-function findBestMove(parsed) {
-  const results = evaluateMultiPV(parsed, 2, 1);
+function findBestMove(parsedOrFen, options = {}) {
+  const parsed = typeof parsedOrFen === 'string' ? parseFen(parsedOrFen) : parsedOrFen;
+  if (!parsed || !parsed.pieces) return { bestMove: 'e2e4', evalScore: 0 };
+  const depth = typeof options === 'number' ? options : ((options && options.depth) || 3);
+  const results = evaluateMultiPV(parsed, depth, 1);
   if (results.length > 0) {
     return { bestMove: results[0].bestMove, evalScore: results[0].scoreRaw };
   }
@@ -908,6 +1049,8 @@ if (typeof module !== 'undefined') {
     StockfishEngine,
     WasmEngine,
     UnifiedEngine,
+    isSquareAttacked,
+    isKingInCheck,
     fenCacheKey,
     getEvalFromCache,
     saveEvalToCache
