@@ -1,13 +1,19 @@
 # Chess Game — Improvement Recommendations
 
-*Updated 2026-09-14 with complete implementation and verification across all tiers (Lichess / Chess.com parity benchmark).*
+*Updated 2026-09-14. Part 1 (Tiers 0–D) documents the shipped single-board client — all complete and
+verified. Part 2 (Tiers X–V) is the 2026 deep-research roadmap targeting **platform-class** parity
+with lichess.org, Chess.com, and Chessable, benchmarked against primary sources (lichess.org/features
+& /faq, database.lichess.org, chess.com membership/features, chessable.com, lichess 2025 year-end
+update).*
 
 **Hard invariant for every change:** board, clocks, and history are REFEREE-AUTHORITATIVE.
 `ui.js` renders from server-reported state only — it must never hold or mutate a local board
-or clock (C1/C3). All decorative features (animations, SVG pieces, eval, highlights) are
+or clock (C1/C3, Gate 4). All decorative features (animations, SVG pieces, eval, highlights) are
 display-layer and must read, never write.
 
 ---
+
+# PART 1 — Shipped work (historical record)
 
 ## TIER 0 — Integrity fixes [KIMI] *(✅ ALL SHIPPED & VERIFIED ON MAIN)*
 
@@ -59,7 +65,116 @@ display-layer and must read, never write.
 - ~~**D4 Keyboard/ARIA accessibility.**~~ — **Done.** Dedicated Blind Accessibility Mode (`#blind-mode-toggle`, shortcut 'B'), ARIA live region (`#accessibility-announcer`), full 8x8 keyboard grid navigation (Arrows, Enter, Space, Esc), spoken piece & square feedback. Verified in `c8-d4-voice-selftest.js`.
 - ~~**D5 Touch/mobile input.**~~ — **Done.** Unified pointer events (`pointerdown`, `pointermove`, `pointerup`, `pointercancel`) for phone/tablet drag-and-drop. Verified in `t1-mobile-visuals-selftest.js`.
 
+### Part 1 Status
+**Tiers 0, A, B, C, D: 100% complete.** The single-board playing client is shipped and verified.
+What follows is the next-generation roadmap.
+
 ---
 
-## Final Status
-**100% Complete.** All items across Tier 0, Tier A, Tier B, Tier C, and Tier D have been built, rigorously unit/integration tested, verified for Gate 4 architectural invariants, merged to `main`, and pushed to remote.
+# PART 2 — Next-Generation Roadmap (2026 deep research)
+
+## Current state — honest assessment
+
+**Genuinely world-class already** (keep, do not regress):
+- Referee-authoritative architecture with FIFO command queue, JSONL journal + atomic snapshot, crash recovery
+- Differential-validated engine (37,839 plies vs chess.js, 0 divergences); ~580 assertions across 17 selftest suites
+- Seat-token mutation security, draw-claim rules, flag fall, lag compensation, multi-room isolation
+- Accessibility: blind mode 8×8 keyboard grid, ARIA live regions, voice move input/announcements
+- SQLite archive with PGN import/export and JSON fallback
+
+**Ceilings that cap everything built on top:**
+1. **Engine credibility.** `stockfish-worker.js` is a PST+material heuristic, depth 1–4 (realistically ~1500–1700 Elo). CAPS labels, coach hints, mistake puzzles, post-game reports, bot strength — **every AI feature inherits this inaccuracy**. This is the single highest-leverage fix.
+2. **No identity layer.** No accounts/ratings/matchmaking/profiles/leaderboards — each unlocks the next.
+3. **`ui.js` is a 3,751-LOC monolith; index.html inlines ~850 lines of CSS. No site shell (lobby/profile/analysis pages), no PWA, no i18n, no ESLint/types.**
+4. **Opening explorer is a ~25-node hardcoded tree with fabricated percentages.** Puzzle product is self-generated blunders only — no puzzle DB, rating, spaced repetition, or themed tactics.
+
+## TIER X — Credibility unlocks (do first; everything else compounds on these)
+
+- **X1 Stockfish WASM in the Web Worker.** Drop `stockfish.wasm` (full-strength NNUE) behind the existing UCI interface (`uci`/`position fen`/`go depth` unchanged). Single fetch, no build step. Upgrades eval quality ~1000+ Elo "for free" and makes every downstream AI feature (CAPS, coach, puzzles, reports, bots) honest. Keep the PST engine as a fallback when WASM fails to load. Lichess runs exactly this in-browser for unlimited local analysis. → `stockfish-worker.js`, `p2-stockfish-selftest.js`.
+- **X2 Win-probability logistic curve.** Replace raw-centipawn classification in `move-review.js` with lichess's logistic `50+50·(2/(1+e^(−0.004·cp))−1)` so mistakes are penalized by *expected-points swing*, and blunders in already-lost positions stop rating as harshly. One formula, high payoff.
+- **X3 Eval cache keyed by FEN in SQLite.** Lichess ships 410M precomputed position evals; locally, persist every engine eval you compute. Instant re-render of graphs/reports, and deep analysis becomes incremental. → `game-archive.js` (new table), `move-review.js`, engine worker callers.
+- **X4 Glicko-2 rating engine (~150 lines, public domain).** Apply to (a) bot levels so "Grandmaster 2200" becomes an earned converging rating instead of a label, and (b) puzzle solving. Used by both lichess and chess.com. → new `rating.js` + selftest.
+- **X5 Split `ui.js` into plain `<script>` modules** (render / network / input / seats-chat / analysis / puzzles / voice) — no bundler needed, just file boundaries. Prerequisite for adding a lobby/archive/analysis page shell without the monolith becoming unreviewable. Add ESLint (`node --check` is syntax-only today).
+
+## TIER P — Puzzle ecosystem (Chessable/lichess parity; highest user-retention ROI)
+
+- **P1 Import lichess's 6.1M CC0 puzzle CSV into SQLite** (schema: `PuzzleId,FEN,Moves(UCI),Rating,RatingDeviation,Popularity,Themes,OpeningTags`). One-time ETL script, filterable themed subset to keep the DB small. **This single import beats any home-grown generator.** → `game-archive.js`, new `puzzle-service.js`.
+- **P2 Puzzle rating loop:** each solve attempt scored as a Glicko-2 game (X4) between player and puzzle; popularity ±votes. Copy lichess's exact mechanics.
+- **P3 Puzzle Storm** (timed streak, escalating difficulty) and **Daily Puzzle** (deterministic date-seeded pick). Both ride on P1 with tiny UI deltas.
+- **P4 Spaced-repetition mistake review.** Extend `generateMistakePuzzles` with a review schedule (Chessable MoveTrainer interval model: quiz at expanding delays); persist mistakes per player in SQLite with `nextDueAt`. This is the niche users demonstrably pay for (Chessable claims ~95% retention, 2M students).
+- **P5 Retry-before-reveal pedagogy** (already half-built): ensure every mistake puzzle hides the solution until the user's attempt is committed — lichess's "learn from your mistakes" differentiator.
+- **P6 Puzzle Racer/Battle** — multiplayer race over existing SSE rooms + seat auth. Moderate effort, strong social hook.
+
+## TIER A2 — Analysis & learning depth
+
+- **A2.1 Analysis-board mode with a variation tree.** Today the scrubber replays the actual game only. Add a free analysis room where users play out sidelines (engine-opposed or freeform), with a persistent, commented variation tree — lichess **Studies** is the crown jewel for learning, and your archive + scrubber + annotation canvas are ~60% of the substrate. Keep it referee-mediated to preserve Gate 4 (a dedicated "analysis room" referee mode).
+- **A2.2 Study chapters:** PGN/FEN/game-import chapters, hidden-move "quiz" chapters (moves concealed until guessed) — reuses the puzzle input loop. PGN export with `$1`–`$9` NAG glyphs for downstream tool interop (already have NAG comments; verify glyph codes).
+- **A2.3 Real opening explorer.** Options, in order of effort: (a) enrich `openings-db.js` with the `lichess-org/chess-openings` TSV (ECO/name/moves); (b) personal explorer over the SQLite archive ("what do *I* play here, and how does it score?"); (c) optional online proxy to lichess explorer API with offline fallback. Replace fabricated win-rates with data.
+- **A2.4 Masters-DB mistake whitelist.** Cross-check engine-flagged "mistakes" against book positions (≥2 master games ⇒ not a mistake) so theory-true moves aren't condemned. Needs a compact frequency-sorted book file; big quality jump for Game Review trust.
+- **A2.5 Tablebase.** Online: probe `tablebase.lichess.ovh` (7-piece WDL/DTZ per FEN, one fetch). Offline: graceful fallback to engine eval. Perfect endgame play in deep endgames, and bulletproof endgame report sections.
+- **A2.6 Interactive eval graph.** Replace the 400×80 sparkline with a click-to-jump graph with per-ply tooltips (SAN, eval, ACPL delta) linking to the scrubber.
+- **A2.7 Report upgrades:** ACPL (average centipawn loss) — the standard quality metric — move-time stats, phase-segmented accuracy, and "practice new ideas" (replay critical positions vs engine straight from the report).
+
+## TIER G — Gameplay breadth
+
+- **G1 Chess960 (Fischer Random).** Castling rules + initial-position generation in `referee-service.js`/`rules-engine.js`; UI nearly unchanged. The one variant worth doing first (used in top-level events).
+- **G2 FEN setup / board editor.** Start a room from an arbitrary FEN (referee command + validation dialog). Unlocks training positions, composed problems, handicap play. Gate-4-safe: it's a referee command.
+- **G3 Time-control completeness:** custom per-color clocks, increment presets >15s, simple delay (Bronstein optional), odds games, and lichess's TC label formula (`initial + 40·increment` → UltraBullet/Bullet/Blitz/Rapid/Classical) for archive/search tagging.
+- **G4 Undo as a *request* with opponent consent** (not unilateral) when both seats are human; keep unilateral solo mode.
+- **G5 Coordinates trainer** mini-game (click the named square) — lichess's most-used beginner tool, trivially buildable.
+- **G6 Zen mode** (`z` key: hide ratings/eval during play) and flip-board shortcut parity.
+
+## TIER S — Social & platform layer (the biggest gap; biggest scope)
+
+- **S1 Accounts & profiles.** Minimal viable identity: local accounts (username + passkey/bcrypt) → per-player pages with game history (archive is already queryable), win-rate-by-opening, accuracy trends. Everything below depends on this.
+- **S2 Ratings & leaderboards:** Glicko-2 (X4) pools per time control; provisional handling (RD>110); bot games explicitly unrated vs the human pool (anti-distortion; lichess fair-play scale shows why pools matter).
+- **S3 Lobby & matchmaking:** open seeks list, challenges, rating-bracketed auto-pairing. Today the only path is "copy room link."
+- **S4 Arena tournaments:** pairing queue, streak ×2 scoring, berserk option over SSE rooms. (Lichess arena model; Swiss later.)
+- **S5 Social graph lite:** friend list, game-share links with OEmbed preview of final position (SVG → PNG), spectator discovery (list of live rooms, "watch top game").
+- **S6 Chat upgrades:** emoji/reactions, whisper/DM, moderation/report hooks. Server-side sanitization audit of existing chat while there.
+- **S7 Correspondence mode:** multi-day time controls, conditional premoves (if-then chains — lichess's differentiator), browser notifications on opponent move. Largest infra item in this tier; defer until S1–S3 land.
+
+## TIER M — Delivery & reach
+
+- **M1 PWA:** manifest + service worker (~50 lines + asset list, no build step) + IndexedDB game cache → installable, **full offline play vs bots/puzzles**, "works on a plane." For a local-first app this is home turf; lichess made offline-vs-computer a headline 2025 mobile feature.
+- **M2 i18n layer:** extract all hardcoded English (index.html, ai-coach.js, bot-service.js, game-report.js) into a strings module; lichess ships 140+ languages. Start with the layer; ship 2–3 locales.
+- **M3 SSE hardening:** `Last-Event-ID` reconnection + event-driven emits (replace the 250ms fs-watch/hash poll now that the referee knows when state changes). Keep SSE — WebSockets/WebRTC buy nothing for 2-player turn games.
+- **M4 Security headers:** CSP, HSTS (when behind TLS), helmet-style hardening, persistent (SQLite-backed) rate limiting to survive restarts. Today's limits are in-memory and per-process.
+- **M5 Performance pass:** profile `computeHistoryPositions` (O(n²) risk on long games), cache-control strategy for the ~140KB raw `ui.js`, and pre-split it per X5 anyway.
+
+## TIER AB — Accessibility leadership (extend an existing strength)
+
+- **AB1 NVUI parity benchmark:** lichess's non-visual UI supports full play + puzzles by screen reader; add **text command entry** (type SAN/UCI into a command box) and NVDA-tested focus order.
+- **AB2 Touchscreen gestures for blind mode** (lichess's 2025 NVUI breakthrough): swipe-grid navigation with spoken feedback on touch devices.
+- **AB3 Voice loop coverage:** extend voice commands beyond moves (resign, offer draw, "analyze this", "show best move") — the voice parser already exists; this is intent routing.
+
+## TIER V — Differentiating bets (only after core credibility lands)
+
+- **V1 Personality bots:** names, avatars, opening books, play styles (aggressive/positional/turtle) wrapped around the existing level 1–8 engine + chat commentary. Chess.com's top casual-player hook; mostly presentation once X1 gives real strength range. Optional: Maia-style human-like play via capped-depth + blunder-model tuning.
+- **V2 Shareable annotated-POV exports:** one-click post-game summary card (accuracy, headline, turning point) as image, for social.
+- **V3 Embeddable game viewer** (iframe widget rendering a PGN from the archive) — cheap marketing surface.
+- **V4 Additional variants** (Crazyhouse, KOTH, Three-Check...) — each is a referee/rules fork + engine + eval changes; only add on explicit demand after G1 proves the pattern.
+
+---
+
+## Explicitly NOT recommended
+
+- **WebSockets/WebRTC for move sync** — SSE + REST is architecturally correct for chess; spend the budget elsewhere.
+- **8-piece tablebases** — terabytes for vanishingly rare positions; the online API covers it.
+- **ML anti-cheat** — meaningless without a rated human pool; S2's pool separation is the proportionate measure.
+- **Native mobile apps** — M1 PWA gets ~90% of the value at ~5% of the cost.
+- **A JS framework/bundler migration** — the no-build philosophy is a feature; fix modularity with file splits, not tooling.
+
+## Sequencing (suggested)
+
+| Wave | Items | Why |
+|---|---|---|
+| **1 (credibility)** | X1, X2, X3, X4, X5 | Every AI feature becomes honest; monolith unblocked |
+| **2 (retention)** | P1, P2, P3, P4, A2.1, A2.3, A2.6 | Daily-reason-to-return: puzzles + studies + real explorer |
+| **3 (platform)** | S1, S2, S3, M1, M3, M4 | Identity, ratings, matchmaking, installability |
+| **4 (breadth)** | G1, G2, G3, A2.4, A2.5, A2.7, P6, AB1–3 | Variants, endgame truth, social puzzles, a11y leadership |
+| **5 (bets)** | S4–S7, V1–V4, M2 | Tournaments, correspondence, personalities, locales |
+
+**The six cheapest 10× improvements** (all feasible in no-build vanilla JS): Stockfish.wasm in the worker (X1), lichess puzzle CSV import (P1), win-probability classification + masters whitelist (X2/A2.4), Glicko-2 ratings (X4), Studies-style persistent analysis tree (A2.1), PWA offline (M1).
+
+Every item should ship with a matching `*-selftest.js` wired into `test:unit` and `lint`, per project convention, and `npm run check` before done.
