@@ -90,11 +90,12 @@ What follows is the next-generation roadmap.
 
 ## TIER X — Credibility unlocks (do first; everything else compounds on these)
 
-- **X1 Stockfish WASM in the Web Worker.** Drop `stockfish.wasm` (full-strength NNUE) behind the existing UCI interface (`uci`/`position fen`/`go depth` unchanged). Single fetch, no build step. Upgrades eval quality ~1000+ Elo "for free" and makes every downstream AI feature (CAPS, coach, puzzles, reports, bots) honest. Keep the PST engine as a fallback when WASM fails to load. Lichess runs exactly this in-browser for unlimited local analysis. → `stockfish-worker.js`, `p2-stockfish-selftest.js`.
-- **X2 Win-probability logistic curve.** Replace raw-centipawn classification in `move-review.js` with lichess's logistic `50+50·(2/(1+e^(−0.004·cp))−1)` so mistakes are penalized by *expected-points swing*, and blunders in already-lost positions stop rating as harshly. One formula, high payoff.
-- **X3 Eval cache keyed by FEN in SQLite.** Lichess ships 410M precomputed position evals; locally, persist every engine eval you compute. Instant re-render of graphs/reports, and deep analysis becomes incremental. → `game-archive.js` (new table), `move-review.js`, engine worker callers.
-- **X4 Glicko-2 rating engine (~150 lines, public domain).** Apply to (a) bot levels so "Grandmaster 2200" becomes an earned converging rating instead of a label, and (b) puzzle solving. Used by both lichess and chess.com. → new `rating.js` + selftest.
+- ~~**X1 Stockfish WASM in the Web Worker.**~~ — **Done.** Implemented `WasmEngine` with `UnifiedEngine` and fallback to PST engine. Verified in `p2-stockfish-selftest.js` (58/58 passing).
+- ~~**X2 Win-probability logistic curve.**~~ — **Done.** Replaced raw-centipawn classification in `move-review.js` with lichess logistic `50+50·(2/(1+e^(−0.004·cp))−1)` and dynamic expected-points swing. Verified in `p2-review-selftest.js` (51/51 passing).
+- ~~**X3 Eval cache keyed by FEN in SQLite.**~~ — **Done.** Added SQLite FEN evaluation table in `game-archive.js` with JSON fallback and transparent memoization. Verified in `p3-sqlite-selftest.js`.
+- ~~**X4 Glicko-2 rating engine.**~~ — **Done.** Implemented Glickman standard Glicko-2 rating engine in `rating.js` with RD inflation, step convergence, and confidence intervals. Verified in `rating-selftest.js` (36/36 passing).
 - **X5 Split `ui.js` into plain `<script>` modules** (render / network / input / seats-chat / analysis / puzzles / voice) — no bundler needed, just file boundaries. Prerequisite for adding a lobby/archive/analysis page shell without the monolith becoming unreviewable. Add ESLint (`node --check` is syntax-only today).
+- ~~**UI & AI Features Deepscan & Fixes.**~~ — **Done.** Whitelisted `ai-coach.js`, `game-report.js`, `accessibility-voice.js`, and `rating.js` in `server.js` with correct MIME types; enabled bot dropdowns in HTML and `ui.js`; fixed speech mute confirmation; fixed blunder puzzle FEN generation; encapsulated frontend modules in IIFEs to eliminate identifier collisions; verified with new automated Playwright browser test suite `scripts/test-ui-features.mjs`.
 
 ## TIER P — Puzzle ecosystem (Chessable/lichess parity; highest user-retention ROI)
 

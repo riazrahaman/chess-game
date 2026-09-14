@@ -3210,14 +3210,12 @@ function updateBotUI(botConfig) {
     toggle.checked = botConfig.enabled;
   }
   if (levelSelect) {
-    levelSelect.disabled = !botConfig.enabled;
-    if (botConfig.level && document.activeElement !== levelSelect) {
+    if (botConfig && botConfig.level && document.activeElement !== levelSelect) {
       levelSelect.value = String(botConfig.level);
     }
   }
   if (colorSelect) {
-    colorSelect.disabled = !botConfig.enabled;
-    if (botConfig.color && document.activeElement !== colorSelect) {
+    if (botConfig && botConfig.color && document.activeElement !== colorSelect) {
       colorSelect.value = botConfig.color;
     }
   }
@@ -3264,8 +3262,18 @@ function setupBotUI() {
   const colorSelect = document.getElementById('bot-color-select');
 
   if (toggle) toggle.addEventListener('change', sendBotConfigUpdate);
-  if (levelSelect) levelSelect.addEventListener('change', sendBotConfigUpdate);
-  if (colorSelect) colorSelect.addEventListener('change', sendBotConfigUpdate);
+  if (levelSelect) {
+    levelSelect.addEventListener('change', () => {
+      if (toggle && !toggle.checked) toggle.checked = true;
+      sendBotConfigUpdate();
+    });
+  }
+  if (colorSelect) {
+    colorSelect.addEventListener('change', () => {
+      if (toggle && !toggle.checked) toggle.checked = true;
+      sendBotConfigUpdate();
+    });
+  }
 
   fetchBotConfig();
 }
@@ -3325,9 +3333,12 @@ function handlePuzzleSquareClick(squareId) {
 
 function startMistakePuzzles() {
   const reviewModule = (typeof window !== 'undefined' && window.MoveReview) || (typeof MoveReview !== 'undefined' ? MoveReview : null);
-  if (!reviewModule || typeof reviewModule.generateMistakePuzzles !== 'function') return;
+  if (!reviewModule || typeof reviewModule.generateMistakePuzzles !== 'function') {
+    showUiError('Game review module is not loaded.');
+    return;
+  }
 
-  const fenHistory = (historyPositions || []).map(hp => hp && hp.fen ? hp.fen : (hp && hp.board && typeof rulesEngine !== 'undefined' && rulesEngine.boardToFen ? rulesEngine.boardToFen(hp.board) : null));
+  const fenHistory = (historyPositions || []).map(hp => getFenFromStateOrBoard(hp));
   activeMistakePuzzles = reviewModule.generateMistakePuzzles(liveHistory || [], evalHistory || [], fenHistory);
 
   const puzzleBox = document.getElementById('puzzle-box');
@@ -3418,7 +3429,10 @@ function setupMistakePuzzlesUI() {
 
 function explainCurrentlyViewedMove() {
   const coachModule = (typeof window !== 'undefined' && window.AiCoach) || (typeof AiCoach !== 'undefined' ? AiCoach : null);
-  if (!coachModule || typeof coachModule.explainMove !== 'function') return;
+  if (!coachModule || typeof coachModule.explainMove !== 'function') {
+    showUiError('AI Coach is loading or unavailable.');
+    return;
+  }
 
   const card = document.getElementById('why-explanation-card');
   const titleEl = document.getElementById('why-title');
@@ -3467,14 +3481,30 @@ function explainCurrentlyViewedMove() {
 
 function showCoachHint() {
   const coachModule = (typeof window !== 'undefined' && window.AiCoach) || (typeof AiCoach !== 'undefined' ? AiCoach : null);
-  if (!coachModule || typeof coachModule.getCoachHint !== 'function') return;
+  if (!coachModule || typeof coachModule.getCoachHint !== 'function') {
+    showUiError('AI Coach is loading or unavailable.');
+    return;
+  }
 
   const banner = document.getElementById('coach-hint-banner');
   const textEl = document.getElementById('coach-hint-text');
   if (!banner || !textEl) return;
 
   const currentTurn = turn || (board && board.turn) || 'white';
-  const bestCandidate = (engineMultiPvLines && engineMultiPvLines[0] && (engineMultiPvLines[0].from + engineMultiPvLines[0].to)) || 'e2e4';
+  let bestCandidate = (engineMultiPvLines && engineMultiPvLines[0] && (engineMultiPvLines[0].from + engineMultiPvLines[0].to));
+  if (!bestCandidate && board) {
+    for (const [from, p] of Object.entries(board.pieces || {})) {
+      if (p && p.color === currentTurn) {
+        const dests = getLegalMoves(board, from, currentTurn);
+        if (dests && dests.length > 0) {
+          bestCandidate = from + dests[0];
+          break;
+        }
+      }
+    }
+  }
+  if (!bestCandidate) bestCandidate = currentTurn === 'black' ? 'e7e5' : 'e2e4';
+
   const currentEval = (evalHistory && evalHistory.length > 0) ? evalHistory[evalHistory.length - 1] : 0;
   const ply = (liveHistory && liveHistory.length) ? liveHistory.length + 1 : 1;
 
@@ -3573,33 +3603,55 @@ function handleVoiceTranscript(transcript) {
 
 function setupAccessibilityVoiceUI() {
   const AccessModule = (typeof window !== 'undefined' && window.AccessibilityVoice) || (typeof AccessibilityVoice !== 'undefined' ? AccessibilityVoice : null);
-  if (!AccessModule) return;
-
-  accessibilityController = new AccessModule.AccessibilityVoiceController({
-    submitMoveCallback: (moveStr) => submitMoveToReferee(moveStr)
-  });
+  if (AccessModule && !accessibilityController) {
+    accessibilityController = new AccessModule.AccessibilityVoiceController({
+      submitMoveCallback: (moveStr) => submitMoveToReferee(moveStr)
+    });
+  }
 
   const voiceToggleBtn = document.getElementById('voice-toggle');
   if (voiceToggleBtn) {
-    voiceToggleBtn.textContent = accessibilityController.voiceEnabled ? 'Voice: On' : 'Voice: Off';
-    voiceToggleBtn.classList.toggle('active', accessibilityController.voiceEnabled);
+    const isVoice = accessibilityController ? accessibilityController.voiceEnabled : false;
+    voiceToggleBtn.textContent = isVoice ? 'Voice: On' : 'Voice: Off';
+    voiceToggleBtn.classList.toggle('active', isVoice);
     voiceToggleBtn.onclick = () => {
-      const enabled = accessibilityController.toggleVoice();
-      voiceToggleBtn.textContent = enabled ? 'Voice: On' : 'Voice: Off';
-      voiceToggleBtn.classList.toggle('active', enabled);
+      const Mod = (typeof window !== 'undefined' && window.AccessibilityVoice) || (typeof AccessibilityVoice !== 'undefined' ? AccessibilityVoice : null);
+      if (!accessibilityController && Mod) {
+        accessibilityController = new Mod.AccessibilityVoiceController({
+          submitMoveCallback: (moveStr) => submitMoveToReferee(moveStr)
+        });
+      }
+      if (accessibilityController) {
+        const enabled = accessibilityController.toggleVoice();
+        voiceToggleBtn.textContent = enabled ? 'Voice: On' : 'Voice: Off';
+        voiceToggleBtn.classList.toggle('active', enabled);
+      } else {
+        showUiError('Voice module is not available in this browser.');
+      }
     };
   }
 
   const blindToggleBtn = document.getElementById('blind-mode-toggle');
   if (blindToggleBtn) {
-    blindToggleBtn.textContent = accessibilityController.blindModeEnabled ? 'Blind Mode: On' : 'Blind Mode: Off';
-    blindToggleBtn.classList.toggle('active', accessibilityController.blindModeEnabled);
+    const isBlind = accessibilityController ? accessibilityController.blindModeEnabled : false;
+    blindToggleBtn.textContent = isBlind ? 'Blind Mode: On' : 'Blind Mode: Off';
+    blindToggleBtn.classList.toggle('active', isBlind);
     blindToggleBtn.onclick = () => {
-      const enabled = accessibilityController.toggleBlindMode();
-      blindToggleBtn.textContent = enabled ? 'Blind Mode: On' : 'Blind Mode: Off';
-      blindToggleBtn.classList.toggle('active', enabled);
-      if (enabled && focusedSquareId) {
-        setRovingSquare(focusedSquareId, true);
+      const Mod = (typeof window !== 'undefined' && window.AccessibilityVoice) || (typeof AccessibilityVoice !== 'undefined' ? AccessibilityVoice : null);
+      if (!accessibilityController && Mod) {
+        accessibilityController = new Mod.AccessibilityVoiceController({
+          submitMoveCallback: (moveStr) => submitMoveToReferee(moveStr)
+        });
+      }
+      if (accessibilityController) {
+        const enabled = accessibilityController.toggleBlindMode();
+        blindToggleBtn.textContent = enabled ? 'Blind Mode: On' : 'Blind Mode: Off';
+        blindToggleBtn.classList.toggle('active', enabled);
+        if (enabled && focusedSquareId) {
+          setRovingSquare(focusedSquareId, true);
+        }
+      } else {
+        showUiError('Accessibility module is not available in this browser.');
       }
     };
   }
@@ -3609,6 +3661,17 @@ function setupAccessibilityVoiceUI() {
 
   if (micMoveBtn) {
     micMoveBtn.onclick = () => {
+      const Mod = (typeof window !== 'undefined' && window.AccessibilityVoice) || (typeof AccessibilityVoice !== 'undefined' ? AccessibilityVoice : null);
+      if (!accessibilityController && Mod) {
+        accessibilityController = new Mod.AccessibilityVoiceController({
+          submitMoveCallback: (moveStr) => submitMoveToReferee(moveStr)
+        });
+      }
+      if (!accessibilityController) {
+        showUiError('Voice recognition module is not available.');
+        return;
+      }
+
       if (accessibilityController.isListening) {
         accessibilityController.stopVoiceRecognition();
         micMoveBtn.textContent = '🎤 Mic';

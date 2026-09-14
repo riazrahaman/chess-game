@@ -1,3 +1,4 @@
+(function() {
 'use strict';
 
 // Move Review & Win-Probability Classification Engine
@@ -262,3 +263,4 @@ if (typeof window !== 'undefined') {
 if (typeof module !== 'undefined') {
   module.exports = MoveReviewModule;
 }
+})();

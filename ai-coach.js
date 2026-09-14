@@ -1,3 +1,4 @@
+(function() {
 'use strict';
 
 /**
@@ -116,3 +117,4 @@ if (typeof window !== 'undefined') {
 if (typeof module !== 'undefined') {
   module.exports = AiCoachModule;
 }
+})();

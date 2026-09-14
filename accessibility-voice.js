@@ -1,3 +1,4 @@
+(function() {
 'use strict';
 
 /**
@@ -198,13 +199,28 @@ class AccessibilityVoiceController {
   }
 
   toggleVoice(enabled) {
+    const prev = this.voiceEnabled;
     this.voiceEnabled = enabled !== undefined ? enabled : !this.voiceEnabled;
     if (typeof window !== 'undefined' && window.localStorage) {
       try {
         window.localStorage.setItem('chess_voice_enabled', String(this.voiceEnabled));
       } catch (e) {}
     }
-    this.speak(this.voiceEnabled ? 'Voice announcements enabled' : 'Voice announcements muted');
+    const msg = this.voiceEnabled ? 'Voice announcements enabled' : 'Voice announcements muted';
+    if (this.voiceEnabled) {
+      this.speak(msg);
+    } else {
+      // Speak final confirmation before muting, and announce via live region
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        try {
+          window.speechSynthesis.cancel();
+          const utterance = new window.SpeechSynthesisUtterance(msg);
+          utterance.rate = 1.05;
+          window.speechSynthesis.speak(utterance);
+        } catch (_) {}
+      }
+    }
+    this.announceLive(msg, true);
     return this.voiceEnabled;
   }
 
@@ -369,3 +385,4 @@ if (typeof window !== 'undefined') {
 if (typeof module !== 'undefined') {
   module.exports = AccessibilityVoiceModule;
 }
+})();
