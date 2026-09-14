@@ -76,6 +76,13 @@ async function postMove(moveStr) {
 }
 
 async function postReset() {
+  try {
+    await fetch(`${BASE_URL}api/bot`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: false })
+    });
+  } catch (_) {}
   const deadline = Date.now() + RESET_TIMEOUT_MS;
   while (Date.now() < deadline) {
     try {

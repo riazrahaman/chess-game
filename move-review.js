@@ -1,9 +1,22 @@
+(function() {
 'use strict';
 
 // Move Review & Win-Probability Classification Engine
 // Implements CAPS (Computer Aggregated Precision Score) accuracy and
 // Chess.com/Lichess standard move classifications:
 // Brilliant (!!), Great (!), Best (★), Excellent, Good, Inaccuracy (?!), Mistake (?), Blunder (??)
+
+/**
+ * Normalizes a FEN to a 4-field cache key (strips halfmove/fullmove counters).
+ * @param {string} fen  Full FEN string.
+ * @returns {string}    4-field key: piecePlacement + sideToMove + castling + enPassant
+ */
+function fenCacheKey(fen) {
+  if (!fen || typeof fen !== 'string') return '';
+  const parts = fen.trim().split(/\s+/);
+  if (parts.length < 4) return fen;
+  return parts.slice(0, 4).join(' ');
+}
 
 const CLASSIFICATIONS = {
   BRILLIANT: { key: 'brilliant', symbol: '!!', label: 'Brilliant', color: '#1baca6', badgeClass: 'badge-brilliant' },
@@ -18,13 +31,25 @@ const CLASSIFICATIONS = {
 
 /**
  * Calculates winning probability (0 to 100%) from centipawns eval from White's perspective.
- * Uses standard sigmoid model: W(cp) = 50 + 50 * (2 / (1 + exp(-0.00368208 * cp)) - 1)
+ * Uses the Lichess logistic model: W(cp) = 50 + 50 * (2 / (1 + exp(-0.004 * cp)) - 1)
+ * This maps centipawn advantage to expected win percentage, so mistakes are penalized
+ * by expected-points swing rather than raw centipawn loss. Blunders in already-lost
+ * positions produce smaller win-prob deltas and rate less harshly.
  */
 function calculateWinProbability(cp) {
   if (typeof cp !== 'number' || isNaN(cp)) return 50;
   const clampedCp = Math.max(-2000, Math.min(2000, cp));
-  const rawProb = 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * clampedCp)) - 1);
+  const rawProb = 50 + 50 * (2 / (1 + Math.exp(-0.004 * clampedCp)) - 1);
   return Math.max(0, Math.min(100, rawProb));
+}
+
+/**
+ * Alias for calculateWinProbability — converts centipawn eval to win probability (0–100%).
+ * @param {number} cp  Centipawn evaluation from White's perspective.
+ * @returns {number}   Win probability percentage (0–100).
+ */
+function cpToWinProbability(cp) {
+  return calculateWinProbability(cp);
 }
 
 /**
@@ -170,10 +195,12 @@ function generateMistakePuzzles(moveHistory, evalHistory, fenHistory) {
   if (!review || !review.moves) return puzzles;
 
   let engineHelper = null;
+  let evalCache = null;
   if (typeof stockfishWorker !== 'undefined') {
     engineHelper = stockfishWorker;
   } else if (typeof require !== 'undefined') {
     try { engineHelper = require('./stockfish-worker.js'); } catch (_) {}
+    try { evalCache = require('./game-archive.js'); } catch (_) {}
   }
 
   for (let i = 0; i < review.moves.length; i++) {
@@ -181,10 +208,23 @@ function generateMistakePuzzles(moveHistory, evalHistory, fenHistory) {
     if (m.key === 'blunder' || m.key === 'mistake') {
       const fen = Array.isArray(fenHistory) && fenHistory[i] ? fenHistory[i] : null;
       let bestMove = null;
-      if (engineHelper && fen) {
+
+      // Check eval cache first (transparent memoization)
+      if (evalCache && fen) {
+        try {
+          const cached = evalCache.getEval(fenCacheKey(fen));
+          if (cached && cached.bestmove) bestMove = cached.bestmove;
+        } catch (_) { /* graceful degradation */ }
+      }
+
+      // Fall back to engine if cache miss
+      if (!bestMove && engineHelper && fen) {
         try {
           const res = engineHelper.findBestMove(fen, { depth: 2 });
           if (res && res.bestMove) bestMove = res.bestMove;
+          if (res && fen && evalCache) {
+            try { evalCache.saveEval(fenCacheKey(fen), { cp: res.evalScore, depth: 2, mate: null, bestmove: res.bestMove }); } catch (_) {}
+          }
         } catch (_) {}
       }
       puzzles.push({
@@ -208,11 +248,13 @@ function generateMistakePuzzles(moveHistory, evalHistory, fenHistory) {
 const MoveReviewModule = {
   CLASSIFICATIONS,
   calculateWinProbability,
+  cpToWinProbability,
   calculateDeltaWinProb,
   calculateMoveAccuracy,
   classifyMove,
   reviewGame,
-  generateMistakePuzzles
+  generateMistakePuzzles,
+  fenCacheKey
 };
 
 if (typeof window !== 'undefined') {
@@ -221,3 +263,4 @@ if (typeof window !== 'undefined') {
 if (typeof module !== 'undefined') {
   module.exports = MoveReviewModule;
 }
+})();

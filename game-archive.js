@@ -23,6 +23,19 @@ if (typeof require === 'function') {
 const DEFAULT_DB_PATH = (typeof process !== 'undefined' && process.env && process.env.CHESS_DB_FILE) || (path ? path.join(__dirname, 'games.db') : 'games.db');
 const DEFAULT_JSON_PATH = (typeof process !== 'undefined' && process.env && process.env.CHESS_JSON_ARCHIVE_FILE) || (path ? path.join(__dirname, '.games-archive.json') : '.games-archive.json');
 
+/**
+ * Normalizes a FEN to a 4-field cache key by stripping halfmove and fullmove counters.
+ * Transpositions (same board, different move counters) share a cache entry.
+ * @param {string} fen  Full FEN string.
+ * @returns {string}    4-field key: "piecePlacement sideToMove castling enPassant"
+ */
+function fenCacheKey(fen) {
+  if (!fen || typeof fen !== 'string') return '';
+  const parts = fen.trim().split(/\s+/);
+  if (parts.length < 4) return fen;
+  return parts.slice(0, 4).join(' ');
+}
+
 let _lastCreatedAt = 0;
 function getNextCreatedAt() {
   const now = Date.now();
@@ -276,6 +289,14 @@ class SqliteStorageAdapter {
         created_at INTEGER
       );
       CREATE INDEX IF NOT EXISTS idx_games_created_at ON games(created_at DESC);
+      CREATE TABLE IF NOT EXISTS eval_cache (
+        fen TEXT PRIMARY KEY,
+        cp REAL,
+        depth INTEGER,
+        mate INTEGER,
+        bestmove TEXT,
+        created_at INTEGER
+      );
     `);
   }
 
@@ -348,6 +369,33 @@ class SqliteStorageAdapter {
     return this.list(options);
   }
 
+  saveEval(fen, evalData) {
+    if (!fen) return null;
+    const key = fenCacheKey(fen);
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO eval_cache (fen, cp, depth, mate, bestmove, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      key,
+      evalData.cp != null ? evalData.cp : null,
+      evalData.depth != null ? evalData.depth : null,
+      evalData.mate != null ? evalData.mate : null,
+      evalData.bestmove || null,
+      Date.now()
+    );
+    return { fen: key, ...evalData };
+  }
+
+  getEval(fen) {
+    if (!fen) return null;
+    const key = fenCacheKey(fen);
+    const stmt = this.db.prepare('SELECT * FROM eval_cache WHERE fen = ?');
+    const row = stmt.get(key);
+    if (!row) return null;
+    return { fen: row.fen, cp: row.cp, depth: row.depth, mate: row.mate, bestmove: row.bestmove, created_at: row.created_at };
+  }
+
   close() {
     if (this.db) {
       try { this.db.close(); } catch (_) { /* ignore */ }
@@ -362,35 +410,54 @@ class JsonFileStorageAdapter {
   constructor(filePath) {
     this.filePath = filePath;
     this.games = new Map();
+    this.evalCache = new Map();
     this._load();
   }
 
   _load() {
     if (!this.filePath || this.filePath === ':memory:' || !fs) {
       this.games = new Map();
+      this.evalCache = new Map();
       return;
     }
     try {
       if (fs.existsSync(this.filePath)) {
         const raw = fs.readFileSync(this.filePath, 'utf8');
-        const list = JSON.parse(raw);
-        if (Array.isArray(list)) {
-          for (const item of list) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
             if (item && item.id) this.games.set(item.id, item);
+          }
+        } else if (parsed && typeof parsed === 'object') {
+          if (Array.isArray(parsed.games)) {
+            for (const item of parsed.games) {
+              if (item && item.id) this.games.set(item.id, item);
+            }
+          }
+          if (parsed.evalCache && typeof parsed.evalCache === 'object') {
+            for (const [k, v] of Object.entries(parsed.evalCache)) {
+              this.evalCache.set(k, v);
+            }
           }
         }
       }
     } catch (_) {
       this.games = new Map();
+      this.evalCache = new Map();
     }
   }
 
   _saveToDisk() {
     if (!this.filePath || this.filePath === ':memory:' || !fs) return;
     try {
-      const list = Array.from(this.games.values());
+      const games = Array.from(this.games.values());
+      const evalCacheObj = {};
+      for (const [k, v] of this.evalCache) {
+        evalCacheObj[k] = v;
+      }
+      const payload = JSON.stringify({ games, evalCache: evalCacheObj }, null, 2);
       const tempPath = `${this.filePath}.tmp.${Date.now()}`;
-      fs.writeFileSync(tempPath, JSON.stringify(list, null, 2), 'utf8');
+      fs.writeFileSync(tempPath, payload, 'utf8');
       fs.renameSync(tempPath, this.filePath);
     } catch (_) {
       // non-fatal on write failure
@@ -450,6 +517,22 @@ class JsonFileStorageAdapter {
 
     filtered.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
     return filtered.slice(offset, offset + limit);
+  }
+
+  saveEval(fen, evalData) {
+    if (!fen) return null;
+    const key = fenCacheKey(fen);
+    const entry = { fen: key, cp: evalData.cp, depth: evalData.depth, mate: evalData.mate, bestmove: evalData.bestmove, created_at: Date.now() };
+    this.evalCache.set(key, entry);
+    this._saveToDisk();
+    return entry;
+  }
+
+  getEval(fen) {
+    if (!fen) return null;
+    const key = fenCacheKey(fen);
+    const item = this.evalCache.get(key);
+    return item ? Object.assign({}, item) : null;
   }
 
   close() {
@@ -561,6 +644,24 @@ class GameArchive {
     return this.storage.search(query, options);
   }
 
+  saveEval(fen, evalData) {
+    if (!this.storage || typeof this.storage.saveEval !== 'function') return null;
+    try {
+      return this.storage.saveEval(fen, evalData);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  getEval(fen) {
+    if (!this.storage || typeof this.storage.getEval !== 'function') return null;
+    try {
+      return this.storage.getEval(fen);
+    } catch (_) {
+      return null;
+    }
+  }
+
   exportPgn(game) {
     return exportPgn(game);
   }
@@ -607,6 +708,9 @@ if (typeof module !== 'undefined' && module.exports) {
     getGame: (id) => getArchive().getGame(id),
     listGames: (options) => getArchive().listGames(options),
     searchGames: (query, options) => getArchive().searchGames(query, options),
+    saveEval: (fen, evalData) => getArchive().saveEval(fen, evalData),
+    getEval: (fen) => getArchive().getEval(fen),
+    fenCacheKey,
     exportPgn,
     parsePgn,
     detectEco,

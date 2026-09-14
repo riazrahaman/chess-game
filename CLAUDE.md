@@ -40,11 +40,12 @@ node c7-ai-puzzles-selftest.js       # blunder puzzle generator & retry mode (6 
 node c2-c4-coach-selftest.js         # why move explanations & coach mode hints (6 tests)
 node c6-ai-report-selftest.js        # auto post-game report & annotated PGN (5 tests)
 node c8-d4-voice-selftest.js         # voice move recognition, audio announcements & blind mode (7 tests)
+node rating-selftest.js              # Glicko-2 rating engine (36 tests)
 ```
 
 Selftests write real artifacts (`.referee-state.json`, `.referee-journal.jsonl`, `games.db`) in the repo root and restore them on exit.
 
-`npm run test:browser` runs `scripts/smoke-test.mjs` via Playwright against a live server it spawns; it self-skips if that file is missing.
+`npm run test:browser` runs `scripts/smoke-test.mjs` and `scripts/test-ui-features.mjs` via Playwright against a live server to verify live piece interactions, bot toggles, coach hints, game review, and voice accessibility with zero console errors.
 
 ## Architecture
 

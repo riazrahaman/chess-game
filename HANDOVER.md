@@ -67,6 +67,13 @@ This document records the operational state of the Chess Game project, including
       - Dedicated Blind Accessibility Mode (`#blind-mode-toggle`, shortcut `B`), ARIA live region (`#accessibility-announcer`), full 8x8 keyboard grid navigation (Arrow keys move cursor, Enter/Space selects and moves, Esc cancels), with spoken square and piece feedback.
       - Hotkeys: `V` (voice), `M` (mic), `B` (blind mode), `C` (clocks), `S` (status).
       - Verified with `c8-d4-voice-selftest.js` (7/7 passing).
+  12. `fix-ui-ai-features` (UI & AI Feature Verification): **DONE**
+      - Fixed `server.js` `ALLOWED_FILES` to whitelist `ai-coach.js`, `game-report.js`, `accessibility-voice.js`, and `rating.js` so they are served with proper `application/javascript` MIME type instead of 404 JSON.
+      - Removed `disabled` constraint on `#bot-level-select` and `#bot-color-select`, enabling immediate user interaction and auto-activation.
+      - Fixed voice mute confirmation in `accessibility-voice.js` to speak via `SpeechSynthesis` before disabling.
+      - Fixed `startMistakePuzzles` in `ui.js` to use `getFenFromStateOrBoard(hp)` instead of backend-only `rulesEngine.boardToFen`.
+      - Enclosed `ai-coach.js`, `game-report.js`, `accessibility-voice.js`, and `move-review.js` in IIFEs to prevent global identifier collisions.
+      - Added automated Playwright suite `scripts/test-ui-features.mjs` running in CI.
 
 ---
 
@@ -75,7 +82,7 @@ All test gates pass without error:
 
 ```bash
 npm run check    # Linter syntax check + complete unit/integration test suite (27 suites)
-npm test         # Complete suite + Playwright browser smoke test
+npm test         # Complete suite + Playwright browser smoke test + UI feature test
 ```
 
 Summary of test results on `main`:
@@ -96,11 +103,13 @@ Summary of test results on `main`:
 - `c2-c4-coach-selftest.js`: 6/6 passed
 - `c6-ai-report-selftest.js`: 5/5 passed
 - `c8-d4-voice-selftest.js`: 7/7 passed
+- `rating-selftest.js`: 36/36 passed
 - `differential-selftest.js`: 200/200 random games (37,839 plies vs chess.js, 0 divergences)
 - `scripts/smoke-test.mjs`: Playwright browser smoke test passed (32 pieces, move e2-e4 rendered, referee state synced)
+- `scripts/test-ui-features.mjs`: Playwright UI & AI feature verification passed (voice toggle, bot dropdowns, coach hints, move explanations, mistake puzzles, narrative report)
 
 ---
 
 ## 4. RUNNING SERVICES
-- **Chess Server**: `http://127.0.0.1:39281` (PID: 83669)
+- **Chess Server**: `http://127.0.0.1:39281`
 - **Kanban Server**: `http://localhost:4100` (PID: 30317)

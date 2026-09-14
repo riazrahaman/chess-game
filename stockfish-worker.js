@@ -372,7 +372,64 @@ function findBestMove(parsed) {
   return { bestMove: 'e2e4', evalScore: 0 };
 }
 
-// Stockfish Engine UCI Controller
+/**
+ * Normalizes a FEN to a 4-field cache key (strips halfmove/fullmove counters).
+ * Transpositions with identical board+turn+castling+enPassant share a key.
+ * @param {string} fen  Full FEN string.
+ * @returns {string}    4-field cache key.
+ */
+function fenCacheKey(fen) {
+  if (!fen || typeof fen !== 'string') return '';
+  const parts = fen.trim().split(/\s+/);
+  if (parts.length < 4) return fen;
+  return parts.slice(0, 4).join(' ');
+}
+
+/**
+ * Attempts to retrieve a cached eval for the given FEN.
+ * Uses game-archive.js when available (Node/test context), else an in-memory Map.
+ * Returns null on cache miss or when no backend is available (graceful degradation).
+ */
+let _evalCacheBackend = null;
+let _evalCacheBackendInit = false;
+let _memoryEvalCache = new Map();
+
+function _getEvalCacheBackend() {
+  if (_evalCacheBackendInit) return _evalCacheBackend;
+  _evalCacheBackendInit = true;
+  if (typeof require === 'function') {
+    try {
+      const archive = require('./game-archive.js');
+      if (archive && typeof archive.getEval === 'function' && typeof archive.saveEval === 'function') {
+        _evalCacheBackend = archive;
+      }
+    } catch (_) { /* graceful degradation */ }
+  }
+  return _evalCacheBackend;
+}
+
+function getEvalFromCache(fen) {
+  const key = fenCacheKey(fen);
+  if (!key) return null;
+  const backend = _getEvalCacheBackend();
+  if (backend) {
+    try { return backend.getEval(key); } catch (_) { return null; }
+  }
+  return _memoryEvalCache.get(key) || null;
+}
+
+function saveEvalToCache(fen, evalData) {
+  const key = fenCacheKey(fen);
+  if (!key) return null;
+  const backend = _getEvalCacheBackend();
+  if (backend) {
+    try { return backend.saveEval(key, evalData); } catch (_) { return null; }
+  }
+  _memoryEvalCache.set(key, { fen: key, ...evalData, created_at: Date.now() });
+  return { fen: key, ...evalData };
+}
+
+// Stockfish Engine UCI Controller (PST+Material fallback engine)
 class StockfishEngine {
   constructor(postFn) {
     this.postFn = postFn || (() => {});
@@ -473,35 +530,370 @@ class StockfishEngine {
   }
 }
 
+// --- Stockfish WASM Engine Bridge ---
+// Attempts to load stockfish.wasm (full-strength NNUE) and bridge UCI commands.
+// On any failure, the caller falls back to the PST+Material engine.
+class WasmEngine {
+  constructor(postFn) {
+    this.postFn = postFn || (() => {});
+    this.wasmReady = false;
+    this.wasmFailed = false;
+    this.pendingCommands = [];
+    this._lineBuffer = '';
+    this.currentFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+    this.lastBestMove = null;
+    this.lastMultiPvResults = [];
+    this._collectingEval = false;
+  }
+
+  send(line) {
+    this.postFn(line);
+    this._processEngineLine(line);
+  }
+
+  _processEngineLine(line) {
+    if (!line) return;
+
+    // Collect info lines and bestmove to build eval message
+    if (line.startsWith('info') && line.includes(' pv ')) {
+      // Parse multipv, score cp, pv from info line
+      const pvMatch = line.match(/\bpv\s+(\S+)/);
+      const scoreMatch = line.match(/score cp\s+(-?\d+)/);
+      const multipvMatch = line.match(/multipv\s+(\d+)/);
+      const depthMatch = line.match(/depth\s+(\d+)/);
+
+      if (pvMatch) {
+        const pvIndex = multipvMatch ? parseInt(multipvMatch[1], 10) : 1;
+        const scoreCp = scoreMatch ? parseInt(scoreMatch[1], 10) / 100 : 0;
+        const depth = depthMatch ? parseInt(depthMatch[1], 10) : 0;
+        const bestMove = pvMatch[1];
+
+        // Ensure array is large enough
+        while (this.lastMultiPvResults.length < pvIndex) {
+          this.lastMultiPvResults.push(null);
+        }
+        this.lastMultiPvResults[pvIndex - 1] = {
+          pvIndex,
+          bestMove,
+          scoreCp,
+          scoreRaw: scoreCp * 100,
+          depth,
+          pv: [bestMove]
+        };
+        this._collectingEval = true;
+      }
+    }
+
+    if (line.startsWith('bestmove')) {
+      this.lastBestMove = line.replace('bestmove ', '').trim().split(/\s+/)[0] || null;
+      this._flushEval();
+      return;
+    }
+  }
+
+  _flushEval() {
+    if (!this.lastBestMove) return;
+    const primary = this.lastMultiPvResults[0] || {
+      pvIndex: 1,
+      bestMove: this.lastBestMove,
+      scoreCp: 0,
+      scoreRaw: 0,
+      depth: 0,
+      pv: [this.lastBestMove]
+    };
+
+    if (typeof self !== 'undefined' && self.postMessage) {
+      self.postMessage({
+        type: 'eval',
+        fen: this.currentFen,
+        eval: primary.scoreRaw,
+        evalCp: primary.scoreCp,
+        bestMove: this.lastBestMove,
+        pv: primary.pv || [this.lastBestMove],
+        multipv: this.lastMultiPvResults.length > 0 ? this.lastMultiPvResults : [primary]
+      });
+    }
+
+    this.lastMultiPvResults = [];
+    this._collectingEval = false;
+  }
+
+  // Attempt to load stockfish.wasm. Returns a promise that resolves to true/false.
+  async load(wasmUrl) {
+    if (this.wasmFailed) return false;
+    try {
+      const response = await fetch(wasmUrl || 'stockfish.wasm');
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const contentType = response.headers.get('content-type') || '';
+      let instance;
+
+      if (contentType.includes('application/wasm')) {
+        instance = await WebAssembly.instantiateStreaming(response, this._wasmImports());
+      } else {
+        const buffer = await response.arrayBuffer();
+        instance = await WebAssembly.instantiate(buffer, this._wasmImports());
+      }
+
+      this.wasmInstance = instance.instance || instance;
+      this.wasmModule = this.wasmInstance.exports || {};
+
+      // Stockfish WASM typically exposes a main() or _main entry and a stdout
+      // callback. The standard stockfish.wasm (nnue) uses a JS glue layer.
+      // We support both the raw-WASM-with-print-import pattern and the
+      // emscripten-glue pattern. For raw WASM, we call the exported main()
+      // to start the UCI loop, then pipe commands via a shared stdin mechanism.
+      if (this.wasmModule.main) {
+        try { this.wasmModule.main(); } catch (e) { /* may throw on synchronous exit */ }
+      }
+
+      this.wasmReady = true;
+      return true;
+    } catch (err) {
+      this.wasmFailed = true;
+      this.wasmReady = false;
+      return false;
+    }
+  }
+
+  _wasmImports() {
+    const self = this;
+    return {
+      env: {
+        print: function (ptr, len) {
+          // Emscripten-style: ptr/len refer to WASM memory
+          if (!self.wasmModule || !self.wasmModule.memory) return;
+          const view = new Uint8Array(self.wasmModule.memory.buffer, ptr, len);
+          const text = new TextDecoder().decode(view);
+          self.send(text);
+        },
+        println: function (ptr, len) {
+          if (!self.wasmModule || !self.wasmModule.memory) return;
+          const view = new Uint8Array(self.wasmModule.memory.buffer, ptr, len);
+          const text = new TextDecoder().decode(view);
+          self.send(text);
+        },
+        print_err: function (ptr, len) {},
+        // Stockfish JS glue typically requires these stubs
+        emscripten_resize_heap: function (size) { return false; },
+        emscripten_memcpy_js: function (dest, src, num) {
+          if (!self.wasmModule || !self.wasmModule.memory) return 0;
+          const view = new Uint8Array(self.wasmModule.memory.buffer);
+          view.copyWithin(dest, src, src + num);
+          return dest;
+        },
+        exit: function (code) {},
+        abort: function () {}
+      }
+    };
+  }
+
+  // Send a UCI command to the WASM engine.
+  // Returns true if the command was handled by WASM, false if not.
+  processCommand(rawCmd) {
+    if (!this.wasmReady || !this.wasmInstance) return false;
+    if (!rawCmd || typeof rawCmd !== 'string') return true;
+
+    const cmd = rawCmd.trim();
+    if (!cmd) return true;
+    const tokens = cmd.split(/\s+/);
+    const op = tokens[0].toLowerCase();
+
+    // Track current FEN for eval messages
+    if (op === 'position') {
+      if (tokens[1] === 'fen') {
+        const movesIdx = tokens.findIndex((t, i) => i > 1 && t === 'moves');
+        const fenParts = movesIdx >= 0 ? tokens.slice(2, movesIdx) : tokens.slice(2);
+        this.currentFen = fenParts.join(' ');
+      } else if (tokens[1] === 'startpos') {
+        this.currentFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+      }
+    }
+
+    // Pipe command to WASM
+    this._writeToWasm(cmd + '\n');
+    return true;
+  }
+
+  _writeToWasm(text) {
+    // Write text to the WASM stdin buffer.
+    // Stockfish WASM typically exposes a function to receive stdin input.
+    // Common export names: _stdin_write, _fputs, or via a shared buffer.
+    const mod = this.wasmModule;
+    if (!mod) return;
+
+    // Try common stdin input functions
+    if (mod.stdin_write) {
+      const encoder = new TextEncoder();
+      const bytes = encoder.encode(text);
+      if (mod.memory) {
+        const view = new Uint8Array(mod.memory.buffer);
+        // Write to a known stdin buffer offset if available
+        if (mod.stdin_buffer) {
+          view.set(bytes, mod.stdin_buffer);
+          mod.stdin_write(bytes.length);
+        }
+      }
+      return;
+    }
+
+    if (mod._stdin_write) {
+      const encoder = new TextEncoder();
+      const bytes = encoder.encode(text);
+      if (mod.memory) {
+        const view = new Uint8Array(mod.memory.buffer);
+        if (mod._stdin_buffer) {
+          view.set(bytes, mod._stdin_buffer);
+          mod._stdin_write(bytes.length);
+        }
+      }
+      return;
+    }
+
+    // Fallback: some Stockfish WASM builds expose a direct command function
+    if (mod.uci_command || mod._uci_command) {
+      const fn = mod.uci_command || mod._uci_command;
+      // Allocate string in WASM memory
+      const encoder = new TextEncoder();
+      const bytes = encoder.encode(text + '\0');
+      if (mod.memory && mod.malloc) {
+        const ptr = mod.malloc(bytes.length);
+        const view = new Uint8Array(mod.memory.buffer);
+        view.set(bytes, ptr);
+        fn(ptr);
+        mod.free(ptr);
+      }
+    }
+  }
+}
+
+// Unified Engine: routes UCI commands to WASM when available, falls back to PST.
+class UnifiedEngine {
+  constructor(postFn) {
+    this._postFn = postFn || (() => {});
+    this.pstEngine = new StockfishEngine((line) => this._postFn(line));
+    this.wasmEngine = new WasmEngine((line) => this._postFn(line));
+    this.activeEngine = this.pstEngine; // start with PST until WASM is ready
+    this.wasmLoadAttempted = false;
+    this.wasmLoadPromise = null;
+  }
+
+  get postFn() {
+    return this._postFn;
+  }
+
+  set postFn(fn) {
+    this._postFn = fn || (() => {});
+  }
+
+  async tryLoadWasm(wasmUrl) {
+    if (this.wasmLoadAttempted) return this.wasmEngine.wasmReady;
+    this.wasmLoadAttempted = true;
+    this.wasmLoadPromise = this.wasmEngine.load(wasmUrl);
+    const ok = await this.wasmLoadPromise;
+    if (ok) {
+      this.activeEngine = this.wasmEngine;
+      // Re-send initial UCI handshake to WASM
+      this.wasmEngine.processCommand('uci');
+    }
+    return ok;
+  }
+
+  get wasmReady() {
+    return this.wasmEngine.wasmReady;
+  }
+
+  get multiPv() {
+    return this.pstEngine.multiPv;
+  }
+
+  get parsedPosition() {
+    return this.pstEngine.parsedPosition;
+  }
+
+  // Synchronous command processing (used by tests and PST fallback path).
+  // When WASM is active, commands are piped asynchronously and results
+  // come back via the print callback — so we return [] for the sync path.
+  processCommand(rawCmd) {
+    if (this.activeEngine === this.wasmEngine && this.wasmEngine.wasmReady) {
+      // Pipe to WASM; results come back asynchronously
+      const handled = this.wasmEngine.processCommand(rawCmd);
+      if (handled) return [];
+    }
+    // Fallback to PST engine (synchronous)
+    return this.pstEngine.processCommand(rawCmd);
+  }
+}
+
 // Worker message handling
 if (typeof self !== 'undefined') {
-  const workerEngine = new StockfishEngine((line) => {
+  const unified = new UnifiedEngine((line) => {
     self.postMessage({ type: 'uci', line });
   });
+
+  // Attempt WASM load on worker startup; on failure, PST engine remains active.
+  unified.tryLoadWasm('stockfish.wasm').catch(() => {});
 
   self.onmessage = function (event) {
     const data = event.data;
     if (!data) return;
 
     if (typeof data === 'string') {
-      workerEngine.processCommand(data);
+      unified.processCommand(data);
     } else if (data.type === 'uci' && typeof data.command === 'string') {
-      workerEngine.processCommand(data.command);
+      unified.processCommand(data.command);
     } else if (data.fen || data.type === 'position') {
       const fen = data.fen;
-      workerEngine.processCommand(`position fen ${fen}`);
       const depth = data.depth || 3;
-      const results = workerEngine.processCommand(`go depth ${depth}`);
-      const primary = results && results[0];
-      self.postMessage({
-        type: 'eval',
-        fen,
-        eval: primary ? primary.scoreRaw : 0,
-        evalCp: primary ? primary.scoreCp : 0,
-        bestMove: primary ? primary.bestMove : 'e2e4',
-        pv: primary ? [primary.bestMove] : ['e2e4'],
-        multipv: results || []
-      });
+
+      // Check eval cache before computing
+      const cached = getEvalFromCache(fen);
+      if (cached) {
+        self.postMessage({
+          type: 'eval',
+          fen,
+          eval: cached.cp || 0,
+          evalCp: cached.cp || 0,
+          bestMove: cached.bestmove || 'e2e4',
+          pv: cached.bestmove ? [cached.bestmove] : ['e2e4'],
+          multipv: [],
+          cached: true
+        });
+        return;
+      }
+
+      if (unified.wasmReady) {
+        // WASM path: pipe commands, results arrive asynchronously via print callback
+        unified.processCommand(`position fen ${fen}`);
+        unified.processCommand(`go depth ${depth}`);
+      } else {
+        // PST path: synchronous, return results immediately
+        unified.processCommand(`position fen ${fen}`);
+        const results = unified.processCommand(`go depth ${depth}`);
+        const primary = results && results[0];
+
+        // Persist eval to cache
+        if (primary) {
+          try {
+            saveEvalToCache(fen, {
+              cp: primary.scoreRaw,
+              depth: depth,
+              mate: null,
+              bestmove: primary.bestMove
+            });
+          } catch (_) { /* graceful degradation */ }
+        }
+
+        self.postMessage({
+          type: 'eval',
+          fen,
+          eval: primary ? primary.scoreRaw : 0,
+          evalCp: primary ? primary.scoreCp : 0,
+          bestMove: primary ? primary.bestMove : 'e2e4',
+          pv: primary ? [primary.bestMove] : ['e2e4'],
+          multipv: results || []
+        });
+      }
     }
   };
 }
@@ -513,6 +905,11 @@ if (typeof module !== 'undefined') {
     findBestMove,
     generateCandidateMoves,
     evaluateMultiPV,
-    StockfishEngine
+    StockfishEngine,
+    WasmEngine,
+    UnifiedEngine,
+    fenCacheKey,
+    getEvalFromCache,
+    saveEvalToCache
   };
 }

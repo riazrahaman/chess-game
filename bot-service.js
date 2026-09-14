@@ -47,11 +47,12 @@ class BotService {
     const level = Math.max(1, Math.min(8, parseInt(options.level, 10) || 3));
     const color = options.color === 'white' ? 'white' : 'black';
 
+    const existing = this.rooms.get(roomId);
+    if (existing && existing.token && this.seatAuth && (!enabled || existing.color !== color)) {
+      try { this.seatAuth.releaseSeat(roomId, existing.token); } catch (_) {}
+    }
+
     if (!enabled) {
-      const existing = this.rooms.get(roomId);
-      if (existing && existing.token && this.seatAuth) {
-        try { this.seatAuth.releaseSeat(roomId, existing.token); } catch (_) {}
-      }
       this.rooms.delete(roomId);
       return { ok: true, enabled: false };
     }

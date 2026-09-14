@@ -250,6 +250,10 @@ const ALLOWED_FILES = new Set([
   'move-review.js',
   'openings-db.js',
   'game-archive.js',
+  'ai-coach.js',
+  'game-report.js',
+  'accessibility-voice.js',
+  'rating.js',
   'CBURNETT-LICENSE.txt'
 ]);
 
