@@ -5,6 +5,18 @@
 // Chess.com/Lichess standard move classifications:
 // Brilliant (!!), Great (!), Best (★), Excellent, Good, Inaccuracy (?!), Mistake (?), Blunder (??)
 
+/**
+ * Normalizes a FEN to a 4-field cache key (strips halfmove/fullmove counters).
+ * @param {string} fen  Full FEN string.
+ * @returns {string}    4-field key: piecePlacement + sideToMove + castling + enPassant
+ */
+function fenCacheKey(fen) {
+  if (!fen || typeof fen !== 'string') return '';
+  const parts = fen.trim().split(/\s+/);
+  if (parts.length < 4) return fen;
+  return parts.slice(0, 4).join(' ');
+}
+
 const CLASSIFICATIONS = {
   BRILLIANT: { key: 'brilliant', symbol: '!!', label: 'Brilliant', color: '#1baca6', badgeClass: 'badge-brilliant' },
   GREAT: { key: 'great', symbol: '!', label: 'Great', color: '#5c8bb0', badgeClass: 'badge-great' },
@@ -182,10 +194,12 @@ function generateMistakePuzzles(moveHistory, evalHistory, fenHistory) {
   if (!review || !review.moves) return puzzles;
 
   let engineHelper = null;
+  let evalCache = null;
   if (typeof stockfishWorker !== 'undefined') {
     engineHelper = stockfishWorker;
   } else if (typeof require !== 'undefined') {
     try { engineHelper = require('./stockfish-worker.js'); } catch (_) {}
+    try { evalCache = require('./game-archive.js'); } catch (_) {}
   }
 
   for (let i = 0; i < review.moves.length; i++) {
@@ -193,10 +207,23 @@ function generateMistakePuzzles(moveHistory, evalHistory, fenHistory) {
     if (m.key === 'blunder' || m.key === 'mistake') {
       const fen = Array.isArray(fenHistory) && fenHistory[i] ? fenHistory[i] : null;
       let bestMove = null;
-      if (engineHelper && fen) {
+
+      // Check eval cache first (transparent memoization)
+      if (evalCache && fen) {
+        try {
+          const cached = evalCache.getEval(fenCacheKey(fen));
+          if (cached && cached.bestmove) bestMove = cached.bestmove;
+        } catch (_) { /* graceful degradation */ }
+      }
+
+      // Fall back to engine if cache miss
+      if (!bestMove && engineHelper && fen) {
         try {
           const res = engineHelper.findBestMove(fen, { depth: 2 });
           if (res && res.bestMove) bestMove = res.bestMove;
+          if (res && fen && evalCache) {
+            try { evalCache.saveEval(fenCacheKey(fen), { cp: res.evalScore, depth: 2, mate: null, bestmove: res.bestMove }); } catch (_) {}
+          }
         } catch (_) {}
       }
       puzzles.push({
@@ -225,7 +252,8 @@ const MoveReviewModule = {
   calculateMoveAccuracy,
   classifyMove,
   reviewGame,
-  generateMistakePuzzles
+  generateMistakePuzzles,
+  fenCacheKey
 };
 
 if (typeof window !== 'undefined') {

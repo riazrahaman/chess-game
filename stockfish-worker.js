@@ -372,6 +372,63 @@ function findBestMove(parsed) {
   return { bestMove: 'e2e4', evalScore: 0 };
 }
 
+/**
+ * Normalizes a FEN to a 4-field cache key (strips halfmove/fullmove counters).
+ * Transpositions with identical board+turn+castling+enPassant share a key.
+ * @param {string} fen  Full FEN string.
+ * @returns {string}    4-field cache key.
+ */
+function fenCacheKey(fen) {
+  if (!fen || typeof fen !== 'string') return '';
+  const parts = fen.trim().split(/\s+/);
+  if (parts.length < 4) return fen;
+  return parts.slice(0, 4).join(' ');
+}
+
+/**
+ * Attempts to retrieve a cached eval for the given FEN.
+ * Uses game-archive.js when available (Node/test context), else an in-memory Map.
+ * Returns null on cache miss or when no backend is available (graceful degradation).
+ */
+let _evalCacheBackend = null;
+let _evalCacheBackendInit = false;
+let _memoryEvalCache = new Map();
+
+function _getEvalCacheBackend() {
+  if (_evalCacheBackendInit) return _evalCacheBackend;
+  _evalCacheBackendInit = true;
+  if (typeof require === 'function') {
+    try {
+      const archive = require('./game-archive.js');
+      if (archive && typeof archive.getEval === 'function' && typeof archive.saveEval === 'function') {
+        _evalCacheBackend = archive;
+      }
+    } catch (_) { /* graceful degradation */ }
+  }
+  return _evalCacheBackend;
+}
+
+function getEvalFromCache(fen) {
+  const key = fenCacheKey(fen);
+  if (!key) return null;
+  const backend = _getEvalCacheBackend();
+  if (backend) {
+    try { return backend.getEval(key); } catch (_) { return null; }
+  }
+  return _memoryEvalCache.get(key) || null;
+}
+
+function saveEvalToCache(fen, evalData) {
+  const key = fenCacheKey(fen);
+  if (!key) return null;
+  const backend = _getEvalCacheBackend();
+  if (backend) {
+    try { return backend.saveEval(key, evalData); } catch (_) { return null; }
+  }
+  _memoryEvalCache.set(key, { fen: key, ...evalData, created_at: Date.now() });
+  return { fen: key, ...evalData };
+}
+
 // Stockfish Engine UCI Controller (PST+Material fallback engine)
 class StockfishEngine {
   constructor(postFn) {
@@ -789,6 +846,22 @@ if (typeof self !== 'undefined') {
       const fen = data.fen;
       const depth = data.depth || 3;
 
+      // Check eval cache before computing
+      const cached = getEvalFromCache(fen);
+      if (cached) {
+        self.postMessage({
+          type: 'eval',
+          fen,
+          eval: cached.cp || 0,
+          evalCp: cached.cp || 0,
+          bestMove: cached.bestmove || 'e2e4',
+          pv: cached.bestmove ? [cached.bestmove] : ['e2e4'],
+          multipv: [],
+          cached: true
+        });
+        return;
+      }
+
       if (unified.wasmReady) {
         // WASM path: pipe commands, results arrive asynchronously via print callback
         unified.processCommand(`position fen ${fen}`);
@@ -798,6 +871,19 @@ if (typeof self !== 'undefined') {
         unified.processCommand(`position fen ${fen}`);
         const results = unified.processCommand(`go depth ${depth}`);
         const primary = results && results[0];
+
+        // Persist eval to cache
+        if (primary) {
+          try {
+            saveEvalToCache(fen, {
+              cp: primary.scoreRaw,
+              depth: depth,
+              mate: null,
+              bestmove: primary.bestMove
+            });
+          } catch (_) { /* graceful degradation */ }
+        }
+
         self.postMessage({
           type: 'eval',
           fen,
@@ -821,6 +907,9 @@ if (typeof module !== 'undefined') {
     evaluateMultiPV,
     StockfishEngine,
     WasmEngine,
-    UnifiedEngine
+    UnifiedEngine,
+    fenCacheKey,
+    getEvalFromCache,
+    saveEvalToCache
   };
 }

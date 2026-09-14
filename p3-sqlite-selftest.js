@@ -318,6 +318,107 @@ async function runTests() {
   assert(uiSource.includes('viewArchivedGame'), 'ui.js defines viewArchivedGame');
   assert(uiSource.includes('setupGameArchiveUI'), 'ui.js defines setupGameArchiveUI');
 
+  // -------------------------------------------------------------
+  // 7. Eval Cache (X3): SQLite + JSON + fenCacheKey + graceful degradation
+  // -------------------------------------------------------------
+  console.log('\n--- 7. Eval Cache (X3) ---');
+
+  // 7.1 fenCacheKey normalization
+  const fenFull = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+  const fenSameBoard = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 5 10';
+  const fenDiffBoard = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1';
+  assert(
+    gameArchiveMod.fenCacheKey(fenFull) === gameArchiveMod.fenCacheKey(fenSameBoard),
+    'fenCacheKey: same board, different counters -> same key'
+  );
+  assert(
+    gameArchiveMod.fenCacheKey(fenFull) !== gameArchiveMod.fenCacheKey(fenDiffBoard),
+    'fenCacheKey: different position -> different key'
+  );
+  assert(
+    gameArchiveMod.fenCacheKey(fenFull) === 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -',
+    `fenCacheKey: 4-field key only (got "${gameArchiveMod.fenCacheKey(fenFull)}")`
+  );
+  assert(gameArchiveMod.fenCacheKey('') === '', 'fenCacheKey: empty string -> empty');
+  assert(gameArchiveMod.fenCacheKey(null) === '', 'fenCacheKey: null -> empty');
+  assert(gameArchiveMod.fenCacheKey('partial') === 'partial', 'fenCacheKey: short FEN passthrough');
+
+  // 7.2 SQLite eval cache round-trip
+  const sqliteEvalArchive = gameArchiveMod.createGameArchive(':memory:');
+  const evalFen1 = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1';
+  const evalData1 = { cp: 30, depth: 4, mate: null, bestmove: 'e7e5' };
+  const saved1 = sqliteEvalArchive.saveEval(evalFen1, evalData1);
+  assert(saved1 !== null, 'SQLite saveEval: returns non-null');
+  const got1 = sqliteEvalArchive.getEval(evalFen1);
+  assert(got1 !== null, 'SQLite getEval: cache hit (not null)');
+  assert(got1.cp === 30, `SQLite getEval: cp round-trips (got ${got1.cp})`);
+  assert(got1.depth === 4, `SQLite getEval: depth round-trips (got ${got1.depth})`);
+  assert(got1.bestmove === 'e7e5', `SQLite getEval: bestmove round-trips (got ${got1.bestmove})`);
+  assert(got1.mate === null || got1.mate === undefined, `SQLite getEval: null mate round-trips (got ${got1.mate})`);
+
+  // 7.3 SQLite eval cache miss
+  const missResult = sqliteEvalArchive.getEval('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+  assert(missResult === null, 'SQLite getEval: cache miss returns null');
+
+  // 7.4 SQLite eval cache FEN key normalization (transposition)
+  const fenTransA = 'r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3';
+  const fenTransB = 'r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 99 99';
+  sqliteEvalArchive.saveEval(fenTransA, { cp: 15, depth: 3, mate: null, bestmove: 'f1c4' });
+  const transHit = sqliteEvalArchive.getEval(fenTransB);
+  assert(transHit !== null && transHit.bestmove === 'f1c4', 'SQLite getEval: transposition (diff counters) hits same cache entry');
+
+  // 7.5 SQLite eval with mate score
+  const mateFen = '6k1/5ppp/8/8/8/8/5PPP/6K1 w - - 0 1';
+  sqliteEvalArchive.saveEval(mateFen, { cp: 0, depth: 5, mate: 3, bestmove: 'g1g2' });
+  const mateHit = sqliteEvalArchive.getEval(mateFen);
+  assert(mateHit.mate === 3, `SQLite getEval: mate field round-trips (got ${mateHit.mate})`);
+  sqliteEvalArchive.close();
+
+  // 7.6 JSON fallback eval cache round-trip
+  const jsonEvalPath = path.join(__dirname, `.test-eval-cache-${Date.now()}.json`);
+  const jsonEvalArchive = gameArchiveMod.createGameArchive({ forceJson: true, jsonPath: jsonEvalPath });
+  const evalFen2 = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+  const evalData2 = { cp: 0, depth: 3, mate: null, bestmove: 'e2e4' };
+  jsonEvalArchive.saveEval(evalFen2, evalData2);
+  const got2 = jsonEvalArchive.getEval(evalFen2);
+  assert(got2 !== null, 'JSON saveEval/getEval: cache hit');
+  assert(got2.cp === 0, `JSON getEval: cp round-trips (got ${got2.cp})`);
+  assert(got2.depth === 3, `JSON getEval: depth round-trips (got ${got2.depth})`);
+  assert(got2.bestmove === 'e2e4', `JSON getEval: bestmove round-trips (got ${got2.bestmove})`);
+
+  // 7.7 JSON eval cache miss
+  const jsonMiss = jsonEvalArchive.getEval('nonexistent/fen/8/8/8/8/8/8/8 w - - 0 1');
+  assert(jsonMiss === null, 'JSON getEval: cache miss returns null');
+  jsonEvalArchive.close();
+  try { if (fs.existsSync(jsonEvalPath)) fs.unlinkSync(jsonEvalPath); } catch (_) {}
+
+  // 7.8 Graceful degradation: getEval on unavailable backend returns null (no throw)
+  const gracefulArchive = { storage: null };
+  try {
+    const result = gameArchiveMod.GameArchive.prototype.getEval.call(gracefulArchive, 'some fen');
+    assert(result === null, 'getEval: returns null when storage is null (graceful degradation)');
+  } catch (e) {
+    assert(false, `getEval: should not throw when storage is null (got ${e.message})`);
+  }
+
+  // 7.9 stockfish-worker.js cache helpers
+  const stockfishMod = require('./stockfish-worker.js');
+  assert(typeof stockfishMod.fenCacheKey === 'function', 'stockfish-worker exports fenCacheKey');
+  assert(typeof stockfishMod.getEvalFromCache === 'function', 'stockfish-worker exports getEvalFromCache');
+  assert(typeof stockfishMod.saveEvalToCache === 'function', 'stockfish-worker exports saveEvalToCache');
+  assert(
+    stockfishMod.fenCacheKey(fenFull) === gameArchiveMod.fenCacheKey(fenFull),
+    'stockfish-worker fenCacheKey matches game-archive fenCacheKey'
+  );
+
+  // 7.10 move-review.js fenCacheKey
+  const moveReviewMod = require('./move-review.js');
+  assert(typeof moveReviewMod.fenCacheKey === 'function', 'move-review exports fenCacheKey');
+  assert(
+    moveReviewMod.fenCacheKey(fenFull) === gameArchiveMod.fenCacheKey(fenFull),
+    'move-review fenCacheKey matches game-archive fenCacheKey'
+  );
+
   // Summary
   console.log(`\n========================================`);
   console.log(`P3 SQLite Self-Test Summary:`);
