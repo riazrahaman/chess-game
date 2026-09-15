@@ -297,6 +297,24 @@ class SqliteStorageAdapter {
         bestmove TEXT,
         created_at INTEGER
       );
+      CREATE TABLE IF NOT EXISTS puzzle_ratings (
+        kind TEXT NOT NULL,
+        id TEXT NOT NULL,
+        rating REAL NOT NULL,
+        rd REAL NOT NULL,
+        vol REAL NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (kind, id)
+      );
+      CREATE TABLE IF NOT EXISTS puzzle_reviews (
+        puzzle_id TEXT PRIMARY KEY,
+        next_due_at INTEGER NOT NULL,
+        interval_days INTEGER NOT NULL,
+        step INTEGER NOT NULL DEFAULT 0,
+        review_count INTEGER NOT NULL DEFAULT 0,
+        last_reviewed_at INTEGER,
+        correct_streak INTEGER NOT NULL DEFAULT 0
+      );
     `);
   }
 
@@ -396,6 +414,66 @@ class SqliteStorageAdapter {
     return { fen: row.fen, cp: row.cp, depth: row.depth, mate: row.mate, bestmove: row.bestmove, created_at: row.created_at };
   }
 
+  savePuzzleRating(kind, id, ratingData) {
+    if (!kind || !id || !ratingData) return null;
+    const entry = {
+      kind: String(kind),
+      id: String(id),
+      rating: ratingData.rating,
+      rd: ratingData.rd,
+      vol: ratingData.vol,
+      updated_at: Date.now()
+    };
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO puzzle_ratings (kind, id, rating, rd, vol, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(entry.kind, entry.id, entry.rating, entry.rd, entry.vol, entry.updated_at);
+    return entry;
+  }
+
+  getPuzzleRating(kind, id) {
+    if (!kind || !id) return null;
+    const stmt = this.db.prepare('SELECT * FROM puzzle_ratings WHERE kind = ? AND id = ?');
+    const row = stmt.get(String(kind), String(id));
+    return row ? Object.assign({}, row) : null;
+  }
+
+  savePuzzleReview(reviewRecord) {
+    if (!reviewRecord || !reviewRecord.puzzleId) return null;
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO puzzle_reviews
+        (puzzle_id, next_due_at, interval_days, step, review_count, last_reviewed_at, correct_streak)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      String(reviewRecord.puzzleId),
+      reviewRecord.nextDueAt,
+      reviewRecord.intervalDays,
+      reviewRecord.step || 0,
+      reviewRecord.reviewCount || 0,
+      reviewRecord.lastReviewedAt || null,
+      reviewRecord.correctStreak || 0
+    );
+    return Object.assign({}, reviewRecord);
+  }
+
+  getPuzzleReview(puzzleId) {
+    if (!puzzleId) return null;
+    const stmt = this.db.prepare('SELECT * FROM puzzle_reviews WHERE puzzle_id = ?');
+    const row = stmt.get(String(puzzleId));
+    if (!row) return null;
+    return {
+      puzzleId: row.puzzle_id,
+      nextDueAt: row.next_due_at,
+      intervalDays: row.interval_days,
+      step: row.step,
+      reviewCount: row.review_count,
+      lastReviewedAt: row.last_reviewed_at,
+      correctStreak: row.correct_streak
+    };
+  }
+
   close() {
     if (this.db) {
       try { this.db.close(); } catch (_) { /* ignore */ }
@@ -411,6 +489,8 @@ class JsonFileStorageAdapter {
     this.filePath = filePath;
     this.games = new Map();
     this.evalCache = new Map();
+    this.puzzleRatings = new Map();
+    this.puzzleReviews = new Map();
     this._load();
   }
 
@@ -418,6 +498,8 @@ class JsonFileStorageAdapter {
     if (!this.filePath || this.filePath === ':memory:' || !fs) {
       this.games = new Map();
       this.evalCache = new Map();
+      this.puzzleRatings = new Map();
+      this.puzzleReviews = new Map();
       return;
     }
     try {
@@ -439,11 +521,23 @@ class JsonFileStorageAdapter {
               this.evalCache.set(k, v);
             }
           }
+          if (parsed.puzzleRatings && typeof parsed.puzzleRatings === 'object') {
+            for (const [k, v] of Object.entries(parsed.puzzleRatings)) {
+              this.puzzleRatings.set(k, v);
+            }
+          }
+          if (parsed.puzzleReviews && typeof parsed.puzzleReviews === 'object') {
+            for (const [k, v] of Object.entries(parsed.puzzleReviews)) {
+              this.puzzleReviews.set(k, v);
+            }
+          }
         }
       }
     } catch (_) {
       this.games = new Map();
       this.evalCache = new Map();
+      this.puzzleRatings = new Map();
+      this.puzzleReviews = new Map();
     }
   }
 
@@ -455,7 +549,15 @@ class JsonFileStorageAdapter {
       for (const [k, v] of this.evalCache) {
         evalCacheObj[k] = v;
       }
-      const payload = JSON.stringify({ games, evalCache: evalCacheObj }, null, 2);
+      const puzzleRatingsObj = {};
+      for (const [k, v] of this.puzzleRatings) {
+        puzzleRatingsObj[k] = v;
+      }
+      const puzzleReviewsObj = {};
+      for (const [k, v] of this.puzzleReviews) {
+        puzzleReviewsObj[k] = v;
+      }
+      const payload = JSON.stringify({ games, evalCache: evalCacheObj, puzzleRatings: puzzleRatingsObj, puzzleReviews: puzzleReviewsObj }, null, 2);
       const tempPath = `${this.filePath}.tmp.${Date.now()}`;
       fs.writeFileSync(tempPath, payload, 'utf8');
       fs.renameSync(tempPath, this.filePath);
@@ -532,6 +634,41 @@ class JsonFileStorageAdapter {
     if (!fen) return null;
     const key = fenCacheKey(fen);
     const item = this.evalCache.get(key);
+    return item ? Object.assign({}, item) : null;
+  }
+
+  savePuzzleRating(kind, id, ratingData) {
+    if (!kind || !id || !ratingData) return null;
+    const entry = {
+      kind: String(kind),
+      id: String(id),
+      rating: ratingData.rating,
+      rd: ratingData.rd,
+      vol: ratingData.vol,
+      updated_at: Date.now()
+    };
+    this.puzzleRatings.set(`${entry.kind}:${entry.id}`, entry);
+    this._saveToDisk();
+    return Object.assign({}, entry);
+  }
+
+  getPuzzleRating(kind, id) {
+    if (!kind || !id) return null;
+    const item = this.puzzleRatings.get(`${String(kind)}:${String(id)}`);
+    return item ? Object.assign({}, item) : null;
+  }
+
+  savePuzzleReview(reviewRecord) {
+    if (!reviewRecord || !reviewRecord.puzzleId) return null;
+    const entry = Object.assign({}, reviewRecord);
+    this.puzzleReviews.set(String(reviewRecord.puzzleId), entry);
+    this._saveToDisk();
+    return entry;
+  }
+
+  getPuzzleReview(puzzleId) {
+    if (!puzzleId) return null;
+    const item = this.puzzleReviews.get(String(puzzleId));
     return item ? Object.assign({}, item) : null;
   }
 
@@ -662,6 +799,42 @@ class GameArchive {
     }
   }
 
+  savePuzzleRating(kind, id, ratingData) {
+    if (!this.storage || typeof this.storage.savePuzzleRating !== 'function') return null;
+    try {
+      return this.storage.savePuzzleRating(kind, id, ratingData);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  getPuzzleRating(kind, id) {
+    if (!this.storage || typeof this.storage.getPuzzleRating !== 'function') return null;
+    try {
+      return this.storage.getPuzzleRating(kind, id);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  savePuzzleReview(reviewRecord) {
+    if (!this.storage || typeof this.storage.savePuzzleReview !== 'function') return null;
+    try {
+      return this.storage.savePuzzleReview(reviewRecord);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  getPuzzleReview(puzzleId) {
+    if (!this.storage || typeof this.storage.getPuzzleReview !== 'function') return null;
+    try {
+      return this.storage.getPuzzleReview(puzzleId);
+    } catch (_) {
+      return null;
+    }
+  }
+
   exportPgn(game) {
     return exportPgn(game);
   }
@@ -710,6 +883,10 @@ if (typeof module !== 'undefined' && module.exports) {
     searchGames: (query, options) => getArchive().searchGames(query, options),
     saveEval: (fen, evalData) => getArchive().saveEval(fen, evalData),
     getEval: (fen) => getArchive().getEval(fen),
+    savePuzzleRating: (kind, id, ratingData) => getArchive().savePuzzleRating(kind, id, ratingData),
+    getPuzzleRating: (kind, id) => getArchive().getPuzzleRating(kind, id),
+    savePuzzleReview: (reviewRecord) => getArchive().savePuzzleReview(reviewRecord),
+    getPuzzleReview: (puzzleId) => getArchive().getPuzzleReview(puzzleId),
     fenCacheKey,
     exportPgn,
     parsePgn,

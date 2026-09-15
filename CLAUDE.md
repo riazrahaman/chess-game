@@ -43,6 +43,14 @@ node c7-ai-puzzles-selftest.js       # blunder puzzle generator & retry mode (6 
 node c2-c4-coach-selftest.js         # why move explanations & coach mode hints (6 tests)
 node c6-ai-report-selftest.js        # auto post-game report & annotated PGN (5 tests)
 node c8-d4-voice-selftest.js         # voice move recognition, audio announcements & blind mode (7 tests)
+node puzzle-service-selftest.js      # lichess puzzle CSV import + UCI->SAN (11 tests)
+node puzzle-rating-selftest.js       # puzzle Glicko-2 rating loop (9 tests)
+node puzzle-storm-selftest.js        # puzzle storm + seeded RNG (9 tests)
+node daily-puzzle-selftest.js        # daily puzzle date-seeded pick (6 tests)
+node puzzle-repetition-selftest.js   # spaced-repetition mistake review (24 tests)
+node study-tree-selftest.js          # studies variation tree + PGN/RAV round-trip (49 tests)
+node openings-explorer-selftest.js   # real opening explorer (TSV + personal stats) (35 tests)
+node eval-graph-selftest.js          # interactive eval graph click-to-jump (51 tests)
 ```
 
 Suites not wired into `npm run check`/`npm test` (still runnable standalone, useful for targeted debugging): `draw-selftest.js`, `p1-annotations-selftest.js`, `p1-audio-selftest.js`, `p1-premove-selftest.js`, `p1-scrubber-selftest.js`, `p2-multipv-selftest.js`, `p2-opening-selftest.js`, `p3-lag-selftest.js`, `gate3-selftest.js`, `gate4-selftest.js`, `gate5-selftest.js`. If you add a new feature area's selftest, wire it into both `test:unit` and `lint` in `package.json` (per the checklist below) so it isn't silently orphaned like these.
@@ -92,6 +100,13 @@ server.js            HTTP API, static file serving, SSE stream, CORS/security bo
 - `game-report.js` — auto post-game narrative report generation (`generatePostGameReport`), accuracy summary, turning point swing analysis, endgame performance, and annotated PGN with NAG glyphs and eval comments.
 - `accessibility-voice.js` — natural spoken English move announcements via SpeechSynthesis API, voice move input recognition via Web Speech API, and blind accessibility mode controller with keyboard grid navigation.
 - `openings-db.js` — ECO opening database (prefix matching, master win rates) and the SVG evaluation-graph math.
+- `puzzle-service.js` — lichess puzzle CSV import (UCI→SAN conversion via chess.js) into SQLite; filterable themed subsets.
+- `puzzle-rating.js` — puzzle-vs-player Glicko-2 rating loop (each solve scored as a game, time bonus).
+- `puzzle-storm.js` — timed Puzzle Storm sessions (deterministic seeded RNG, escalating difficulty) + `daily-puzzle.js` date-seeded daily pick.
+- `puzzle-repetition.js` — Chessable-style spaced-repetition mistake review (expanding intervals, persisted per player).
+- `study-tree.js` — pure-data variation tree with `toPGN`/`fromPGN` RAV round-trip (Studies substrate).
+- `openings-explorer.js` — real opening explorer: lichess TSV import + personal archive stats (no fabricated win-rates).
+- `eval-graph.js` — interactive click-to-jump eval graph with per-ply tooltips (SAN/eval/ACPL delta).
 
 ### Adding or changing a feature
 

@@ -99,21 +99,21 @@ What follows is the next-generation roadmap.
 
 ## TIER P — Puzzle ecosystem (Chessable/lichess parity; highest user-retention ROI)
 
-- **P1 Import lichess's 6.1M CC0 puzzle CSV into SQLite** (schema: `PuzzleId,FEN,Moves(UCI),Rating,RatingDeviation,Popularity,Themes,OpeningTags`). One-time ETL script, filterable themed subset to keep the DB small. **This single import beats any home-grown generator.** → `game-archive.js`, new `puzzle-service.js`.
-- **P2 Puzzle rating loop:** each solve attempt scored as a Glicko-2 game (X4) between player and puzzle; popularity ±votes. Copy lichess's exact mechanics.
-- **P3 Puzzle Storm** (timed streak, escalating difficulty) and **Daily Puzzle** (deterministic date-seeded pick). Both ride on P1 with tiny UI deltas.
-- **P4 Spaced-repetition mistake review.** Extend `generateMistakePuzzles` with a review schedule (Chessable MoveTrainer interval model: quiz at expanding delays); persist mistakes per player in SQLite with `nextDueAt`. This is the niche users demonstrably pay for (Chessable claims ~95% retention, 2M students).
+- ~~**P1 Import lichess's 6.1M CC0 puzzle CSV into SQLite**~~ — **Done.** New `puzzle-service.js` imports the lichess puzzle CSV, converting the `Moves` column (UCI) to SAN via `uciToSan` (chess.js replay), storing both `movesUci` and `moves`. Verified in `puzzle-service-selftest.js` (11/11).
+- ~~**P2 Puzzle rating loop**~~ — **Done.** New `puzzle-rating.js` scores each solve as a Glicko-2 game (X4) between player and puzzle (clamped [400,2400]) with a time bonus; persisted in `game-archive.js`. Verified in `puzzle-rating-selftest.js` (9/9).
+- ~~**P3 Puzzle Storm + Daily Puzzle**~~ — **Done.** New `puzzle-storm.js` (deterministic seeded RNG, no `Math.random`) + `daily-puzzle.js` (date-seeded pick). Verified in `puzzle-storm-selftest.js` (9/9) + `daily-puzzle-selftest.js` (6/6).
+- ~~**P4 Spaced-repetition mistake review**~~ — **Done.** New `puzzle-repetition.js` with a Chessable-style expanding-interval schedule (1→2→4→8→16→32→365d), persisted in `game-archive.js`. Verified in `puzzle-repetition-selftest.js` (24/24).
 - **P5 Retry-before-reveal pedagogy** (already half-built): ensure every mistake puzzle hides the solution until the user's attempt is committed — lichess's "learn from your mistakes" differentiator.
 - **P6 Puzzle Racer/Battle** — multiplayer race over existing SSE rooms + seat auth. Moderate effort, strong social hook.
 
 ## TIER A2 — Analysis & learning depth
 
-- **A2.1 Analysis-board mode with a variation tree.** Today the scrubber replays the actual game only. Add a free analysis room where users play out sidelines (engine-opposed or freeform), with a persistent, commented variation tree — lichess **Studies** is the crown jewel for learning, and your archive + scrubber + annotation canvas are ~60% of the substrate. Keep it referee-mediated to preserve Gate 4 (a dedicated "analysis room" referee mode).
+- ~~**A2.1 Analysis-board mode with a variation tree**~~ — **Done.** New `study-tree.js` — a pure-data variation tree with `toPGN`/`fromPGN` (RAV nested-paren round-trip incl. comments + NAGs). Verified in `study-tree-selftest.js` (49/49). (The full analysis-room referee mode remains future work.)
 - **A2.2 Study chapters:** PGN/FEN/game-import chapters, hidden-move "quiz" chapters (moves concealed until guessed) — reuses the puzzle input loop. PGN export with `$1`–`$9` NAG glyphs for downstream tool interop (already have NAG comments; verify glyph codes).
-- **A2.3 Real opening explorer.** Options, in order of effort: (a) enrich `openings-db.js` with the `lichess-org/chess-openings` TSV (ECO/name/moves); (b) personal explorer over the SQLite archive ("what do *I* play here, and how does it score?"); (c) optional online proxy to lichess explorer API with offline fallback. Replace fabricated win-rates with data.
+- ~~**A2.3 Real opening explorer.**~~ — **Done.** New `openings-explorer.js`: `loadFromTSV` (lichess chess-openings TSV), `exploreOpening` (3-tier TSV → bundled 25 real ECO/name/moves → `openings-db.js` fallback), `personalExplorer` (real W/D/L counts from archive; returns null/0 when absent — **no fabricated stats**). Verified in `openings-explorer-selftest.js` (35/35).
 - **A2.4 Masters-DB mistake whitelist.** Cross-check engine-flagged "mistakes" against book positions (≥2 master games ⇒ not a mistake) so theory-true moves aren't condemned. Needs a compact frequency-sorted book file; big quality jump for Game Review trust.
 - **A2.5 Tablebase.** Online: probe `tablebase.lichess.ovh` (7-piece WDL/DTZ per FEN, one fetch). Offline: graceful fallback to engine eval. Perfect endgame play in deep endgames, and bulletproof endgame report sections.
-- **A2.6 Interactive eval graph.** Replace the 400×80 sparkline with a click-to-jump graph with per-ply tooltips (SAN, eval, ACPL delta) linking to the scrubber.
+- ~~**A2.6 Interactive eval graph.**~~ — **Done.** New `eval-graph.js` replaces the 400×80 sparkline with a click-to-jump graph with per-ply tooltips (SAN, eval, ACPL delta); `ui.js` `updateEvalGraphUI` uses it with fallback to the old format. Verified in `eval-graph-selftest.js` (51/51).
 - **A2.7 Report upgrades:** ACPL (average centipawn loss) — the standard quality metric — move-time stats, phase-segmented accuracy, and "practice new ideas" (replay critical positions vs engine straight from the report).
 
 ## TIER G — Gameplay breadth
@@ -171,7 +171,7 @@ What follows is the next-generation roadmap.
 | Wave | Items | Why |
 |---|---|---|
 | **1 (credibility)** | X1, X2, X3, X4, X5 | Every AI feature becomes honest; monolith unblocked |
-| **2 (retention)** | P1, P2, P3, P4, A2.1, A2.3, A2.6 | Daily-reason-to-return: puzzles + studies + real explorer |
+| **2 (retention)** | ~~P1, P2, P3, P4, A2.1, A2.3, A2.6~~ | **Done.** Daily-reason-to-return: puzzles + studies + real explorer |
 | **3 (platform)** | S1, S2, S3, M1, M3, M4 | Identity, ratings, matchmaking, installability |
 | **4 (breadth)** | G1, G2, G3, A2.4, A2.5, A2.7, P6, AB1–3 | Variants, endgame truth, social puzzles, a11y leadership |
 | **5 (bets)** | S4–S7, V1–V4, M2 | Tournaments, correspondence, personalities, locales |

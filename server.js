@@ -258,6 +258,14 @@ const ALLOWED_FILES = new Set([
   'game-report.js',
   'accessibility-voice.js',
   'rating.js',
+  'puzzle-service.js',
+  'puzzle-rating.js',
+  'puzzle-storm.js',
+  'daily-puzzle.js',
+  'study-tree.js',
+  'openings-explorer.js',
+  'puzzle-repetition.js',
+  'eval-graph.js',
   'CBURNETT-LICENSE.txt'
 ]);
 
