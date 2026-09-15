@@ -1996,11 +1996,23 @@ function updateOpeningExplorerUI() {
 
 function updateEvalGraphUI() {
   const openingsModule = (typeof window !== 'undefined' && window.Openings) || (typeof Openings !== 'undefined' ? Openings : null);
+  const evalGraphModule = (typeof window !== 'undefined' && window.EvalGraph) || (typeof EvalGraph !== 'undefined' ? EvalGraph : null);
   const svg = document.getElementById('eval-graph-svg');
   if (!svg || !openingsModule) return;
 
   const currentPly = viewedPly === null ? (liveHistory ? liveHistory.length : 0) : viewedPly;
   const graphData = openingsModule.generateEvalGraphData(evalHistory || [0], 400, 80);
+
+  // Build interactive tooltips via eval-graph.js if available
+  let interactiveTooltips = null;
+  if (evalGraphModule && typeof evalGraphModule.buildEvalGraph === 'function') {
+    const interactive = evalGraphModule.buildEvalGraph(
+      evalHistory || [0],
+      liveHistory || [],
+      { width: 400, height: 80 }
+    );
+    interactiveTooltips = interactive.tooltips;
+  }
 
   svg.innerHTML = '';
 
@@ -2033,7 +2045,7 @@ function updateEvalGraphUI() {
     svg.appendChild(indLine);
   }
 
-  // Dots for each ply
+  // Dots for each ply with interactive tooltips (SAN + eval + ACPL delta)
   if (graphData.points) {
     graphData.points.forEach(pt => {
       const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
@@ -2044,7 +2056,16 @@ function updateEvalGraphUI() {
       circle.dataset.ply = String(pt.ply);
       circle.onclick = () => jumpToPly(pt.ply);
       const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-      title.textContent = `Ply ${pt.ply}: ${pt.cp >= 0 ? '+' : ''}${(pt.cp / 100).toFixed(2)}`;
+      if (interactiveTooltips && interactiveTooltips[pt.ply]) {
+        const tip = interactiveTooltips[pt.ply];
+        let label = `Ply ${pt.ply}: ${tip.evalText}`;
+        if (tip.san) label += `  ${tip.san}`;
+        if (tip.acplText && tip.acplText !== 'Best') label += `  (${tip.acplText})`;
+        if (tip.classification) label += `  [${tip.classification}]`;
+        title.textContent = label;
+      } else {
+        title.textContent = `Ply ${pt.ply}: ${pt.cp >= 0 ? '+' : ''}${(pt.cp / 100).toFixed(2)}`;
+      }
       circle.appendChild(title);
       svg.appendChild(circle);
     });

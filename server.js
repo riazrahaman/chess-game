@@ -262,6 +262,10 @@ const ALLOWED_FILES = new Set([
   'puzzle-rating.js',
   'puzzle-storm.js',
   'daily-puzzle.js',
+  'study-tree.js',
+  'openings-explorer.js',
+  'puzzle-repetition.js',
+  'eval-graph.js',
   'CBURNETT-LICENSE.txt'
 ]);
 
