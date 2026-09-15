@@ -93,17 +93,23 @@ async function run() {
     const alertCalls = uiCode.match(/alert\(/g);
     assert(alertCalls === null, `ui.js has zero literal alert() calls (got ${alertCalls ? alertCalls.length : 0})`);
 
-    // Verify Gate 4 architectural invariant
+    // Verify Gate 4 architectural invariant (ui.js + all extracted modules)
     assert(!uiCode.includes('makeMove('), 'ARCHITECTURAL INVARIANT: ui.js does not contain makeMove(');
     assert(!uiCode.includes('createInitialBoard('), 'ARCHITECTURAL INVARIANT: ui.js does not contain createInitialBoard(');
+    for (const mod of ['ui-sound.js', 'ui-theme.js', 'ui-annotations.js', 'ui-archive.js']) {
+      const modCode = fs.readFileSync(path.join(__dirname, mod), 'utf8');
+      assert(!modCode.includes('makeMove('), `ARCHITECTURAL INVARIANT: ${mod} does not contain makeMove(`);
+      assert(!modCode.includes('createInitialBoard('), `ARCHITECTURAL INVARIANT: ${mod} does not contain createInitialBoard(`);
+    }
 
     // Verify periodic NTP sync
     assert(uiCode.includes('setInterval(syncNtpClock'), 'ui.js schedules periodic syncNtpClock');
 
-    // Verify showUiError and exitArchivedGameView
+    // Verify showUiError (stays in ui.js) and exitArchivedGameView (moved to ui-archive.js)
     assert(uiCode.includes('function showUiError'), 'ui.js defines showUiError');
-    assert(uiCode.includes('function exitArchivedGameView'), 'ui.js defines exitArchivedGameView');
-    assert(uiCode.includes('id: `archive:${gameId}:'), 'ui.js reloadArchivedGameOntoBoard sends idempotency keys and room param');
+    const archiveCode = fs.readFileSync(path.join(__dirname, 'ui-archive.js'), 'utf8');
+    assert(archiveCode.includes('function exitArchivedGameView'), 'ui-archive.js defines exitArchivedGameView');
+    assert(archiveCode.includes('id: `archive:${gameId}:'), 'ui-archive.js reloadArchivedGameOntoBoard sends idempotency keys and room param');
 
   } finally {
     server.close();
