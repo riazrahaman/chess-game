@@ -7,3 +7,6 @@ games.db
 .games-archive.json
 *.log
 
+
+# server runtime log
+server.log

@@ -16,6 +16,7 @@ CHESS_PORT=1234 node server.js   # override port
 npm test                     # full suite: unit tests + Playwright browser smoke test
 npm run test:unit            # all unit & integration selftests
 npm run lint                 # node --check across all server, client worker, and test files
+npm run lint:eslint          # ESLint (flat config) over UI modules + server + engine (warnings only)
 npm run check                # lint + test:unit
 ```
 
@@ -27,12 +28,13 @@ node pieces-selftest.js              # SVG piece rendering (32 tests)
 node security-selftest.js            # CORS, path traversal, body limits (58 tests)
 node differential-selftest.js        # 200 random games vs chess.js (37,800+ plies)
 node p3-multiroom-selftest.js        # multi-room isolation & routing
-node p3-sqlite-selftest.js           # SQLite archive CRUD + PGN import/export (74 tests)
+node p3-sqlite-selftest.js           # SQLite archive CRUD + PGN import/export + eval cache (101 tests)
 node p3-seat-selftest.js             # seat tokens, heartbeats & mutation security (41 tests)
 node t0-draw-flagfall-selftest.js     # draw claims & flag fall timeouts (51 tests)
-node t0-deadcode-selftest.js         # rate limiting, NTP sync & idempotency (13 tests)
-node p2-stockfish-selftest.js        # local heuristic engine & UCI protocol (23 tests)
-node p2-review-selftest.js           # CAPS move-review scoring & classification
+node t0-deadcode-selftest.js         # rate limiting, NTP sync, idempotency & Gate-4 module checks (21 tests)
+node p2-stockfish-selftest.js        # local heuristic engine, WASM bridge & UCI protocol (58 tests)
+node p2-review-selftest.js           # win-probability logistic curve & move classification (51 tests)
+node rating-selftest.js              # Glicko-2 rating engine (36 tests)
 node t1-mobile-visuals-selftest.js   # pointer events, bevel framing & piece shadows (16 tests)
 node p3-social-timecontrol-selftest.js # time controls, chat, rematch & spectator presence (10 tests)
 node c5-ai-bot-selftest.js           # Play vs Computer levels 1-8 bot opponent (10 tests)
@@ -41,7 +43,6 @@ node c7-ai-puzzles-selftest.js       # blunder puzzle generator & retry mode (6 
 node c2-c4-coach-selftest.js         # why move explanations & coach mode hints (6 tests)
 node c6-ai-report-selftest.js        # auto post-game report & annotated PGN (5 tests)
 node c8-d4-voice-selftest.js         # voice move recognition, audio announcements & blind mode (7 tests)
-node rating-selftest.js              # Glicko-2 rating engine (36 tests)
 ```
 
 Suites not wired into `npm run check`/`npm test` (still runnable standalone, useful for targeted debugging): `draw-selftest.js`, `p1-annotations-selftest.js`, `p1-audio-selftest.js`, `p1-premove-selftest.js`, `p1-scrubber-selftest.js`, `p2-multipv-selftest.js`, `p2-opening-selftest.js`, `p3-lag-selftest.js`, `gate3-selftest.js`, `gate4-selftest.js`, `gate5-selftest.js`. If you add a new feature area's selftest, wire it into both `test:unit` and `lint` in `package.json` (per the checklist below) so it isn't silently orphaned like these.
@@ -82,9 +83,10 @@ server.js            HTTP API, static file serving, SSE stream, CORS/security bo
 
 ### Client-side (all plain scripts loaded by `index.html`, no bundler)
 
-- `ui.js` — the orchestrator: SSE/poll receiver and diff-based board reconciliation, pointer events touch/mouse drag-and-drop, move tree scrubber, multi-premove queueing (up to 5 plies), right-click annotation canvas, audio/haptics, seat management, clock-tick interpolation (render-only — never mutates authoritative time), theme switching (`[data-theme]` / `[data-mode=dark]`).
+- `ui.js` — the orchestrator: SSE/poll receiver and diff-based board reconciliation, pointer events touch/mouse drag-and-drop, move tree scrubber, multi-premove queueing (up to 5 plies), right-click annotation canvas, audio/haptics, seat management, clock-tick interpolation (render-only — never mutates authoritative time), theme switching (`[data-theme]` / `[data-mode=dark]`). Split into sibling modules loaded before it: `ui-sound.js` (audio/haptics), `ui-theme.js` (theme switching), `ui-annotations.js` (annotation canvas), `ui-archive.js` (archived-game view).
+- `rating.js` — Glicko-2 rating engine (createPlayer / updateRating / rateMatches / expectedScore / confidenceInterval).
 - `pieces.js` — inline SVG chess pieces (Colin M.L. Burnett cburnett artwork, `CBURNETT-LICENSE.txt`).
-- `stockfish-worker.js` — Web Worker running Lightweight Local Heuristic Engine (PST + material evaluation) over UCI (`uci`, `isready`, `position fen`, `go depth`), multi-PV candidate lines, with Stockfish 17 UCI alias for protocol compatibility.
+- `stockfish-worker.js` — Web Worker running Lightweight Local Heuristic Engine (PST + material evaluation) over UCI (`uci`, `isready`, `position fen`, `go depth`), multi-PV candidate lines, with Stockfish 17 UCI alias for protocol compatibility and an optional WASM bridge (`WasmEngine`) that falls back to the PST engine on failure.
 - `move-review.js` — CAPS-style win-probability accuracy scoring, move classification (Brilliant/Great/Best/Excellent/Good/Inaccuracy/Mistake/Blunder), and blunder puzzle generation (`generateMistakePuzzles`).
 - `ai-coach.js` — plain-English move explanations (`explainMove`) and real-time coaching suggestions on active turn (`getCoachHint`).
 - `game-report.js` — auto post-game narrative report generation (`generatePostGameReport`), accuracy summary, turning point swing analysis, endgame performance, and annotated PGN with NAG glyphs and eval comments.
