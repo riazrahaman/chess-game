@@ -297,6 +297,15 @@ class SqliteStorageAdapter {
         bestmove TEXT,
         created_at INTEGER
       );
+      CREATE TABLE IF NOT EXISTS puzzle_ratings (
+        kind TEXT NOT NULL,
+        id TEXT NOT NULL,
+        rating REAL NOT NULL,
+        rd REAL NOT NULL,
+        vol REAL NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (kind, id)
+      );
     `);
   }
 
@@ -396,6 +405,31 @@ class SqliteStorageAdapter {
     return { fen: row.fen, cp: row.cp, depth: row.depth, mate: row.mate, bestmove: row.bestmove, created_at: row.created_at };
   }
 
+  savePuzzleRating(kind, id, ratingData) {
+    if (!kind || !id || !ratingData) return null;
+    const entry = {
+      kind: String(kind),
+      id: String(id),
+      rating: ratingData.rating,
+      rd: ratingData.rd,
+      vol: ratingData.vol,
+      updated_at: Date.now()
+    };
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO puzzle_ratings (kind, id, rating, rd, vol, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(entry.kind, entry.id, entry.rating, entry.rd, entry.vol, entry.updated_at);
+    return entry;
+  }
+
+  getPuzzleRating(kind, id) {
+    if (!kind || !id) return null;
+    const stmt = this.db.prepare('SELECT * FROM puzzle_ratings WHERE kind = ? AND id = ?');
+    const row = stmt.get(String(kind), String(id));
+    return row ? Object.assign({}, row) : null;
+  }
+
   close() {
     if (this.db) {
       try { this.db.close(); } catch (_) { /* ignore */ }
@@ -411,6 +445,7 @@ class JsonFileStorageAdapter {
     this.filePath = filePath;
     this.games = new Map();
     this.evalCache = new Map();
+    this.puzzleRatings = new Map();
     this._load();
   }
 
@@ -418,6 +453,7 @@ class JsonFileStorageAdapter {
     if (!this.filePath || this.filePath === ':memory:' || !fs) {
       this.games = new Map();
       this.evalCache = new Map();
+      this.puzzleRatings = new Map();
       return;
     }
     try {
@@ -439,11 +475,17 @@ class JsonFileStorageAdapter {
               this.evalCache.set(k, v);
             }
           }
+          if (parsed.puzzleRatings && typeof parsed.puzzleRatings === 'object') {
+            for (const [k, v] of Object.entries(parsed.puzzleRatings)) {
+              this.puzzleRatings.set(k, v);
+            }
+          }
         }
       }
     } catch (_) {
       this.games = new Map();
       this.evalCache = new Map();
+      this.puzzleRatings = new Map();
     }
   }
 
@@ -455,7 +497,11 @@ class JsonFileStorageAdapter {
       for (const [k, v] of this.evalCache) {
         evalCacheObj[k] = v;
       }
-      const payload = JSON.stringify({ games, evalCache: evalCacheObj }, null, 2);
+      const puzzleRatingsObj = {};
+      for (const [k, v] of this.puzzleRatings) {
+        puzzleRatingsObj[k] = v;
+      }
+      const payload = JSON.stringify({ games, evalCache: evalCacheObj, puzzleRatings: puzzleRatingsObj }, null, 2);
       const tempPath = `${this.filePath}.tmp.${Date.now()}`;
       fs.writeFileSync(tempPath, payload, 'utf8');
       fs.renameSync(tempPath, this.filePath);
@@ -532,6 +578,27 @@ class JsonFileStorageAdapter {
     if (!fen) return null;
     const key = fenCacheKey(fen);
     const item = this.evalCache.get(key);
+    return item ? Object.assign({}, item) : null;
+  }
+
+  savePuzzleRating(kind, id, ratingData) {
+    if (!kind || !id || !ratingData) return null;
+    const entry = {
+      kind: String(kind),
+      id: String(id),
+      rating: ratingData.rating,
+      rd: ratingData.rd,
+      vol: ratingData.vol,
+      updated_at: Date.now()
+    };
+    this.puzzleRatings.set(`${entry.kind}:${entry.id}`, entry);
+    this._saveToDisk();
+    return Object.assign({}, entry);
+  }
+
+  getPuzzleRating(kind, id) {
+    if (!kind || !id) return null;
+    const item = this.puzzleRatings.get(`${String(kind)}:${String(id)}`);
     return item ? Object.assign({}, item) : null;
   }
 
@@ -662,6 +729,24 @@ class GameArchive {
     }
   }
 
+  savePuzzleRating(kind, id, ratingData) {
+    if (!this.storage || typeof this.storage.savePuzzleRating !== 'function') return null;
+    try {
+      return this.storage.savePuzzleRating(kind, id, ratingData);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  getPuzzleRating(kind, id) {
+    if (!this.storage || typeof this.storage.getPuzzleRating !== 'function') return null;
+    try {
+      return this.storage.getPuzzleRating(kind, id);
+    } catch (_) {
+      return null;
+    }
+  }
+
   exportPgn(game) {
     return exportPgn(game);
   }
@@ -710,6 +795,8 @@ if (typeof module !== 'undefined' && module.exports) {
     searchGames: (query, options) => getArchive().searchGames(query, options),
     saveEval: (fen, evalData) => getArchive().saveEval(fen, evalData),
     getEval: (fen) => getArchive().getEval(fen),
+    savePuzzleRating: (kind, id, ratingData) => getArchive().savePuzzleRating(kind, id, ratingData),
+    getPuzzleRating: (kind, id) => getArchive().getPuzzleRating(kind, id),
     fenCacheKey,
     exportPgn,
     parsePgn,
