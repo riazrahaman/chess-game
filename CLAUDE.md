@@ -25,7 +25,6 @@ There is no test framework/runner — each `*-selftest.js` file is a standalone 
 node engine-selftest.js              # core engine + referee (159 tests)
 node pieces-selftest.js              # SVG piece rendering (32 tests)
 node security-selftest.js            # CORS, path traversal, body limits (58 tests)
-node draw-selftest.js                # draw/repetition rules (30 tests)
 node differential-selftest.js        # 200 random games vs chess.js (37,800+ plies)
 node p3-multiroom-selftest.js        # multi-room isolation & routing
 node p3-sqlite-selftest.js           # SQLite archive CRUD + PGN import/export (74 tests)
@@ -33,15 +32,19 @@ node p3-seat-selftest.js             # seat tokens, heartbeats & mutation securi
 node t0-draw-flagfall-selftest.js     # draw claims & flag fall timeouts (51 tests)
 node t0-deadcode-selftest.js         # rate limiting, NTP sync & idempotency (13 tests)
 node p2-stockfish-selftest.js        # local heuristic engine & UCI protocol (23 tests)
+node p2-review-selftest.js           # CAPS move-review scoring & classification
 node t1-mobile-visuals-selftest.js   # pointer events, bevel framing & piece shadows (16 tests)
 node p3-social-timecontrol-selftest.js # time controls, chat, rematch & spectator presence (10 tests)
 node c5-ai-bot-selftest.js           # Play vs Computer levels 1-8 bot opponent (10 tests)
+node bot-tactics-selftest.js         # bot tactical strength & opening book
 node c7-ai-puzzles-selftest.js       # blunder puzzle generator & retry mode (6 tests)
 node c2-c4-coach-selftest.js         # why move explanations & coach mode hints (6 tests)
 node c6-ai-report-selftest.js        # auto post-game report & annotated PGN (5 tests)
 node c8-d4-voice-selftest.js         # voice move recognition, audio announcements & blind mode (7 tests)
 node rating-selftest.js              # Glicko-2 rating engine (36 tests)
 ```
+
+Suites not wired into `npm run check`/`npm test` (still runnable standalone, useful for targeted debugging): `draw-selftest.js`, `p1-annotations-selftest.js`, `p1-audio-selftest.js`, `p1-premove-selftest.js`, `p1-scrubber-selftest.js`, `p2-multipv-selftest.js`, `p2-opening-selftest.js`, `p3-lag-selftest.js`, `gate3-selftest.js`, `gate4-selftest.js`, `gate5-selftest.js`. If you add a new feature area's selftest, wire it into both `test:unit` and `lint` in `package.json` (per the checklist below) so it isn't silently orphaned like these.
 
 Selftests write real artifacts (`.referee-state.json`, `.referee-journal.jsonl`, `games.db`) in the repo root and restore them on exit.
 

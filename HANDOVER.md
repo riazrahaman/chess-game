@@ -81,6 +81,11 @@ This document records the operational state of the Chess Game project, including
       - Enforced 100% legal move filtering and checkmate detection (`isKingInCheck`, `isSquareAttacked`) with MVV-LVA move ordering in alpha-beta minimax search.
       - Calibrated difficulty tiers 1–8: Expert (Level 5) through Grandmaster (Level 8) calculate with depths 3–4, zero blunder rates, instant free-piece captures, and mate-in-1 spotting.
       - Unit & integration tests: 11/11 passing (`bot-tactics-selftest.js`).
+  14. `fix-history-ghost-pieces` (History Scrubbing Ghost Piece Cleanup): **DONE**
+      - Fixed `renderBoard` in `ui.js` to systematically remove piece DOM elements from squares where `pieceData` is null (`while (squareDiv.firstChild) squareDiv.removeChild(...)`).
+      - Prevented ghost duplicate pieces (e.g. duplicate Queen on `d8` and `d4`, duplicate Queen on `d1` and `a4`, duplicate Bishop on `c8` and `g4`) when jumping across historical plies.
+      - Synchronized `previousBoard` snapshot in `jumpToPly` to ensure correct board diffing across scrub states.
+      - Added automated regression test in `scripts/test-ui-features.mjs` verifying clean DOM reconcile for `5... Qxd4`.
 
 ---
 

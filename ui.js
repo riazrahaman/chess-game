@@ -637,6 +637,10 @@ function renderBoard(lastMove = null, boardBeforeRender = previousBoard) {
             squareDiv.firstElementChild.dataset.color = color;
           }
         }
+      } else {
+        while (squareDiv.firstChild) {
+          squareDiv.removeChild(squareDiv.firstChild);
+        }
       }
 
       if (selectedSquare === squareId) {
