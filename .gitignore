@@ -5,4 +5,5 @@ opencode.json
 .referee-journal*
 games.db
 .games-archive.json
+*.log
 

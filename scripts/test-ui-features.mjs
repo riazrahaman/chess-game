@@ -141,7 +141,54 @@ async function testUiFeatures() {
   const feedback = await page.locator('#puzzle-feedback').textContent();
   console.log('Puzzle feedback:', feedback);
 
-  // 6. Check console errors
+  // 6. Test History Scrubbing DOM Reconcile (No ghost duplicate pieces on vacated squares like Qxd4)
+  console.log('Testing History Scrubbing DOM Reconcile & Ghost Piece prevention...');
+  // Reset and play moves up to 5... Qxd4
+  await page.evaluate(async () => {
+    await fetch('/api/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  });
+  await page.waitForTimeout(200);
+  const testMoves = ['d2d4', 'd7d5', 'g1f3', 'b8c6', 'c2c4', 'd5c4', 'd1a4', 'c8g4', 'f3e5', 'd8d4'];
+  for (const m of testMoves) {
+    await page.evaluate(async (move) => {
+      await fetch('/api/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ move }) });
+    }, m);
+    await page.waitForTimeout(50);
+  }
+  await page.waitForTimeout(300);
+
+  // Jump to ply 0 then jump to ply 10 (Qxd4)
+  await page.evaluate(() => window.jumpToPly(0));
+  await page.waitForTimeout(150);
+  await page.evaluate(() => window.jumpToPly(10));
+  await page.waitForTimeout(200);
+
+  const ghostCheck = await page.evaluate(() => {
+    const d1 = document.getElementById('d1')?.querySelector('.chess-piece');
+    const a4 = document.getElementById('a4')?.querySelector('.chess-piece');
+    const d8 = document.getElementById('d8')?.querySelector('.chess-piece');
+    const d4 = document.getElementById('d4')?.querySelector('.chess-piece');
+    const c8 = document.getElementById('c8')?.querySelector('.chess-piece');
+    const g4 = document.getElementById('g4')?.querySelector('.chess-piece');
+    return {
+      d1: d1?.getAttribute('data-piece') || null,
+      a4: a4?.getAttribute('data-piece') || null,
+      d8: d8?.getAttribute('data-piece') || null,
+      d4: d4?.getAttribute('data-piece') || null,
+      c8: c8?.getAttribute('data-piece') || null,
+      g4: g4?.getAttribute('data-piece') || null
+    };
+  });
+
+  if (ghostCheck.d1 !== null) throw new Error('Ghost white queen remained on d1 after jumping to ply 10');
+  if (ghostCheck.a4 !== 'white-q') throw new Error('White queen missing on a4 at ply 10');
+  if (ghostCheck.d8 !== null) throw new Error('Ghost black queen remained on d8 after jumping to ply 10 (Qxd4)');
+  if (ghostCheck.d4 !== 'black-q') throw new Error('Black queen missing on d4 at ply 10');
+  if (ghostCheck.c8 !== null) throw new Error('Ghost black bishop remained on c8 after jumping to ply 10');
+  if (ghostCheck.g4 !== 'black-b') throw new Error('Black bishop missing on g4 at ply 10');
+  console.log('✔ Passed: History scrubbing correctly cleans vacated squares without ghost duplicate pieces');
+
+  // 7. Check console errors
   if (consoleErrors.length > 0) {
     throw new Error('Console errors occurred during test:\n' + consoleErrors.join('\n'));
   }
