@@ -87,8 +87,34 @@ async function testUiFeatures() {
   await colorSelect.selectOption('white');
   const selectedColor = await colorSelect.inputValue();
   if (selectedColor !== 'white') throw new Error(`Expected Bot plays White, got ${selectedColor}`);
+
+  // Test New Game in Play vs Computer mode (verifies seat-auth fix for bot play)
+  console.log('Testing New Game with Bot enabled (Seat-Auth Verification)...');
+  await levelSelect.selectOption('7');
+  await colorSelect.selectOption('black');
+  if (!await botToggle.isChecked()) await botToggle.click();
+  await page.waitForTimeout(500);
+
+  // Seat badge should show Playing White
+  const seatBadgeText = await page.locator('#seat-badge').textContent();
+  console.log('Seat badge in bot mode:', seatBadgeText);
+  if (!seatBadgeText.includes('White')) {
+    throw new Error(`Expected seat badge to show Playing White, got: ${seatBadgeText}`);
+  }
+
+  // Click New Game
+  await page.locator('#new-game').click();
+  await page.waitForTimeout(600);
+
+  const statusText = await page.locator('#status').textContent();
+  if (statusText && statusText.includes('Authentication required')) {
+    throw new Error(`New Game failed with authentication error: ${statusText}`);
+  }
+  console.log('✔ Passed: New Game succeeded cleanly with Bot enabled (0 authentication errors)');
+
   // Toggle bot off after verifying configuration
   await botToggle.click();
+  await page.locator('#seat-badge').filter({ hasText: 'Unseated' }).waitFor({ timeout: 5000 });
   console.log('✔ Passed: Play vs computer dropdowns are interactive and configure bot');
 
   // 4. Test Coach Hint
@@ -145,6 +171,7 @@ async function testUiFeatures() {
   console.log('Testing History Scrubbing DOM Reconcile & Ghost Piece prevention...');
   // Reset and play moves up to 5... Qxd4
   await page.evaluate(async () => {
+    if (window.leaveSeat) await window.leaveSeat();
     await fetch('/api/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   });
   await page.waitForTimeout(200);

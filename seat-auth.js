@@ -27,6 +27,7 @@ class SeatAuthManager {
 
   _isExpired(seatInfo) {
     if (!seatInfo) return true;
+    if (seatInfo.isBot) return false;
     return (Date.now() - seatInfo.lastSeen) > SEAT_TIMEOUT_MS;
   }
 
@@ -37,7 +38,8 @@ class SeatAuthManager {
   /**
    * Claims a player seat ('white', 'black', or 'spectator')
    */
-  claimSeat(roomId = 'default', role) {
+  claimSeat(roomId = 'default', role, options = {}) {
+    const isBot = typeof options === 'boolean' ? options : Boolean(options && options.isBot);
     const room = this._getRoom(roomId);
     const now = Date.now();
 
@@ -60,7 +62,8 @@ class SeatAuthManager {
     room[role] = {
       token,
       claimedAt: now,
-      lastSeen: now
+      lastSeen: now,
+      isBot
     };
 
     return { ok: true, role, token, roomId };
@@ -150,8 +153,12 @@ class SeatAuthManager {
     const whiteActive = !!(room.white && !this._isExpired(room.white));
     const blackActive = !!(room.black && !this._isExpired(room.black));
 
-    // Backward compatibility: If neither player seat is occupied, allow open mutation
-    if (!whiteActive && !blackActive) {
+    const humanWhiteActive = whiteActive && !room.white.isBot;
+    const humanBlackActive = blackActive && !room.black.isBot;
+
+    // Backward compatibility & Solo Bot Play:
+    // If neither human player seat is occupied, allow open mutation (resets, undo, draw, resign)
+    if (!humanWhiteActive && !humanBlackActive) {
       return { ok: true, unseated: true };
     }
 

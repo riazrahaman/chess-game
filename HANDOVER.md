@@ -86,6 +86,12 @@ This document records the operational state of the Chess Game project, including
       - Prevented ghost duplicate pieces (e.g. duplicate Queen on `d8` and `d4`, duplicate Queen on `d1` and `a4`, duplicate Bishop on `c8` and `g4`) when jumping across historical plies.
       - Synchronized `previousBoard` snapshot in `jumpToPly` to ensure correct board diffing across scrub states.
       - Added automated regression test in `scripts/test-ui-features.mjs` verifying clean DOM reconcile for `5... Qxd4`.
+  15. `fix-bot-seat-auth-reset` (Bot Play Seat Auth & Unseated Reset): **DONE**
+      - In `seat-auth.js`, differentiated human seats from bot seats (`isBot: true`), allowing open resets and mutations (`/api/reset`, `/api/undo`, `/api/draw`, `/api/resign`) when only the bot is seated.
+      - In `bot-service.js`, marked bot seat reservations as persistent while bot is enabled (`isBot: true`).
+      - In `ui.js`, updated `sendBotConfigUpdate` and `fetchBotConfig` to automatically claim the human player's seat opposite the bot (e.g., Playing White when Bot plays Black), and release it when bot mode is toggled off.
+      - Preserved full multiplayer seat integrity (unauthorized spectators cannot reset or tamper with active human vs human or human vs bot matches).
+      - Unit & integration tests: 44/44 passing (`p3-seat-selftest.js`).
 
 ---
 
@@ -106,7 +112,7 @@ Summary of test results:
 - `draw-selftest.js`: 30/30 passed
 - `p3-multiroom-selftest.js`: 58/58 passed
 - `p3-sqlite-selftest.js`: 74/74 passed
-- `p3-seat-selftest.js`: 41/41 passed
+- `p3-seat-selftest.js`: 44/44 passed
 - `t0-draw-flagfall-selftest.js`: 51/51 passed
 - `t0-deadcode-selftest.js`: 13/13 passed
 - `p2-stockfish-selftest.js`: 58/58 passed

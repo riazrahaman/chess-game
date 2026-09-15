@@ -2401,6 +2401,10 @@ async function fetchBotConfig() {
       const data = await res.json();
       if (data && data.bot) {
         updateBotUI(data.bot);
+        if (data.bot.enabled && !currentSeatRole) {
+          const humanColor = data.bot.color === 'black' ? 'white' : 'black';
+          claimSeat(humanColor);
+        }
       }
     }
   } catch (e) {}
@@ -2457,6 +2461,19 @@ async function sendBotConfigUpdate() {
     if (res.ok) {
       const data = await res.json();
       updateBotUI(data);
+      if (enabled) {
+        const humanColor = color === 'black' ? 'white' : 'black';
+        if (currentSeatRole !== humanColor) {
+          if (currentSeatRole) {
+            await leaveSeat();
+          }
+          await claimSeat(humanColor);
+        }
+      } else {
+        if (currentSeatRole) {
+          await leaveSeat();
+        }
+      }
     }
   } catch (e) {
     console.error('Failed to update bot config', e);
