@@ -61,13 +61,14 @@ class BotService {
     let token = null;
     if (this.seatAuth) {
       // Claim the seat for the bot so human spectators cannot override bot turns
-      const claim = this.seatAuth.claimSeat(roomId, color);
+      const claim = this.seatAuth.claimSeat(roomId, color, { isBot: true });
       if (claim.ok) {
         token = claim.token;
       } else {
         // Seat might already belong to the bot or be open
         const currentSeat = this.seatAuth._getRoom(roomId)[color];
         if (currentSeat && !this.seatAuth._isExpired(currentSeat)) {
+          currentSeat.isBot = true;
           token = currentSeat.token;
         }
       }

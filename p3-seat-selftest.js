@@ -88,6 +88,12 @@ async function main() {
   const reclaim = mgr.claimSeat('room1', 'white');
   assert(reclaim.ok === true, 'White seat successfully reclaimed after release');
 
+  // 9. Bot seat claim and unseated mutation allowance
+  const botClaim = mgr.claimSeat('botroom', 'black', { isBot: true });
+  assert(botClaim.ok === true, 'Bot seat claimed successfully with isBot: true');
+  const botRoomMutation = mgr.validateMutation('botroom', null);
+  assert(botRoomMutation.ok === true && botRoomMutation.unseated === true, 'Unseated player allowed to mutate/reset when only bot is seated');
+
   console.log('\n=== Test Suite 2: HTTP Integration Tests via Server ===');
 
   const server = createServer();
@@ -229,6 +235,15 @@ async function main() {
     // 9. After release (unseated), anyone can reset (backward compatibility)
     const unseatedReset = await request('/api/reset?room=testroom', { method: 'POST' });
     assert(unseatedReset.status === 200, `Unseated room permits reset without token (backward compatibility, got ${unseatedReset.status})`);
+
+    // 10. Room with autonomous bot allows reset without token
+    await request('/api/bot?room=botroom', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: true, level: 3, color: 'black' })
+    });
+    const botReset = await request('/api/reset?room=botroom', { method: 'POST' });
+    assert(botReset.status === 200, `Room with active bot permits reset without token (got ${botReset.status})`);
 
   } finally {
     server.close();
