@@ -34,6 +34,7 @@ const PRECACHE_ASSETS = [
     '/pov-export.js',
     '/embed-viewer.js',
     '/variants.js',
+    '/i18n.js',
     '/ui.js',
   '/manifest.webmanifest',
   '/assets/icon.svg'

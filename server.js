@@ -343,6 +343,7 @@ const ALLOWED_FILES = new Set([
     'pov-export.js',
     'embed-viewer.js',
     'variants.js',
+    'i18n.js',
     'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'
