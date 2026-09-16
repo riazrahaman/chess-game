@@ -230,6 +230,7 @@ const MIME = {
   '.json': 'application/json',
   '.css': 'text/css',
   '.svg': 'image/svg+xml',
+  '.webmanifest': 'application/manifest+json',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
   '.wasm': 'application/wasm'
@@ -268,6 +269,8 @@ const ALLOWED_FILES = new Set([
   'openings-explorer.js',
   'puzzle-repetition.js',
   'eval-graph.js',
+  'manifest.webmanifest',
+  'service-worker.js',
   'CBURNETT-LICENSE.txt'
 ]);
 
