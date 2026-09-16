@@ -326,6 +326,8 @@ const ALLOWED_FILES = new Set([
   'openings-explorer.js',
   'puzzle-repetition.js',
   'eval-graph.js',
+  'masters-db.js',
+  'acpl.js',
   'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'

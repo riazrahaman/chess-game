@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Chess Swarm — Orchestration Brief</title>
+<style>
+  :root {
+    --bg: #0f1218;
+    --panel: #171c26;
+    --panel2: #1e2430;
+    --ink: #e6ebf2;
+    --muted: #8b95a5;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --amber: #d29922;
+    --red: #f85149;
+    --border: #2a3040;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.55;
+    padding: 40px 24px;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.02em; }
+  h2 { font-size: 20px; margin: 32px 0 12px; letter-spacing: -0.01em; }
+  h3 { font-size: 15px; margin: 20px 0 8px; color: var(--accent); }
+  .sub { color: var(--muted); margin: 0 0 28px; font-size: 14px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 22px;
+    margin-bottom: 16px;
+  }
+  .pill {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-right: 6px;
+  }
+  .done { background: rgba(63,185,80,.15); color: var(--green); }
+  .active { background: rgba(210,153,34,.15); color: var(--amber); }
+  .todo { background: rgba(248,81,73,.15); color: var(--red); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; }
+  code {
+    background: var(--panel2);
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 12.5px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+  ul { margin: 6px 0; padding-left: 20px; }
+  li { margin: 3px 0; }
+  .note { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Chess Swarm — Orchestration Brief</h1>
+  <p class="sub">Goal, architecture, and live progress of the multi-agent build&rarr;review&rarr;test loop driving the chess-game repo.</p>
+
+  <div class="card">
+    <h3>Mission</h3>
+    <p>
+      Execute the feature roadmap in <code>RECOMMENDATIONS.md</code> using a continuous
+      <strong>build &rarr; review &rarr; test</strong> loop staffed by <strong>three separate agents</strong>
+      (builder, reviewer, tester), coordinated by an orchestrator. Every task is logged to a Kanban
+      board and tracked on the canvas until it reaches <span class="pill done">DONE</span>.
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>The Loop</h3>
+    <table>
+      <tr><th>Stage</th><th>Owner</th><th>Action</th><th>Kanban</th></tr>
+      <tr><td>1. Claim</td><td>Orchestrator</td><td>Claim task from board</td><td>BACKLOG &rarr; BUILDING</td></tr>
+      <tr><td>2. Build</td><td>Builder</td><td>Implement + selftest + wire package.json</td><td>BUILDING</td></tr>
+      <tr><td>3. Verify</td><td>Orchestrator</td><td>Independent <code>node --check</code> / wiring / Gate-4</td><td>&mdash;</td></tr>
+      <tr><td>4. Review</td><td>Reviewer</td><td>Correctness, Gate-4, coverage &rarr; APPROVE/CHANGES</td><td>IN_REVIEW</td></tr>
+      <tr><td>5. Test</td><td>Tester</td><td><code>npm run check</code> + Gate-4 &rarr; PASS/FAIL</td><td>IN_TEST</td></tr>
+      <tr><td>6. Commit</td><td>Orchestrator</td><td>Commit + flip board</td><td>DONE</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Guiding invariants</h3>
+    <ul>
+      <li><strong>Gate-4:</strong> <code>ui.js</code> (and all new modules) must never call <code>makeMove(</code> or <code>createInitialBoard(</code> — the referee is authoritative.</li>
+      <li>Every feature ships a matching <code>*-selftest.js</code>, wired into <em>both</em> <code>test:unit</code> and <code>lint</code> (grep count = 2).</li>
+      <li>No build step, no framework, no bundler; no external npm deps (bcrypt/passkey forbidden — use <code>crypto.scrypt</code>).</li>
+      <li>Final gate for any change: <code>npm run check</code> exits 0.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>Roadmap progress</h3>
+
+    <h3 style="color:var(--green)">Wave 1 — Credibility (shipped)</h3>
+    <table>
+      <tr><th>Item</th><th>Status</th></tr>
+      <tr><td>X1 Stockfish WASM</td><td><span class="pill done">DONE</span></td></tr>
+      <tr><td>X2 Win-prob logistic curve</td><td><span class="pill done">DONE</span></td></tr>
+      <tr><td>X3 Eval cache (FEN &rarr; SQLite)</td><td><span class="pill done">DONE</span></td></tr>
+      <tr><td>X4 Glicko-2 rating engine</td><td><span class="pill done">DONE</span></td></tr>
+      <tr><td>X5 Split ui.js + ESLint</td><td><span class="pill done">DONE</span></td></tr>
+    </table>
+
+    <h3 style="color:var(--green)">Wave 2 — Retention (shipped)</h3>
+    <table>
+      <tr><th>Item</th><th>Status</th></tr>
+      <tr><td>P1 Lichess puzzle CSV import</td><td><span class="pill done">DONE</span></td></tr>
+      <tr><td>P2 Puzzle Glicko-2 rating loop</td><td><span class="pill done">DONE</span></td></tr>
+      <tr><td>P3 Puzzle Storm + Daily</td><td><span class="pill done">DONE</span></td></tr>
+      <tr><td>P4 Spaced-repetition review</td><td><span class="pill done">DONE</span></td></tr>
+      <tr><td>A2.1 Studies variation tree</td><td><span class="pill done">DONE</span></td></tr>
+      <tr><td>A2.3 Opening explorer</td><td><span class="pill done">DONE</span></td></tr>
+      <tr><td>A2.6 Interactive eval graph</td><td><span class="pill done">DONE</span></td></tr>
+    </table>
+
+    <h3 style="color:var(--green)">Wave 3 — Platform (shipped)</h3>
+    <table>
+      <tr><th>Item</th><th>Status</th></tr>
+      <tr><td>S1 Accounts &amp; profiles</td><td><span class="pill done">DONE</span></td></tr>
+      <tr><td>S2 Ratings &amp; leaderboards</td><td><span class="pill done">DONE</span></td></tr>
+      <tr><td>S3 Lobby &amp; matchmaking</td><td><span class="pill done">DONE</span></td></tr>
+      <tr><td>M1 PWA (manifest + service worker)</td><td><span class="pill done">DONE</span></td></tr>
+      <tr><td>M3 SSE hardening</td><td><span class="pill done">DONE</span></td></tr>
+      <tr><td>M4 Security headers</td><td><span class="pill done">DONE</span></td></tr>
+    </table>
+
+    <h3 style="color:var(--red)">Wave 4 — Breadth (queued)</h3>
+    <table>
+      <tr><th>Item</th><th>Difficulty</th><th>Status</th></tr>
+      <tr><td>G1 Chess960</td><td>Moderate</td><td><span class="pill todo">TODO</span></td></tr>
+      <tr><td>G2 FEN setup</td><td>Moderate</td><td><span class="pill todo">TODO</span></td></tr>
+      <tr><td>G3 Time-control completeness</td><td>Moderate</td><td><span class="pill todo">TODO</span></td></tr>
+      <tr><td>A2.4 Masters whitelist</td><td>Easy</td><td><span class="pill todo">TODO</span></td></tr>
+      <tr><td>A2.5 Tablebase</td><td><strong>Hard</strong> (scope down)</td><td><span class="pill todo">TODO</span></td></tr>
+      <tr><td>A2.7 Report upgrades</td><td>Easy</td><td><span class="pill todo">TODO</span></td></tr>
+      <tr><td>P6 Puzzle racer</td><td>Easy</td><td><span class="pill todo">TODO</span></td></tr>
+      <tr><td>AB1&ndash;3 Accessibility</td><td>Easy</td><td><span class="pill todo">TODO</span></td></tr>
+    </table>
+
+    <h3 style="color:var(--red)">Wave 5 — Bets (queued)</h3>
+    <table>
+      <tr><th>Item</th><th>Difficulty</th><th>Status</th></tr>
+      <tr><td>S4 Arena tournaments</td><td>Moderate</td><td><span class="pill todo">TODO</span></td></tr>
+      <tr><td>S5 Social graph</td><td>Easy</td><td><span class="pill todo">TODO</span></td></tr>
+      <tr><td>S6 Chat</td><td>Easy</td><td><span class="pill todo">TODO</span></td></tr>
+      <tr><td>S7 Correspondence mode</td><td><strong>Hard</strong> (infra)</td><td><span class="pill todo">TODO</span></td></tr>
+      <tr><td>V1 Personality bots</td><td>Easy</td><td><span class="pill todo">TODO</span></td></tr>
+      <tr><td>V2 Annotated-POV exports</td><td>Easy</td><td><span class="pill todo">TODO</span></td></tr>
+      <tr><td>V3 Embed viewer</td><td>Easy</td><td><span class="pill todo">TODO</span></td></tr>
+      <tr><td>V4 Variants</td><td>Moderate</td><td><span class="pill todo">TODO</span></td></tr>
+      <tr><td>M2 i18n</td><td>Easy</td><td><span class="pill todo">TODO</span></td></tr>
+    </table>
+    <p class="note">19 items remaining. Estimate ~5&ndash;6h best case, ~8&ndash;12h realistic (dominated by worker availability, not code difficulty). Hardest: A2.5 tablebase (scope to 3&ndash;4-piece) and S7 correspondence.</p>
+  </div>
+
+  <div class="card">
+    <h3>Tech stack</h3>
+    <ul>
+      <li>Local-first vanilla JS &mdash; no build step, no framework, no bundler.</li>
+      <li>Node.js referee backend (<code>server.js</code> &rarr; <code>referee-service.js</code>) with SSE + JSON snapshot/journal.</li>
+      <li>SQLite archive (<code>node:sqlite</code>) with JSON-file fallback.</li>
+      <li>Plain <code>&lt;script&gt;</code> client modules; CommonJS + <code>window.*</code> fallback everywhere.</li>
+      <li>Zero external runtime deps (crypto is Node built-in).</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>Next up (Wave 4)</h3>
+    <table>
+      <tr><th>Item</th><th>Status</th></tr>
+      <tr><td>Wave 4 &mdash; Breadth (10 items)</td><td><span class="pill todo">QUEUED</span></td></tr>
+      <tr><td>Wave 5 &mdash; Bets (9 items)</td><td><span class="pill todo">QUEUED</span></td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Current state</h3>
+    <ul>
+      <li><strong>Branch:</strong> <code>main</code> (Wave 3 merged).</li>
+      <li><strong>Latest commit:</strong> <code>770e675</code> Merge wave3 (platform: S1-S3, M1, M3, M4) &mdash; pushed to GitHub.</li>
+      <li><strong>Kanban:</strong> <a href="http://localhost:4100" style="color:var(--accent)">http://localhost:4100</a> &mdash; waves 1&ndash;3 all <span class="pill done">DONE</span>.</li>
+      <li><strong>App:</strong> live on canvas at <a href="http://127.0.0.1:39281" style="color:var(--accent)">http://127.0.0.1:39281</a>.</li>
+      <li><strong>Workers:</strong> codex (rate-limited), antigravity (flaky), opencode (last resort) — orchestrator built M3+M4 directly.</li>
+    </ul>
+  </div>
+
+  <p class="note" style="text-align:center; margin-top:28px;">Generated by the orchestrator &middot; chess-game &middot; Waves 1&ndash;3 shipped &middot; last updated <span id="updated">2026-09-16</span></p>
+</div>
+</body>
+</html>
