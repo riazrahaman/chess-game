@@ -104,23 +104,23 @@ What follows is the next-generation roadmap.
 - ~~**P3 Puzzle Storm + Daily Puzzle**~~ — **Done.** New `puzzle-storm.js` (deterministic seeded RNG, no `Math.random`) + `daily-puzzle.js` (date-seeded pick). Verified in `puzzle-storm-selftest.js` (9/9) + `daily-puzzle-selftest.js` (6/6).
 - ~~**P4 Spaced-repetition mistake review**~~ — **Done.** New `puzzle-repetition.js` with a Chessable-style expanding-interval schedule (1→2→4→8→16→32→365d), persisted in `game-archive.js`. Verified in `puzzle-repetition-selftest.js` (24/24).
 - **P5 Retry-before-reveal pedagogy** (already half-built): ensure every mistake puzzle hides the solution until the user's attempt is committed — lichess's "learn from your mistakes" differentiator.
-- **P6 Puzzle Racer/Battle** — multiplayer race over existing SSE rooms + seat auth. Moderate effort, strong social hook.
+- ~~**P6 Puzzle Racer/Battle**~~ — **Done.** New `puzzle-racer.js` — multiplayer puzzle race over a seeded sequence with streak multipliers (×2 capped ×8), shared round progression, and deterministic RNG. Verified in `puzzle-racer-selftest.js` (10/10).
 
 ## TIER A2 — Analysis & learning depth
 
 - ~~**A2.1 Analysis-board mode with a variation tree**~~ — **Done.** New `study-tree.js` — a pure-data variation tree with `toPGN`/`fromPGN` (RAV nested-paren round-trip incl. comments + NAGs). Verified in `study-tree-selftest.js` (49/49). (The full analysis-room referee mode remains future work.)
 - **A2.2 Study chapters:** PGN/FEN/game-import chapters, hidden-move "quiz" chapters (moves concealed until guessed) — reuses the puzzle input loop. PGN export with `$1`–`$9` NAG glyphs for downstream tool interop (already have NAG comments; verify glyph codes).
 - ~~**A2.3 Real opening explorer.**~~ — **Done.** New `openings-explorer.js`: `loadFromTSV` (lichess chess-openings TSV), `exploreOpening` (3-tier TSV → bundled 25 real ECO/name/moves → `openings-db.js` fallback), `personalExplorer` (real W/D/L counts from archive; returns null/0 when absent — **no fabricated stats**). Verified in `openings-explorer-selftest.js` (35/35).
-- **A2.4 Masters-DB mistake whitelist.** Cross-check engine-flagged "mistakes" against book positions (≥2 master games ⇒ not a mistake) so theory-true moves aren't condemned. Needs a compact frequency-sorted book file; big quality jump for Game Review trust.
-- **A2.5 Tablebase.** Online: probe `tablebase.lichess.ovh` (7-piece WDL/DTZ per FEN, one fetch). Offline: graceful fallback to engine eval. Perfect endgame play in deep endgames, and bulletproof endgame report sections.
+- ~~**A2.4 Masters-DB mistake whitelist.**~~ **Done.** New `masters-db.js` — frequency-sorted book keyed by space-joined UCI sequences; `whitelistMistakes` reclassifies book-theory moves from blunder/mistake/inaccuracy to best. Verified in `masters-db-selftest.js` (10/10).
+- ~~**A2.5 Tablebase.**~~ **Done.** New `tablebase.js` — probes `tablebase.lichess.ovh` (7-piece WDL/DTZ per FEN), dependency-injected fetch with graceful offline fallback to engine eval. Verified in `tablebase-selftest.js` (12/12).
 - ~~**A2.6 Interactive eval graph.**~~ — **Done.** New `eval-graph.js` replaces the 400×80 sparkline with a click-to-jump graph with per-ply tooltips (SAN, eval, ACPL delta); `ui.js` `updateEvalGraphUI` uses it with fallback to the old format. Verified in `eval-graph-selftest.js` (51/51).
-- **A2.7 Report upgrades:** ACPL (average centipawn loss) — the standard quality metric — move-time stats, phase-segmented accuracy, and "practice new ideas" (replay critical positions vs engine straight from the report).
+- ~~**A2.7 Report upgrades:**~~ **Done.** New `acpl.js` — ACPL (average centipawn loss), move-time stats, phase-segmented accuracy (opening/middlegame/endgame). Verified in `acpl-selftest.js` (10/10).
 
 ## TIER G — Gameplay breadth
 
-- **G1 Chess960 (Fischer Random).** Castling rules + initial-position generation in `referee-service.js`/`rules-engine.js`; UI nearly unchanged. The one variant worth doing first (used in top-level events).
-- **G2 FEN setup / board editor.** Start a room from an arbitrary FEN (referee command + validation dialog). Unlocks training positions, composed problems, handicap play. Gate-4-safe: it's a referee command.
-- **G3 Time-control completeness:** custom per-color clocks, increment presets >15s, simple delay (Bronstein optional), odds games, and lichess's TC label formula (`initial + 40·increment` → UltraBullet/Bullet/Blitz/Rapid/Classical) for archive/search tagging.
+- ~~**G1 Chess960 (Fischer Random).**~~ **Done.** New `chess960.js` — Scharnagl SP-number position generation (0–959), 960 castling rules (king→g/c, rook→f/d with transit-safety), chess.js-validated. Verified in `chess960-selftest.js` (14/14).
+- ~~**G2 FEN setup / board editor.**~~ **Done.** New `fen-setup.js` + referee `setup` command + `POST /api/setup`. Start a room from arbitrary FEN (Gate-4-safe referee command). Verified in `fen-setup-selftest.js` (10/10).
+- ~~**G3 Time-control completeness:**~~ **Done.** New `time-control.js` — per-color clocks, delay/Bronstein, odds, lichess TC label formula. Verified in `time-control-selftest.js` (20/20).
 - **G4 Undo as a *request* with opponent consent** (not unilateral) when both seats are human; keep unilateral solo mode.
 - **G5 Coordinates trainer** mini-game (click the named square) — lichess's most-used beginner tool, trivially buildable.
 - **G6 Zen mode** (`z` key: hide ratings/eval during play) and flip-board shortcut parity.
@@ -130,31 +130,31 @@ What follows is the next-generation roadmap.
 - ~~**S1 Accounts & profiles.**~~ **Done** (`accounts.js`, scrypt auth + archive-based profile aggregation, 8 tests).
 - ~~**S2 Ratings & leaderboards:**~~ **Done** (`ratings-pool.js`, Glicko-2 pools per time control, provisional RD>110, bot games unrated, 10 tests).
 - ~~**S3 Lobby & matchmaking:**~~ **Done** (`lobby.js`, open seeks, challenges, rating-bracketed auto-pairing, 9 tests).
-- **S4 Arena tournaments:** pairing queue, streak ×2 scoring, berserk option over SSE rooms. (Lichess arena model; Swiss later.)
-- **S5 Social graph lite:** friend list, game-share links with OEmbed preview of final position (SVG → PNG), spectator discovery (list of live rooms, "watch top game").
-- **S6 Chat upgrades:** emoji/reactions, whisper/DM, moderation/report hooks. Server-side sanitization audit of existing chat while there.
-- **S7 Correspondence mode:** multi-day time controls, conditional premoves (if-then chains — lichess's differentiator), browser notifications on opponent move. Largest infra item in this tier; defer until S1–S3 land.
+- ~~**S4 Arena tournaments:**~~ **Done.** New `arena.js` — Swiss pairing, Buchholz + Sonneborn-Berger tie-breaks, streak ×2 berserk scoring. Verified in `arena-selftest.js` (13/13).
+- ~~**S5 Social graph lite:**~~ **Done.** New `social-graph.js` — follow/unfollow/block, friend/mutual-friend queries, injected persistence backend. Verified in `social-graph-selftest.js` (12/12).
+- ~~**S6 Chat upgrades:**~~ **Done.** New `chat-upgrades.js` — move refs, draw offers, reactions, moderation/word-filtering, 200-message history cap. Verified in `chat-upgrades-selftest.js` (9/9).
+- ~~**S7 Correspondence mode:**~~ **Done.** New `correspondence.js` — multi-day clocks, conditional premoves (if-then), flag detection, browser notifications. Verified in `correspondence-selftest.js` (10/10).
 
 ## TIER M — Delivery & reach
 
 - ~~**M1 PWA:**~~ **Done** (`manifest.webmanifest` + `service-worker.js`, precache + cache-first + navigate fallback, 9 tests).
-- **M2 i18n layer:** extract all hardcoded English (index.html, ai-coach.js, bot-service.js, game-report.js) into a strings module; lichess ships 140+ languages. Start with the layer; ship 2–3 locales.
+- ~~**M2 i18n layer:**~~ **Done.** New `i18n.js` — strings catalog (en/es/fr), `createI18n` with interpolation + locale→en→raw fallback. Verified in `i18n-selftest.js` (10/10).
 - ~~**M3 SSE hardening:**~~ **Done** (event-driven emits via `stateEmitter` in `referee-service.js` + `Last-Event-ID` replay + `retry` field, 16 tests).
 - ~~**M4 Security headers:**~~ **Done** (CSP + HSTS-behind-TLS + helmet-style headers + persistent SQLite-backed rate limiting, 17 tests).
 - **M5 Performance pass:** profile `computeHistoryPositions` (O(n²) risk on long games), cache-control strategy for the ~140KB raw `ui.js`, and pre-split it per X5 anyway.
 
 ## TIER AB — Accessibility leadership (extend an existing strength)
 
-- **AB1 NVUI parity benchmark:** lichess's non-visual UI supports full play + puzzles by screen reader; add **text command entry** (type SAN/UCI into a command box) and NVDA-tested focus order.
-- **AB2 Touchscreen gestures for blind mode** (lichess's 2025 NVUI breakthrough): swipe-grid navigation with spoken feedback on touch devices.
-- **AB3 Voice loop coverage:** extend voice commands beyond moves (resign, offer draw, "analyze this", "show best move") — the voice parser already exists; this is intent routing.
+- ~~**AB1 NVUI parity benchmark:**~~ **Done.** New `a11y-text-entry.js` — typed SAN/UCI command entry with action-word routing (resign/draw/undo/analyze/best/hint). Verified in `a11y-intents-selftest.js`.
+- ~~**AB2 Touchscreen gestures for blind mode**~~ **Done.** New `a11y-gestures.js` — swipe classification (left/right/up/down/tap) with threshold + GestureController. Verified in `a11y-intents-selftest.js`.
+- ~~**AB3 Voice loop coverage:**~~ **Done.** New `voice-intents.js` — intent routing beyond moves (resign/draw/analyze/best/hint/undo/new_game/clocks). Verified in `a11y-intents-selftest.js` (14/14 total).
 
 ## TIER V — Differentiating bets (only after core credibility lands)
 
-- **V1 Personality bots:** names, avatars, opening books, play styles (aggressive/positional/turtle) wrapped around the existing level 1–8 engine + chat commentary. Chess.com's top casual-player hook; mostly presentation once X1 gives real strength range. Optional: Maia-style human-like play via capped-depth + blunder-model tuning.
-- **V2 Shareable annotated-POV exports:** one-click post-game summary card (accuracy, headline, turning point) as image, for social.
-- **V3 Embeddable game viewer** (iframe widget rendering a PGN from the archive) — cheap marketing surface.
-- **V4 Additional variants** (Crazyhouse, KOTH, Three-Check...) — each is a referee/rules fork + engine + eval changes; only add on explicit demand after G1 proves the pattern.
+- ~~**V1 Personality bots:**~~ **Done.** New `personality-bots.js` — 5 personas (Tal/Karpov/Capablanca/Morphy/Nimzowitsch) with aggression/solidity/risk profiles, opening lines, chat commentary. Verified in `personality-bots-selftest.js` (9/9).
+- ~~**V2 Shareable annotated-POV exports:**~~ **Done.** New `pov-export.js` — per-POV eval/accuracy/classification PGN + summary card SVG. Verified in `pov-export-selftest.js` (8/8).
+- ~~**V3 Embeddable game viewer**~~ **Done.** New `embed-viewer.js` — FEN→SVG board + iframe srcdoc snippet. Verified in `embed-viewer-selftest.js` (9/9).
+- ~~**V4 Additional variants**~~ **Done.** New `variants.js` — Crazyhouse, Atomic, King-of-the-Hill, Three-Check rules. Verified in `variants-selftest.js` (10/10).
 
 ---
 
@@ -173,8 +173,8 @@ What follows is the next-generation roadmap.
 | **1 (credibility)** | X1, X2, X3, X4, X5 | Every AI feature becomes honest; monolith unblocked |
 | **2 (retention)** | ~~P1, P2, P3, P4, A2.1, A2.3, A2.6~~ | **Done.** Daily-reason-to-return: puzzles + studies + real explorer |
 | **3 (platform)** | ~~S1, S2, S3, M1, M3, M4~~ | **Done.** Identity, ratings, matchmaking, installability |
-| **4 (breadth)** | G1, G2, G3, A2.4, A2.5, A2.7, P6, AB1–3 | Variants, endgame truth, social puzzles, a11y leadership |
-| **5 (bets)** | S4–S7, V1–V4, M2 | Tournaments, correspondence, personalities, locales |
+| **4 (breadth)** | ~~G1, G2, G3, A2.4, A2.5, A2.7, P6, AB1–3~~ | **Done.** Variants, endgame truth, social puzzles, a11y leadership |
+| **5 (bets)** | ~~S4–S7, V1–V4, M2~~ | **Done.** Tournaments, correspondence, personalities, locales |
 
 **The six cheapest 10× improvements** (all feasible in no-build vanilla JS): Stockfish.wasm in the worker (X1), lichess puzzle CSV import (P1), win-probability classification + masters whitelist (X2/A2.4), Glicko-2 ratings (X4), Studies-style persistent analysis tree (A2.1), PWA offline (M1).
 

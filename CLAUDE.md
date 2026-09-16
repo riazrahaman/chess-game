@@ -57,6 +57,23 @@ node lobby-selftest.js               # lobby seeks/challenges/matchmaking (9 tes
 node pwa-selftest.js                 # manifest + service worker structural validation (9 tests)
 node sse-hardening-selftest.js       # event-driven emits + Last-Event-ID replay (16 tests)
 node security-headers-selftest.js    # CSP/HSTS/helmet headers + persistent rate limiting (17 tests)
+node masters-db-selftest.js          # masters-DB mistake whitelist (book-theory reclassification) (10 tests)
+node acpl-selftest.js                # ACPL + move-time stats + phase-segmented accuracy (10 tests)
+node puzzle-racer-selftest.js        # multiplayer puzzle race (streak multipliers, seeded) (10 tests)
+node a11y-intents-selftest.js        # text entry + touch gestures + voice intents (14 tests)
+node chess960-selftest.js            # Fischer Random position gen + castling rules (14 tests)
+node fen-setup-selftest.js           # FEN validation + referee setup command (10 tests)
+node time-control-selftest.js        # per-color clocks, delay/Bronstein, odds, TC labels (20 tests)
+node tablebase-selftest.js           # lichess Syzygy tablebase probe + offline fallback (12 tests)
+node arena-selftest.js               # arena tournaments (Swiss pairing, tie-breaks, berserk) (13 tests)
+node social-graph-selftest.js        # social graph (follow/block/friends) (12 tests)
+node chat-upgrades-selftest.js       # chat upgrades (reactions, moderation, move refs) (9 tests)
+node correspondence-selftest.js      # correspondence mode (day clocks, conditional premoves) (10 tests)
+node personality-bots-selftest.js    # personality bots (5 personas, play styles) (9 tests)
+node pov-export-selftest.js          # annotated-POV PGN export + summary card (8 tests)
+node embed-viewer-selftest.js        # embeddable viewer (FEN→SVG + iframe snippet) (9 tests)
+node variants-selftest.js            # variants (Crazyhouse/Atomic/KOTH/Three-Check) (10 tests)
+node i18n-selftest.js                # i18n layer (en/es/fr catalog + interpolation) (10 tests)
 ```
 
 Suites not wired into `npm run check`/`npm test` (still runnable standalone, useful for targeted debugging): `draw-selftest.js`, `p1-annotations-selftest.js`, `p1-audio-selftest.js`, `p1-premove-selftest.js`, `p1-scrubber-selftest.js`, `p2-multipv-selftest.js`, `p2-opening-selftest.js`, `p3-lag-selftest.js`, `gate3-selftest.js`, `gate4-selftest.js`, `gate5-selftest.js`. If you add a new feature area's selftest, wire it into both `test:unit` and `lint` in `package.json` (per the checklist below) so it isn't silently orphaned like these.
@@ -121,6 +138,23 @@ server.js            HTTP API, static file serving, SSE stream (event-driven emi
 - `ratings-pool.js` — per-time-control Glicko-2 rating pools (provisional `RD>110` handling, bot games explicitly unrated) + leaderboards, persisted via `game-archive.js`.
 - `lobby.js` — lobby seeks/challenges/matchmaking (rating brackets with mutual tolerance, seeded-RNG tie-break, room-id validation).
 - `service-worker.js` — PWA service worker (precache + cache-first GET + navigate fallback) + `manifest.webmanifest`.
+- `masters-db.js` — compact frequency-sorted master opening book; `whitelistMistakes` reclassifies book-theory moves (≥2 master games) from blunder/mistake to best.
+- `acpl.js` — ACPL (average centipawn loss), move-time stats, phase-segmented accuracy (opening/middlegame/endgame).
+- `puzzle-racer.js` — multiplayer puzzle race (seeded sequence, streak multipliers ×2 capped ×8).
+- `a11y-text-entry.js` / `a11y-gestures.js` / `voice-intents.js` — typed command entry, touch swipe gestures, and voice intent routing for accessibility.
+- `chess960.js` — Fischer Random (Chess960) start-position generation (SP 0–959) + castling rules.
+- `fen-setup.js` — FEN parse/validate/canonicalize for the referee `setup` command.
+- `time-control.js` — per-color clocks, delay/Bronstein, odds, lichess TC label formula.
+- `tablebase.js` — lichess Syzygy tablebase probe (7-piece WDL/DTZ) with offline engine-eval fallback.
+- `arena.js` — arena tournaments (Swiss pairing, Buchholz + Sonneborn-Berger tie-breaks, berserk).
+- `social-graph.js` — follow/block/friend relationships with injected persistence backend.
+- `chat-upgrades.js` — chat move refs, draw offers, reactions, moderation, history cap.
+- `correspondence.js` — multi-day clocks, conditional premoves (if-then chains), flag detection.
+- `personality-bots.js` — 5 persona bots (Tal/Karpov/Capablanca/Morphy/Nimzowitsch) with play-style profiles + chat commentary.
+- `pov-export.js` — annotated per-POV PGN export + summary-card SVG.
+- `embed-viewer.js` — FEN→SVG board renderer + iframe embed snippet.
+- `variants.js` — Crazyhouse / Atomic / King-of-the-Hill / Three-Check rules.
+- `i18n.js` — strings catalog (en/es/fr) with interpolation + locale→en→raw fallback.
 
 ### Adding or changing a feature
 
