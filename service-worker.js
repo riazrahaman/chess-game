@@ -23,8 +23,9 @@ const PRECACHE_ASSETS = [
   '/a11y-text-entry.js',
   '/a11y-gestures.js',
   '/voice-intents.js',
-  '/chess960.js',
-  '/ui.js',
+    '/chess960.js',
+    '/time-control.js',
+    '/ui.js',
   '/manifest.webmanifest',
   '/assets/icon.svg'
 ];

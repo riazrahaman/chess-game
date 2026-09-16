@@ -332,8 +332,9 @@ const ALLOWED_FILES = new Set([
   'a11y-text-entry.js',
   'a11y-gestures.js',
   'voice-intents.js',
-  'chess960.js',
-  'manifest.webmanifest',
+    'chess960.js',
+    'time-control.js',
+    'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'
 ]);
