@@ -33,6 +33,7 @@ const PRECACHE_ASSETS = [
     '/personality-bots.js',
     '/pov-export.js',
     '/embed-viewer.js',
+    '/variants.js',
     '/ui.js',
   '/manifest.webmanifest',
   '/assets/icon.svg'
