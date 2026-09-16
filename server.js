@@ -341,6 +341,7 @@ const ALLOWED_FILES = new Set([
     'correspondence.js',
     'personality-bots.js',
     'pov-export.js',
+    'embed-viewer.js',
     'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'
