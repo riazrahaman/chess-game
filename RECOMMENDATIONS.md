@@ -127,9 +127,9 @@ What follows is the next-generation roadmap.
 
 ## TIER S — Social & platform layer (the biggest gap; biggest scope)
 
-- **S1 Accounts & profiles.** Minimal viable identity: local accounts (username + passkey/bcrypt) → per-player pages with game history (archive is already queryable), win-rate-by-opening, accuracy trends. Everything below depends on this.
-- **S2 Ratings & leaderboards:** Glicko-2 (X4) pools per time control; provisional handling (RD>110); bot games explicitly unrated vs the human pool (anti-distortion; lichess fair-play scale shows why pools matter).
-- **S3 Lobby & matchmaking:** open seeks list, challenges, rating-bracketed auto-pairing. Today the only path is "copy room link."
+- ~~**S1 Accounts & profiles.**~~ **Done** (`accounts.js`, scrypt auth + archive-based profile aggregation, 8 tests).
+- ~~**S2 Ratings & leaderboards:**~~ **Done** (`ratings-pool.js`, Glicko-2 pools per time control, provisional RD>110, bot games unrated, 10 tests).
+- ~~**S3 Lobby & matchmaking:**~~ **Done** (`lobby.js`, open seeks, challenges, rating-bracketed auto-pairing, 9 tests).
 - **S4 Arena tournaments:** pairing queue, streak ×2 scoring, berserk option over SSE rooms. (Lichess arena model; Swiss later.)
 - **S5 Social graph lite:** friend list, game-share links with OEmbed preview of final position (SVG → PNG), spectator discovery (list of live rooms, "watch top game").
 - **S6 Chat upgrades:** emoji/reactions, whisper/DM, moderation/report hooks. Server-side sanitization audit of existing chat while there.
@@ -137,10 +137,10 @@ What follows is the next-generation roadmap.
 
 ## TIER M — Delivery & reach
 
-- **M1 PWA:** manifest + service worker (~50 lines + asset list, no build step) + IndexedDB game cache → installable, **full offline play vs bots/puzzles**, "works on a plane." For a local-first app this is home turf; lichess made offline-vs-computer a headline 2025 mobile feature.
+- ~~**M1 PWA:**~~ **Done** (`manifest.webmanifest` + `service-worker.js`, precache + cache-first + navigate fallback, 9 tests).
 - **M2 i18n layer:** extract all hardcoded English (index.html, ai-coach.js, bot-service.js, game-report.js) into a strings module; lichess ships 140+ languages. Start with the layer; ship 2–3 locales.
-- **M3 SSE hardening:** `Last-Event-ID` reconnection + event-driven emits (replace the 250ms fs-watch/hash poll now that the referee knows when state changes). Keep SSE — WebSockets/WebRTC buy nothing for 2-player turn games.
-- **M4 Security headers:** CSP, HSTS (when behind TLS), helmet-style hardening, persistent (SQLite-backed) rate limiting to survive restarts. Today's limits are in-memory and per-process.
+- ~~**M3 SSE hardening:**~~ **Done** (event-driven emits via `stateEmitter` in `referee-service.js` + `Last-Event-ID` replay + `retry` field, 16 tests).
+- ~~**M4 Security headers:**~~ **Done** (CSP + HSTS-behind-TLS + helmet-style headers + persistent SQLite-backed rate limiting, 17 tests).
 - **M5 Performance pass:** profile `computeHistoryPositions` (O(n²) risk on long games), cache-control strategy for the ~140KB raw `ui.js`, and pre-split it per X5 anyway.
 
 ## TIER AB — Accessibility leadership (extend an existing strength)
@@ -172,7 +172,7 @@ What follows is the next-generation roadmap.
 |---|---|---|
 | **1 (credibility)** | X1, X2, X3, X4, X5 | Every AI feature becomes honest; monolith unblocked |
 | **2 (retention)** | ~~P1, P2, P3, P4, A2.1, A2.3, A2.6~~ | **Done.** Daily-reason-to-return: puzzles + studies + real explorer |
-| **3 (platform)** | S1, S2, S3, M1, M3, M4 | Identity, ratings, matchmaking, installability |
+| **3 (platform)** | ~~S1, S2, S3, M1, M3, M4~~ | **Done.** Identity, ratings, matchmaking, installability |
 | **4 (breadth)** | G1, G2, G3, A2.4, A2.5, A2.7, P6, AB1–3 | Variants, endgame truth, social puzzles, a11y leadership |
 | **5 (bets)** | S4–S7, V1–V4, M2 | Tournaments, correspondence, personalities, locales |
 
