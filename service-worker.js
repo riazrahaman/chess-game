@@ -31,6 +31,7 @@ const PRECACHE_ASSETS = [
     '/chat-upgrades.js',
     '/correspondence.js',
     '/personality-bots.js',
+    '/pov-export.js',
     '/ui.js',
   '/manifest.webmanifest',
   '/assets/icon.svg'

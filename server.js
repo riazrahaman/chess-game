@@ -340,6 +340,7 @@ const ALLOWED_FILES = new Set([
     'chat-upgrades.js',
     'correspondence.js',
     'personality-bots.js',
+    'pov-export.js',
     'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'
