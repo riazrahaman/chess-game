@@ -757,7 +757,7 @@ async function runD1SSETransport() {
       const check = () => {
         const frames = sseBuf.split('\n\n');
         for (const frame of frames) {
-          if (frame.startsWith('event: state')) {
+          if (frame.includes('event: state')) {
             const dataLine = frame.split('\n').find(l => l.startsWith('data: '));
             if (dataLine) {
               try {

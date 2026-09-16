@@ -35,6 +35,29 @@ function getAllowedOrigins() {
 const roomSseClients = new Map();
 const roomWatchers = new Map();
 
+// M3: per-room monotonic SSE event id + bounded replay log so clients can
+// reconnect with Last-Event-ID and recover events they missed while offline.
+const SSE_REPLAY_LIMIT = 200;
+const roomSseSeq = new Map();          // roomId -> next id to assign
+const roomSseLog = new Map();          // roomId -> [{id, event, data}]
+
+function nextSseId(roomId) {
+  const cur = roomSseSeq.get(roomId) || 0;
+  const next = cur + 1;
+  roomSseSeq.set(roomId, next);
+  return next;
+}
+
+function appendSseEvent(roomId, id, eventName, data) {
+  let log = roomSseLog.get(roomId);
+  if (!log) {
+    log = [];
+    roomSseLog.set(roomId, log);
+  }
+  log.push({ id, event: eventName, data });
+  if (log.length > SSE_REPLAY_LIMIT) log.splice(0, log.length - SSE_REPLAY_LIMIT);
+}
+
 function extractRoomId(req) {
   let roomId = null;
   try {
@@ -113,11 +136,13 @@ function broadcastRoomStateToSSEClients(roomId = 'default') {
   const state = readRoomStateJson(roomId);
   if (!state) return;
   const data = JSON.stringify(state);
+  const id = nextSseId(roomId);
+  appendSseEvent(roomId, id, 'state', data);
   const clients = roomSseClients.get(roomId);
   if (!clients) return;
   for (const client of Array.from(clients)) {
     try {
-      client.res.write(`event: state\ndata: ${data}\n\n`);
+      client.res.write(`id: ${id}\nevent: state\ndata: ${data}\n\n`);
     } catch (e) {
       removeRoomSSEClient(roomId, client);
     }
@@ -128,9 +153,11 @@ function broadcastRoomEventToSSEClients(roomId = 'default', eventName = 'message
   const clients = roomSseClients.get(roomId);
   if (!clients) return;
   const data = JSON.stringify(payload);
+  const id = nextSseId(roomId);
+  appendSseEvent(roomId, id, eventName, data);
   for (const client of Array.from(clients)) {
     try {
-      client.res.write(`event: ${eventName}\ndata: ${data}\n\n`);
+      client.res.write(`id: ${id}\nevent: ${eventName}\ndata: ${data}\n\n`);
     } catch (e) {
       removeRoomSSEClient(roomId, client);
     }
@@ -145,15 +172,24 @@ function startStateWatcher(roomId = 'default') {
   if (roomWatchers.has(roomId)) return;
   const file = getRoomStateFile(roomId);
   const lastHash = computeRoomStateHash(roomId);
+  // M3: primary path is the referee's event-driven change bus — the referee is
+  // the only writer, so it pushes exactly when state changes (no 250ms poll).
+  // The fs.watchFile fallback remains only for out-of-process edits to the
+  // snapshot file (e.g. an external tool or another server instance).
+  const unsubscribe = referee.onStateChange(({ roomId: changedRoom }) => {
+    if (changedRoom === roomId || changedRoom === 'default' || !changedRoom) {
+      broadcastRoomStateToSSEClients(roomId);
+    }
+  });
   let unwatch;
   try {
     fs.watchFile(file, { interval: SSE_WATCH_INTERVAL_MS }, () => {
       broadcastRoomStateToSSEClients(roomId);
     });
-    unwatch = () => fs.unwatchFile(file);
+    unwatch = () => { unsubscribe(); fs.unwatchFile(file); };
   } catch (e) {
     const intervalId = setInterval(() => broadcastRoomStateToSSEClients(roomId), SSE_WATCH_INTERVAL_MS);
-    unwatch = () => clearInterval(intervalId);
+    unwatch = () => { unsubscribe(); clearInterval(intervalId); };
   }
   roomWatchers.set(roomId, { unwatch, lastHash });
 }
@@ -197,7 +233,24 @@ function handleSSEEndpoint(req, res, roomId = 'default') {
     headers['Vary'] = 'Origin';
   }
   res.writeHead(200, headers);
-  res.write('\n');
+  res.write(`retry: ${Math.max(1000, SSE_HEARTBEAT_MS)}\n`);
+
+  // M3: Last-Event-ID reconnection — replay events the client missed while
+  // disconnected. `0`/absent means "send current snapshot only". Bounded by the
+  // replay log (SSE_REPLAY_LIMIT entries); anything older is unrecoverable.
+  let lastEventId = 0;
+  const rawLastId = req.headers['last-event-id'];
+  if (rawLastId !== undefined) {
+    const n = Number(rawLastId);
+    if (Number.isFinite(n) && n >= 0) lastEventId = n;
+  }
+  const log = roomSseLog.get(roomId) || [];
+  for (const entry of log) {
+    if (entry.id <= lastEventId) continue;
+    try {
+      res.write(`id: ${entry.id}\nevent: ${entry.event}\ndata: ${entry.data}\n\n`);
+    } catch (e) { /* ignore */ }
+  }
 
   const client = { res, heartbeatTimer: null };
   const clients = getClientsForRoom(roomId);
@@ -213,10 +266,14 @@ function handleSSEEndpoint(req, res, roomId = 'default') {
   }, SSE_HEARTBEAT_MS);
 
   // Immediately push the current state so the client doesn't wait for a change.
+  // Only if the client did not already receive a fresher snapshot via replay.
   const state = readRoomStateJson(roomId);
   if (state) {
+    const data = JSON.stringify(state);
     try {
-      res.write(`event: state\ndata: ${JSON.stringify(state)}\n\n`);
+      const id = nextSseId(roomId);
+      appendSseEvent(roomId, id, 'state', data);
+      res.write(`id: ${id}\nevent: state\ndata: ${data}\n\n`);
     } catch (e) { /* ignore */ }
   }
 
@@ -1034,7 +1091,13 @@ module.exports = {
   gameArchive,
   checkRateLimit,
   botService,
-  BOT_LEVELS
+  BOT_LEVELS,
+  getRoomSseLog: (roomId) => roomSseLog.get(roomId) || [],
+  getRoomSseSeq: (roomId) => roomSseSeq.get(roomId) || 0,
+  clearRoomSseState: (roomId) => {
+    roomSseLog.delete(roomId);
+    roomSseSeq.delete(roomId);
+  }
 };
 
 if (require.main === module) {

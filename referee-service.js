@@ -2,6 +2,19 @@ const engine = require('./engine.js');
 const rulesEngine = require('./rules-engine.js');
 const fs = require('fs');
 const path = require('path');
+const { EventEmitter } = require('events');
+
+// M3: event-driven state-change bus. Emitted synchronously whenever the referee
+// mutates state (move/undo/resign/draw/time-control/rematch/reset/timeout). This
+// replaces the server's old 250ms fs-watch/hash poll: the referee is the single
+// authoritative writer, so it can tell the SSE layer exactly when state changes.
+const stateEmitter = new EventEmitter();
+stateEmitter.setMaxListeners(0);
+
+function onStateChange(listener) {
+  stateEmitter.on('change', listener);
+  return () => stateEmitter.removeListener('change', listener);
+}
 
 const DIR = __dirname;
 const STATE_FILE = process.env.CHESS_STATE_FILE || path.join(DIR, '.referee-state.json');
@@ -522,6 +535,7 @@ class RefereeService {
     atomicSaveSnapshot(this.state, this.stateFile);
     try { this._lastSnapshotMtime = fs.statSync(this.stateFile).mtimeMs; } catch (_) {}
     this.revision = this._computeRevision();
+    stateEmitter.emit('change', { roomId: this.roomId, type, revision: this.revision });
   }
 
   _cmdMove(args) {
@@ -779,6 +793,8 @@ module.exports = {
   renderAscii,
   historyStr,
   rebuildState,
+  stateEmitter,
+  onStateChange,
   CLOCK_START_SECONDS,
   CLOCK_INCREMENT_SECONDS,
   MOVE_TIME_COST_SECONDS,
