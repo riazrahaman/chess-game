@@ -338,6 +338,7 @@ const ALLOWED_FILES = new Set([
     'arena.js',
     'social-graph.js',
     'chat-upgrades.js',
+    'correspondence.js',
     'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'

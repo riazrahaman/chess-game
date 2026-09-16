@@ -29,6 +29,7 @@ const PRECACHE_ASSETS = [
     '/arena.js',
     '/social-graph.js',
     '/chat-upgrades.js',
+    '/correspondence.js',
     '/ui.js',
   '/manifest.webmanifest',
   '/assets/icon.svg'
