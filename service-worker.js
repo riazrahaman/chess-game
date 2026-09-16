@@ -19,6 +19,7 @@ const PRECACHE_ASSETS = [
   '/eval-graph.js',
   '/masters-db.js',
   '/acpl.js',
+  '/puzzle-racer.js',
   '/ui.js',
   '/manifest.webmanifest',
   '/assets/icon.svg'
