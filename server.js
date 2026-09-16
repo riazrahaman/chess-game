@@ -35,6 +35,29 @@ function getAllowedOrigins() {
 const roomSseClients = new Map();
 const roomWatchers = new Map();
 
+// M3: per-room monotonic SSE event id + bounded replay log so clients can
+// reconnect with Last-Event-ID and recover events they missed while offline.
+const SSE_REPLAY_LIMIT = 200;
+const roomSseSeq = new Map();          // roomId -> next id to assign
+const roomSseLog = new Map();          // roomId -> [{id, event, data}]
+
+function nextSseId(roomId) {
+  const cur = roomSseSeq.get(roomId) || 0;
+  const next = cur + 1;
+  roomSseSeq.set(roomId, next);
+  return next;
+}
+
+function appendSseEvent(roomId, id, eventName, data) {
+  let log = roomSseLog.get(roomId);
+  if (!log) {
+    log = [];
+    roomSseLog.set(roomId, log);
+  }
+  log.push({ id, event: eventName, data });
+  if (log.length > SSE_REPLAY_LIMIT) log.splice(0, log.length - SSE_REPLAY_LIMIT);
+}
+
 function extractRoomId(req) {
   let roomId = null;
   try {
@@ -113,11 +136,13 @@ function broadcastRoomStateToSSEClients(roomId = 'default') {
   const state = readRoomStateJson(roomId);
   if (!state) return;
   const data = JSON.stringify(state);
+  const id = nextSseId(roomId);
+  appendSseEvent(roomId, id, 'state', data);
   const clients = roomSseClients.get(roomId);
   if (!clients) return;
   for (const client of Array.from(clients)) {
     try {
-      client.res.write(`event: state\ndata: ${data}\n\n`);
+      client.res.write(`id: ${id}\nevent: state\ndata: ${data}\n\n`);
     } catch (e) {
       removeRoomSSEClient(roomId, client);
     }
@@ -128,9 +153,11 @@ function broadcastRoomEventToSSEClients(roomId = 'default', eventName = 'message
   const clients = roomSseClients.get(roomId);
   if (!clients) return;
   const data = JSON.stringify(payload);
+  const id = nextSseId(roomId);
+  appendSseEvent(roomId, id, eventName, data);
   for (const client of Array.from(clients)) {
     try {
-      client.res.write(`event: ${eventName}\ndata: ${data}\n\n`);
+      client.res.write(`id: ${id}\nevent: ${eventName}\ndata: ${data}\n\n`);
     } catch (e) {
       removeRoomSSEClient(roomId, client);
     }
@@ -145,15 +172,24 @@ function startStateWatcher(roomId = 'default') {
   if (roomWatchers.has(roomId)) return;
   const file = getRoomStateFile(roomId);
   const lastHash = computeRoomStateHash(roomId);
+  // M3: primary path is the referee's event-driven change bus — the referee is
+  // the only writer, so it pushes exactly when state changes (no 250ms poll).
+  // The fs.watchFile fallback remains only for out-of-process edits to the
+  // snapshot file (e.g. an external tool or another server instance).
+  const unsubscribe = referee.onStateChange(({ roomId: changedRoom }) => {
+    if (changedRoom === roomId || changedRoom === 'default' || !changedRoom) {
+      broadcastRoomStateToSSEClients(roomId);
+    }
+  });
   let unwatch;
   try {
     fs.watchFile(file, { interval: SSE_WATCH_INTERVAL_MS }, () => {
       broadcastRoomStateToSSEClients(roomId);
     });
-    unwatch = () => fs.unwatchFile(file);
+    unwatch = () => { unsubscribe(); fs.unwatchFile(file); };
   } catch (e) {
     const intervalId = setInterval(() => broadcastRoomStateToSSEClients(roomId), SSE_WATCH_INTERVAL_MS);
-    unwatch = () => clearInterval(intervalId);
+    unwatch = () => { unsubscribe(); clearInterval(intervalId); };
   }
   roomWatchers.set(roomId, { unwatch, lastHash });
 }
@@ -197,7 +233,24 @@ function handleSSEEndpoint(req, res, roomId = 'default') {
     headers['Vary'] = 'Origin';
   }
   res.writeHead(200, headers);
-  res.write('\n');
+  res.write(`retry: ${Math.max(1000, SSE_HEARTBEAT_MS)}\n`);
+
+  // M3: Last-Event-ID reconnection — replay events the client missed while
+  // disconnected. `0`/absent means "send current snapshot only". Bounded by the
+  // replay log (SSE_REPLAY_LIMIT entries); anything older is unrecoverable.
+  let lastEventId = 0;
+  const rawLastId = req.headers['last-event-id'];
+  if (rawLastId !== undefined) {
+    const n = Number(rawLastId);
+    if (Number.isFinite(n) && n >= 0) lastEventId = n;
+  }
+  const log = roomSseLog.get(roomId) || [];
+  for (const entry of log) {
+    if (entry.id <= lastEventId) continue;
+    try {
+      res.write(`id: ${entry.id}\nevent: ${entry.event}\ndata: ${entry.data}\n\n`);
+    } catch (e) { /* ignore */ }
+  }
 
   const client = { res, heartbeatTimer: null };
   const clients = getClientsForRoom(roomId);
@@ -213,10 +266,14 @@ function handleSSEEndpoint(req, res, roomId = 'default') {
   }, SSE_HEARTBEAT_MS);
 
   // Immediately push the current state so the client doesn't wait for a change.
+  // Only if the client did not already receive a fresher snapshot via replay.
   const state = readRoomStateJson(roomId);
   if (state) {
+    const data = JSON.stringify(state);
     try {
-      res.write(`event: state\ndata: ${JSON.stringify(state)}\n\n`);
+      const id = nextSseId(roomId);
+      appendSseEvent(roomId, id, 'state', data);
+      res.write(`id: ${id}\nevent: state\ndata: ${data}\n\n`);
     } catch (e) { /* ignore */ }
   }
 
@@ -230,6 +287,7 @@ const MIME = {
   '.json': 'application/json',
   '.css': 'text/css',
   '.svg': 'image/svg+xml',
+  '.webmanifest': 'application/manifest+json',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
   '.wasm': 'application/wasm'
@@ -258,6 +316,8 @@ const ALLOWED_FILES = new Set([
   'game-report.js',
   'accessibility-voice.js',
   'rating.js',
+  'ratings-pool.js',
+  'lobby.js',
   'puzzle-service.js',
   'puzzle-rating.js',
   'puzzle-storm.js',
@@ -266,12 +326,38 @@ const ALLOWED_FILES = new Set([
   'openings-explorer.js',
   'puzzle-repetition.js',
   'eval-graph.js',
+  'manifest.webmanifest',
+  'service-worker.js',
   'CBURNETT-LICENSE.txt'
 ]);
 
 const rateLimitMap = new Map();
 const RATE_LIMIT_WINDOW_MS = 60000;
 const RATE_LIMIT_MAX_REQUESTS = Number(process.env.CHESS_RATE_LIMIT) || 600;
+
+// M4: persistent (SQLite-backed) rate limiting. Counts are written through the
+// archive so they survive process restarts. An in-memory Map stays as the fast
+// read cache; the archive is the durable source of truth on write.
+function rateLimitKey(ip) {
+  return 'rl:' + (typeof ip === 'string' ? ip : '127.0.0.1');
+}
+
+function loadRateLimit(ip) {
+  const key = rateLimitKey(ip);
+  try {
+    const stored = gameArchive.getRateLimit(key);
+    if (stored && typeof stored.count === 'number' && typeof stored.windowStart === 'number') {
+      return { count: stored.count, resetAt: stored.windowStart + RATE_LIMIT_WINDOW_MS };
+    }
+  } catch (_) { /* archive unavailable */ }
+  return null;
+}
+
+function persistRateLimit(ip, count, windowStart) {
+  try {
+    gameArchive.saveRateLimit(rateLimitKey(ip), { count, windowStart, updatedAt: Date.now() });
+  } catch (_) { /* non-fatal */ }
+}
 
 function checkRateLimit(ip) {
   const now = Date.now();
@@ -280,13 +366,18 @@ function checkRateLimit(ip) {
       if (now > v.resetAt) rateLimitMap.delete(k);
     }
   }
-  const entry = rateLimitMap.get(ip) || { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+  let entry = rateLimitMap.get(ip);
+  if (!entry) {
+    const restored = loadRateLimit(ip);
+    entry = restored && restored.resetAt > now ? restored : { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+  }
   if (now > entry.resetAt) {
     entry.count = 0;
     entry.resetAt = now + RATE_LIMIT_WINDOW_MS;
   }
   entry.count++;
   rateLimitMap.set(ip, entry);
+  persistRateLimit(ip, entry.count, entry.resetAt - RATE_LIMIT_WINDOW_MS);
   return entry.count <= RATE_LIMIT_MAX_REQUESTS;
 }
 
@@ -320,6 +411,45 @@ function checkCors(req, res) {
     res.setHeader('Vary', 'Origin');
   }
   return true;
+}
+
+// M4: helmet-style security headers. HSTS is only emitted when the connection is
+// actually behind TLS (socket.encrypted) or explicitly enabled via CHESS_HSTS=1,
+// so the local plain-HTTP dev server never advertises HSTS incorrectly.
+function isBehindTls(req) {
+  return !!(req.socket && req.socket.encrypted) || process.env.CHESS_HSTS === '1';
+}
+
+function buildCsp() {
+  if (process.env.CHESS_CSP) return process.env.CHESS_CSP;
+  // The app is a no-build-step vanilla JS SPA with one inline <script> (SW reg)
+  // and an inline <style> block, and an optional WebAssembly engine path.
+  return [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "worker-src 'self' blob:",
+    "media-src 'self' blob: data:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+    "form-action 'self'"
+  ].join('; ');
+}
+
+function applySecurityHeaders(req, res) {
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '0');
+  res.setHeader('X-Download-Options', 'noopen');
+  res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+  res.setHeader('Content-Security-Policy', buildCsp());
+  if (isBehindTls(req)) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
 }
 
 function isPathAllowed(reqPath) {
@@ -662,6 +792,7 @@ function createServer() {
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    applySecurityHeaders(req, res);
 
     if (req.method === 'OPTIONS') {
       const origin = req.headers.origin;
@@ -1029,7 +1160,19 @@ module.exports = {
   gameArchive,
   checkRateLimit,
   botService,
-  BOT_LEVELS
+  BOT_LEVELS,
+  applySecurityHeaders,
+  buildCsp,
+  isBehindTls,
+  loadRateLimit,
+  persistRateLimit,
+  rateLimitKey,
+  getRoomSseLog: (roomId) => roomSseLog.get(roomId) || [],
+  getRoomSseSeq: (roomId) => roomSseSeq.get(roomId) || 0,
+  clearRoomSseState: (roomId) => {
+    roomSseLog.delete(roomId);
+    roomSseSeq.delete(roomId);
+  }
 };
 
 if (require.main === module) {

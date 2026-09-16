@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chess UI — Play &amp; study</title>
     <meta name="description" content="A quiet space for chess. Play locally, explore your games, and keep your library on your own machine.">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#333333">
     <base href="/">
     <style>
         /* A6: Theme system — CSS custom properties on :root.
@@ -1184,5 +1186,12 @@
     <script src="ui-archive.js"></script>
     <script src="eval-graph.js"></script>
     <script src="ui.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+            });
+        }
+    </script>
 </body>
 </html>

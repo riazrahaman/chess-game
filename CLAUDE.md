@@ -51,6 +51,12 @@ node puzzle-repetition-selftest.js   # spaced-repetition mistake review (24 test
 node study-tree-selftest.js          # studies variation tree + PGN/RAV round-trip (49 tests)
 node openings-explorer-selftest.js   # real opening explorer (TSV + personal stats) (35 tests)
 node eval-graph-selftest.js          # interactive eval graph click-to-jump (51 tests)
+node accounts-selftest.js            # accounts & profiles (scrypt auth) (8 tests)
+node ratings-pool-selftest.js        # per-time-control Glicko-2 pools & leaderboards (10 tests)
+node lobby-selftest.js               # lobby seeks/challenges/matchmaking (9 tests)
+node pwa-selftest.js                 # manifest + service worker structural validation (9 tests)
+node sse-hardening-selftest.js       # event-driven emits + Last-Event-ID replay (16 tests)
+node security-headers-selftest.js    # CSP/HSTS/helmet headers + persistent rate limiting (17 tests)
 ```
 
 Suites not wired into `npm run check`/`npm test` (still runnable standalone, useful for targeted debugging): `draw-selftest.js`, `p1-annotations-selftest.js`, `p1-audio-selftest.js`, `p1-premove-selftest.js`, `p1-scrubber-selftest.js`, `p2-multipv-selftest.js`, `p2-opening-selftest.js`, `p3-lag-selftest.js`, `gate3-selftest.js`, `gate4-selftest.js`, `gate5-selftest.js`. If you add a new feature area's selftest, wire it into both `test:unit` and `lint` in `package.json` (per the checklist below) so it isn't silently orphaned like these.
@@ -71,7 +77,9 @@ Selftests write real artifacts (`.referee-state.json`, `.referee-journal.jsonl`,
 ### Server-side pipeline
 
 ```
-server.js            HTTP API, static file serving, SSE stream, CORS/security boundary, room routing
+server.js            HTTP API, static file serving, SSE stream (event-driven emits + Last-Event-ID
+                     replay), CORS/security boundary (CSP/HSTS/helmet headers), persistent
+                     SQLite-backed rate limiting, room routing
   └─ referee-service.js   long-lived per-room referee: serialized FIFO command queue,
                           monotonic revision counter, append-only JSONL event journal
                           (.referee-journal.jsonl), atomic JSON snapshot (.referee-state.json,
@@ -84,9 +92,11 @@ server.js            HTTP API, static file serving, SSE stream, CORS/security bo
                           prevents move hijacking and enforces seat ownership on mutations
   └─ bot-service.js      autonomous Play vs Computer bot levels 1-8, search depths 1-4,
                           blunder rates, human delay simulation, and chat commentary
-  └─ game-archive.js     node:sqlite-backed game archive (games.db) with JSON-file fallback
-                          (.games-archive.json) when node:sqlite isn't available; Seven Tag
-                          Roster PGN parsing/export, search, pagination
+   └─ game-archive.js     node:sqlite-backed game archive (games.db) with JSON-file fallback
+                           (.games-archive.json) when node:sqlite isn't available; Seven Tag
+                           Roster PGN parsing/export, search, pagination; also the persistence
+                           backend for eval cache, puzzle ratings/reviews, rating pools, and
+                           persistent rate-limit counts
 ```
 
 ### Client-side (all plain scripts loaded by `index.html`, no bundler)
@@ -107,6 +117,10 @@ server.js            HTTP API, static file serving, SSE stream, CORS/security bo
 - `study-tree.js` — pure-data variation tree with `toPGN`/`fromPGN` RAV round-trip (Studies substrate).
 - `openings-explorer.js` — real opening explorer: lichess TSV import + personal archive stats (no fabricated win-rates).
 - `eval-graph.js` — interactive click-to-jump eval graph with per-ply tooltips (SAN/eval/ACPL delta).
+- `accounts.js` — accounts & profiles (Node `crypto.scrypt` hashing with per-user salt, `timingSafeEqual` verification, `publicAccount()` strips hash/salt, archive-based `playerProfile` aggregation).
+- `ratings-pool.js` — per-time-control Glicko-2 rating pools (provisional `RD>110` handling, bot games explicitly unrated) + leaderboards, persisted via `game-archive.js`.
+- `lobby.js` — lobby seeks/challenges/matchmaking (rating brackets with mutual tolerance, seeded-RNG tie-break, room-id validation).
+- `service-worker.js` — PWA service worker (precache + cache-first GET + navigate fallback) + `manifest.webmanifest`.
 
 ### Adding or changing a feature
 
