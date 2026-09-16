@@ -1,5 +1,6 @@
 const engine = require('./engine.js');
 const rulesEngine = require('./rules-engine.js');
+const timeControlMod = require('./time-control.js');
 const fs = require('fs');
 const path = require('path');
 const { EventEmitter } = require('events');
@@ -84,7 +85,51 @@ function newGame(timeControl) {
     timeControl: tc,
     fen: rulesEngine.boardToFen(board)
   };
-  return s;
+   return s;
+}
+
+// G3: per-color / delay / bronstein / odds time-control helpers. Pure derivations
+// from the time-control.js module; they never touch board state directly.
+function replayClocks(tc, normalized) {
+  if (normalized && normalized.perColor) {
+    return { white: normalized.perColor.white, black: normalized.perColor.black };
+  }
+  var base = normalized && typeof normalized.baseSeconds === 'number' ? normalized.baseSeconds : CLOCK_START_SECONDS;
+  return { white: base, black: base };
+}
+
+function normalizeReplayTc(tc) {
+  if (timeControlMod && typeof timeControlMod.normalize === 'function') {
+    return timeControlMod.normalize(tc);
+   }
+  return {
+    preset: tc.preset || 'custom',
+    baseSeconds: tc.baseSeconds,
+    incrementSeconds: tc.incrementSeconds || 0,
+    name: tc.name || `${Math.floor(tc.baseSeconds / 60)}+${tc.incrementSeconds || 0}`
+   };
+}
+
+function applyTimeControl(self, args) {
+  var tc = (timeControlMod && typeof timeControlMod.normalize === 'function')
+     ? timeControlMod.normalize(args)
+     : {
+        preset: args.preset || 'custom',
+        baseSeconds: (typeof args.baseSeconds === 'number') ? Math.max(10, Math.min(7200, args.baseSeconds)) : CLOCK_START_SECONDS,
+        incrementSeconds: Math.max(0, Math.min(60, args.incrementSeconds || 0)),
+        name: args.name || 'Custom',
+        perColor: { white: CLOCK_START_SECONDS, black: CLOCK_START_SECONDS },
+        delay: 0,
+        bronstein: args.bronstein === true,
+        odds: null
+        };
+  self.timeControl = tc;
+  self.state.timeControl = tc;
+  if (self.state.history.length === 0) {
+    self.state.clocks = replayClocks(tc, tc);
+   }
+  self._journalAndSnapshot('time-control', tc);
+  return { ok: true, timeControl: tc, clocks: self.state.clocks };
 }
 
 function allLegalMoves(board, turn) {
@@ -435,21 +480,16 @@ class RefereeService {
           this.state.drawOffer = null;
         }
       }
-    } else if (entry.type === 'time-control') {
-      const tc = entry.args || {};
-      if (typeof tc.baseSeconds === 'number') {
-        this.timeControl = {
-          preset: tc.preset || 'custom',
-          baseSeconds: tc.baseSeconds,
-          incrementSeconds: tc.incrementSeconds || 0,
-          name: tc.name || `${Math.floor(tc.baseSeconds / 60)}+${tc.incrementSeconds || 0}`
-        };
-        this.state.timeControl = this.timeControl;
-        if (this.state.history.length === 0) {
-          this.state.clocks = { white: tc.baseSeconds, black: tc.baseSeconds };
-        }
-      }
-    } else if (entry.type === 'rematch') {
+      } else if (entry.type === 'time-control') {
+        const tc = entry.args || {};
+        if (typeof tc.baseSeconds === 'number') {
+          this.timeControl = normalizeReplayTc(tc);
+          this.state.timeControl = this.timeControl;
+          if (this.state.history.length === 0) {
+            this.state.clocks = replayClocks(tc, this.timeControl);
+            }
+           }
+        } else if (entry.type === 'rematch') {
       const args = entry.args || {};
       if (args.action === 'offer') {
         this.state.rematchOffer = args.color;
@@ -458,6 +498,35 @@ class RefereeService {
       } else if (args.action === 'accept') {
         this.state.rematchOffer = null;
         this.state = newGame(this.timeControl);
+      }
+    } else if (entry.type === 'setup') {
+      const fen = entry.args && entry.args.fen;
+      if (typeof fen === 'string') {
+        try {
+          const board = rulesEngine.fenToBoard(fen);
+          rulesEngine.create(fen);
+          const tc = this.timeControl || (this.state && this.state.timeControl);
+          const baseSec = (tc && typeof tc.baseSeconds === 'number') ? tc.baseSeconds : CLOCK_START_SECONDS;
+          this.state = {
+            board,
+            history: [],
+            clocks: { white: baseSec, black: baseSec },
+            elapsed: defaultElapsed(),
+            moveStartTs: 0,
+            moveTimestamps: [],
+            gameOver: false,
+            status: 'ongoing',
+            result: null,
+            flagged: null,
+            resigned: null,
+            draw: false,
+            drawReason: null,
+            drawOffer: null,
+            rematchOffer: null,
+            timeControl: tc,
+            fen: rulesEngine.boardToFen(board)
+          };
+        } catch (_) { /* ignore invalid setup on replay */ }
       }
     }
   }
@@ -524,6 +593,7 @@ class RefereeService {
       case 'time-control': return this._cmdSetTimeControl(command.args || {});
       case 'rematch': return this._cmdRematch(command.args || {});
       case 'reset': return this._cmdReset();
+      case 'setup': return this._cmdSetup(command.args || {});
       default: return { ok: false, error: 'unknown command type: ' + command.type, httpStatus: 400 };
     }
   }
@@ -666,24 +736,55 @@ class RefereeService {
     return { ok: true, reset: true };
   }
 
-  _cmdSetTimeControl(args = {}) {
-    if (typeof args.baseSeconds !== 'number') {
-      return { ok: false, error: 'invalid baseSeconds', httpStatus: 400 };
+  _cmdSetup(args = {}) {
+    const fen = (typeof args.fen === 'string' && args.fen.trim()) ? args.fen.trim() : null;
+    if (!fen) {
+      return { ok: false, error: 'missing FEN', httpStatus: 400 };
     }
-    const tc = {
-      preset: args.preset || 'custom',
-      baseSeconds: Math.max(10, Math.min(7200, args.baseSeconds)),
-      incrementSeconds: Math.max(0, Math.min(60, args.incrementSeconds || 0)),
-      name: args.name || `${Math.floor(args.baseSeconds / 60)}+${args.incrementSeconds || 0}`
+    let board;
+    try {
+      board = rulesEngine.fenToBoard(fen);
+    } catch (e) {
+      return { ok: false, error: 'invalid FEN', httpStatus: 400 };
+    }
+    // Validate the FEN through chess.js (rejects illegal/ambiguous positions).
+    let instance;
+    try {
+      instance = rulesEngine.create(fen);
+    } catch (e) {
+      return { ok: false, error: 'invalid FEN', httpStatus: 400 };
+    }
+    if (!instance) {
+      return { ok: false, error: 'invalid FEN', httpStatus: 400 };
+    }
+    const tc = this.timeControl || (this.state && this.state.timeControl);
+    const baseSec = (tc && typeof tc.baseSeconds === 'number') ? tc.baseSeconds : CLOCK_START_SECONDS;
+    this.state = {
+      board,
+      history: [],
+      clocks: { white: baseSec, black: baseSec },
+      elapsed: defaultElapsed(),
+      moveStartTs: 0,
+      moveTimestamps: [],
+      gameOver: false,
+      status: 'ongoing',
+      result: null,
+      flagged: null,
+      resigned: null,
+      draw: false,
+      drawReason: null,
+      drawOffer: null,
+      rematchOffer: null,
+      timeControl: tc,
+      fen: rulesEngine.boardToFen(board)
     };
-    this.timeControl = tc;
-    this.state.timeControl = tc;
-    if (this.state.history.length === 0) {
-      this.state.clocks = { white: tc.baseSeconds, black: tc.baseSeconds };
-    }
-    this._journalAndSnapshot('time-control', tc);
-    return { ok: true, timeControl: tc, clocks: this.state.clocks };
+    this._journalAndSnapshot('setup', { fen });
+    return Object.assign({ ok: true, setup: true, fen: this.state.fen }, stateView(this.state));
   }
+
+   _cmdSetTimeControl(args = {}) {
+    return applyTimeControl(this, args);
+   }
 
   _cmdRematch(args = {}) {
     const action = args.action;

@@ -326,7 +326,25 @@ const ALLOWED_FILES = new Set([
   'openings-explorer.js',
   'puzzle-repetition.js',
   'eval-graph.js',
-  'manifest.webmanifest',
+  'masters-db.js',
+  'acpl.js',
+  'puzzle-racer.js',
+  'a11y-text-entry.js',
+  'a11y-gestures.js',
+  'voice-intents.js',
+    'chess960.js',
+    'time-control.js',
+    'tablebase.js',
+    'arena.js',
+    'social-graph.js',
+    'chat-upgrades.js',
+    'correspondence.js',
+    'personality-bots.js',
+    'pov-export.js',
+    'embed-viewer.js',
+    'variants.js',
+    'i18n.js',
+    'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'
 ]);
@@ -643,6 +661,14 @@ function handleResetEndpoint(req, res, roomId = 'default') {
   }), roomId);
 }
 
+function handleSetupEndpoint(req, res, roomId = 'default') {
+  handleQueueCommand(req, res, 'setup', (parsed) => ({
+    args: { fen: parsed.fen },
+    cmdId: parsed.id !== undefined ? parsed.id : null,
+    expectedRevision: parsed.expectedRevision !== undefined ? Number(parsed.expectedRevision) : undefined
+  }), roomId);
+}
+
 function handleResignEndpoint(req, res, roomId = 'default') {
   const query = new URL(req.url, 'http://127.0.0.1').searchParams;
   const color = query.has('w') ? 'white' : query.has('b') ? 'black' : (query.get('color') || null);
@@ -860,6 +886,10 @@ function createServer() {
       }
       if (req.method === 'POST' && urlPath === '/api/reset') {
         handleResetEndpoint(req, res, roomId);
+        return;
+      }
+      if (req.method === 'POST' && urlPath === '/api/setup') {
+        handleSetupEndpoint(req, res, roomId);
         return;
       }
       if ((req.method === 'GET' || req.method === 'POST') && urlPath === '/api/resign') {
