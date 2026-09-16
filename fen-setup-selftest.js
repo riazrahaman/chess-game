@@ -74,4 +74,42 @@ test('parseFen handles no-castling dash', () => {
   assert(p.castling.black.kingSide === false && p.castling.black.queenSide === false, 'no black castling');
 });
 
-console.log('\nAll ' + passed + ' tests passed successfully!');
+// --- referee `setup` command (authoritative board swap) ---
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const referee = require('./referee-service.js');
+
+async function runRefereeTests() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'g2setup-'));
+  const ref = new referee.RefereeService({ roomId: 'g2-setup', stateFile: path.join(tmp, 's.json'), journalFile: path.join(tmp, 'j.jsonl') });
+
+  const res = await ref.enqueue({ id: 's1', type: 'setup', args: { fen: 'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2' } });
+  assert(res.ok === true, 'setup ok');
+  assert(ref.state.history.length === 0, 'history empty');
+  assert(ref.state.board.pieces.e4.type === 'p' && ref.state.board.pieces.e4.color === 'white', 'e4 white pawn');
+  assert(ref.state.board.pieces.e5.type === 'p' && ref.state.board.pieces.e5.color === 'black', 'e5 black pawn');
+  const m = await ref.enqueue({ id: 's2', type: 'move', args: { move: 'g1f3' } });
+  assert(m.ok === true, 'legal move after setup');
+  assert(m.applied === 'g1f3', 'applied g1f3');
+  passed++;
+  console.log('PASS: referee setup command builds state from FEN');
+
+  const bad = await ref.enqueue({ id: 'b1', type: 'setup', args: { fen: 'not-a-fen' } });
+  assert(bad.ok === false, 'invalid FEN rejected');
+  assert(bad.error === 'invalid FEN', 'invalid FEN error');
+  const missing = await ref.enqueue({ id: 'b2', type: 'setup', args: {} });
+  assert(missing.ok === false, 'missing FEN rejected');
+  passed++;
+  console.log('PASS: referee setup command rejects invalid/missing FEN');
+
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+runRefereeTests().then(() => {
+  console.log('\nAll ' + passed + ' tests passed successfully!');
+}).catch(err => {
+  console.error('FAIL: ' + (err && err.message || err));
+  process.exit(1);
+});

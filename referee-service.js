@@ -459,6 +459,35 @@ class RefereeService {
         this.state.rematchOffer = null;
         this.state = newGame(this.timeControl);
       }
+    } else if (entry.type === 'setup') {
+      const fen = entry.args && entry.args.fen;
+      if (typeof fen === 'string') {
+        try {
+          const board = rulesEngine.fenToBoard(fen);
+          rulesEngine.create(fen);
+          const tc = this.timeControl || (this.state && this.state.timeControl);
+          const baseSec = (tc && typeof tc.baseSeconds === 'number') ? tc.baseSeconds : CLOCK_START_SECONDS;
+          this.state = {
+            board,
+            history: [],
+            clocks: { white: baseSec, black: baseSec },
+            elapsed: defaultElapsed(),
+            moveStartTs: 0,
+            moveTimestamps: [],
+            gameOver: false,
+            status: 'ongoing',
+            result: null,
+            flagged: null,
+            resigned: null,
+            draw: false,
+            drawReason: null,
+            drawOffer: null,
+            rematchOffer: null,
+            timeControl: tc,
+            fen: rulesEngine.boardToFen(board)
+          };
+        } catch (_) { /* ignore invalid setup on replay */ }
+      }
     }
   }
 
@@ -524,6 +553,7 @@ class RefereeService {
       case 'time-control': return this._cmdSetTimeControl(command.args || {});
       case 'rematch': return this._cmdRematch(command.args || {});
       case 'reset': return this._cmdReset();
+      case 'setup': return this._cmdSetup(command.args || {});
       default: return { ok: false, error: 'unknown command type: ' + command.type, httpStatus: 400 };
     }
   }
@@ -664,6 +694,52 @@ class RefereeService {
     this.state = newGame(tc);
     this._journalAndSnapshot('reset', {});
     return { ok: true, reset: true };
+  }
+
+  _cmdSetup(args = {}) {
+    const fen = (typeof args.fen === 'string' && args.fen.trim()) ? args.fen.trim() : null;
+    if (!fen) {
+      return { ok: false, error: 'missing FEN', httpStatus: 400 };
+    }
+    let board;
+    try {
+      board = rulesEngine.fenToBoard(fen);
+    } catch (e) {
+      return { ok: false, error: 'invalid FEN', httpStatus: 400 };
+    }
+    // Validate the FEN through chess.js (rejects illegal/ambiguous positions).
+    let instance;
+    try {
+      instance = rulesEngine.create(fen);
+    } catch (e) {
+      return { ok: false, error: 'invalid FEN', httpStatus: 400 };
+    }
+    if (!instance) {
+      return { ok: false, error: 'invalid FEN', httpStatus: 400 };
+    }
+    const tc = this.timeControl || (this.state && this.state.timeControl);
+    const baseSec = (tc && typeof tc.baseSeconds === 'number') ? tc.baseSeconds : CLOCK_START_SECONDS;
+    this.state = {
+      board,
+      history: [],
+      clocks: { white: baseSec, black: baseSec },
+      elapsed: defaultElapsed(),
+      moveStartTs: 0,
+      moveTimestamps: [],
+      gameOver: false,
+      status: 'ongoing',
+      result: null,
+      flagged: null,
+      resigned: null,
+      draw: false,
+      drawReason: null,
+      drawOffer: null,
+      rematchOffer: null,
+      timeControl: tc,
+      fen: rulesEngine.boardToFen(board)
+    };
+    this._journalAndSnapshot('setup', { fen });
+    return Object.assign({ ok: true, setup: true, fen: this.state.fen }, stateView(this.state));
   }
 
   _cmdSetTimeControl(args = {}) {

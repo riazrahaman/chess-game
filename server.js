@@ -650,6 +650,14 @@ function handleResetEndpoint(req, res, roomId = 'default') {
   }), roomId);
 }
 
+function handleSetupEndpoint(req, res, roomId = 'default') {
+  handleQueueCommand(req, res, 'setup', (parsed) => ({
+    args: { fen: parsed.fen },
+    cmdId: parsed.id !== undefined ? parsed.id : null,
+    expectedRevision: parsed.expectedRevision !== undefined ? Number(parsed.expectedRevision) : undefined
+  }), roomId);
+}
+
 function handleResignEndpoint(req, res, roomId = 'default') {
   const query = new URL(req.url, 'http://127.0.0.1').searchParams;
   const color = query.has('w') ? 'white' : query.has('b') ? 'black' : (query.get('color') || null);
@@ -867,6 +875,10 @@ function createServer() {
       }
       if (req.method === 'POST' && urlPath === '/api/reset') {
         handleResetEndpoint(req, res, roomId);
+        return;
+      }
+      if (req.method === 'POST' && urlPath === '/api/setup') {
+        handleSetupEndpoint(req, res, roomId);
         return;
       }
       if ((req.method === 'GET' || req.method === 'POST') && urlPath === '/api/resign') {
