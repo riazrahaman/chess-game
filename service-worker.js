@@ -20,6 +20,9 @@ const PRECACHE_ASSETS = [
   '/masters-db.js',
   '/acpl.js',
   '/puzzle-racer.js',
+  '/a11y-text-entry.js',
+  '/a11y-gestures.js',
+  '/voice-intents.js',
   '/ui.js',
   '/manifest.webmanifest',
   '/assets/icon.svg'

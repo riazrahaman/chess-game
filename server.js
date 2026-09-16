@@ -329,6 +329,9 @@ const ALLOWED_FILES = new Set([
   'masters-db.js',
   'acpl.js',
   'puzzle-racer.js',
+  'a11y-text-entry.js',
+  'a11y-gestures.js',
+  'voice-intents.js',
   'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'
