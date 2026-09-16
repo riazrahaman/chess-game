@@ -327,6 +327,12 @@ class SqliteStorageAdapter {
         last_reviewed_at INTEGER,
         correct_streak INTEGER NOT NULL DEFAULT 0
       );
+      CREATE TABLE IF NOT EXISTS rate_limits (
+        key TEXT PRIMARY KEY,
+        count INTEGER NOT NULL,
+        window_start INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
     `);
   }
 
@@ -538,6 +544,29 @@ class SqliteStorageAdapter {
     };
   }
 
+  getRateLimit(key) {
+    if (!key) return null;
+    const row = this.db.prepare('SELECT * FROM rate_limits WHERE key = ?').get(String(key));
+    if (!row) return null;
+    return { key: row.key, count: row.count, windowStart: row.window_start, updatedAt: row.updated_at };
+  }
+
+  saveRateLimit(key, record) {
+    if (!key || !record) return null;
+    const entry = {
+      key: String(key),
+      count: Number(record.count) || 0,
+      windowStart: Number(record.windowStart) || 0,
+      updatedAt: Number(record.updatedAt) || Date.now()
+    };
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO rate_limits (key, count, window_start, updated_at)
+      VALUES (?, ?, ?, ?)
+    `);
+    stmt.run(entry.key, entry.count, entry.windowStart, entry.updatedAt);
+    return entry;
+  }
+
   close() {
     if (this.db) {
       try { this.db.close(); } catch (_) { /* ignore */ }
@@ -556,6 +585,7 @@ class JsonFileStorageAdapter {
     this.puzzleRatings = new Map();
     this.ratingsPool = new Map();
     this.puzzleReviews = new Map();
+    this.rateLimits = new Map();
     this._load();
   }
 
@@ -566,6 +596,7 @@ class JsonFileStorageAdapter {
       this.puzzleRatings = new Map();
       this.ratingsPool = new Map();
       this.puzzleReviews = new Map();
+      this.rateLimits = new Map();
       return;
     }
     try {
@@ -602,6 +633,11 @@ class JsonFileStorageAdapter {
               this.puzzleReviews.set(k, v);
             }
           }
+          if (parsed.rateLimits && typeof parsed.rateLimits === 'object') {
+            for (const [k, v] of Object.entries(parsed.rateLimits)) {
+              this.rateLimits.set(k, v);
+            }
+          }
         }
       }
     } catch (_) {
@@ -610,6 +646,7 @@ class JsonFileStorageAdapter {
       this.puzzleRatings = new Map();
       this.ratingsPool = new Map();
       this.puzzleReviews = new Map();
+      this.rateLimits = new Map();
     }
   }
 
@@ -633,7 +670,11 @@ class JsonFileStorageAdapter {
       for (const [k, v] of this.puzzleReviews) {
         puzzleReviewsObj[k] = v;
       }
-      const payload = JSON.stringify({ games, evalCache: evalCacheObj, puzzleRatings: puzzleRatingsObj, ratingsPool: ratingsPoolObj, puzzleReviews: puzzleReviewsObj }, null, 2);
+      const rateLimitsObj = {};
+      for (const [k, v] of this.rateLimits) {
+        rateLimitsObj[k] = v;
+      }
+      const payload = JSON.stringify({ games, evalCache: evalCacheObj, puzzleRatings: puzzleRatingsObj, ratingsPool: ratingsPoolObj, puzzleReviews: puzzleReviewsObj, rateLimits: rateLimitsObj }, null, 2);
       const tempPath = `${this.filePath}.tmp.${Date.now()}`;
       fs.writeFileSync(tempPath, payload, 'utf8');
       fs.renameSync(tempPath, this.filePath);
@@ -777,6 +818,25 @@ class JsonFileStorageAdapter {
     if (!puzzleId) return null;
     const item = this.puzzleReviews.get(String(puzzleId));
     return item ? Object.assign({}, item) : null;
+  }
+
+  getRateLimit(key) {
+    if (!key) return null;
+    const item = this.rateLimits.get(String(key));
+    return item ? Object.assign({}, item) : null;
+  }
+
+  saveRateLimit(key, record) {
+    if (!key || !record) return null;
+    const entry = {
+      key: String(key),
+      count: Number(record.count) || 0,
+      windowStart: Number(record.windowStart) || 0,
+      updatedAt: Number(record.updatedAt) || Date.now()
+    };
+    this.rateLimits.set(entry.key, entry);
+    this._saveToDisk();
+    return Object.assign({}, entry);
   }
 
   close() {
@@ -969,6 +1029,24 @@ class GameArchive {
     }
   }
 
+  getRateLimit(key) {
+    if (!this.storage || typeof this.storage.getRateLimit !== 'function') return null;
+    try {
+      return this.storage.getRateLimit(key);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  saveRateLimit(key, record) {
+    if (!this.storage || typeof this.storage.saveRateLimit !== 'function') return null;
+    try {
+      return this.storage.saveRateLimit(key, record);
+    } catch (_) {
+      return null;
+    }
+  }
+
   exportPgn(game) {
     return exportPgn(game);
   }
@@ -1024,6 +1102,8 @@ if (typeof module !== 'undefined' && module.exports) {
     listPoolRatings: (pool) => getArchive().listPoolRatings(pool),
     savePuzzleReview: (reviewRecord) => getArchive().savePuzzleReview(reviewRecord),
     getPuzzleReview: (puzzleId) => getArchive().getPuzzleReview(puzzleId),
+    saveRateLimit: (key, record) => getArchive().saveRateLimit(key, record),
+    getRateLimit: (key) => getArchive().getRateLimit(key),
     fenCacheKey,
     exportPgn,
     parsePgn,

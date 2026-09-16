@@ -335,6 +335,30 @@ const rateLimitMap = new Map();
 const RATE_LIMIT_WINDOW_MS = 60000;
 const RATE_LIMIT_MAX_REQUESTS = Number(process.env.CHESS_RATE_LIMIT) || 600;
 
+// M4: persistent (SQLite-backed) rate limiting. Counts are written through the
+// archive so they survive process restarts. An in-memory Map stays as the fast
+// read cache; the archive is the durable source of truth on write.
+function rateLimitKey(ip) {
+  return 'rl:' + (typeof ip === 'string' ? ip : '127.0.0.1');
+}
+
+function loadRateLimit(ip) {
+  const key = rateLimitKey(ip);
+  try {
+    const stored = gameArchive.getRateLimit(key);
+    if (stored && typeof stored.count === 'number' && typeof stored.windowStart === 'number') {
+      return { count: stored.count, resetAt: stored.windowStart + RATE_LIMIT_WINDOW_MS };
+    }
+  } catch (_) { /* archive unavailable */ }
+  return null;
+}
+
+function persistRateLimit(ip, count, windowStart) {
+  try {
+    gameArchive.saveRateLimit(rateLimitKey(ip), { count, windowStart, updatedAt: Date.now() });
+  } catch (_) { /* non-fatal */ }
+}
+
 function checkRateLimit(ip) {
   const now = Date.now();
   if (rateLimitMap.size > 2000) {
@@ -342,13 +366,18 @@ function checkRateLimit(ip) {
       if (now > v.resetAt) rateLimitMap.delete(k);
     }
   }
-  const entry = rateLimitMap.get(ip) || { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+  let entry = rateLimitMap.get(ip);
+  if (!entry) {
+    const restored = loadRateLimit(ip);
+    entry = restored && restored.resetAt > now ? restored : { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+  }
   if (now > entry.resetAt) {
     entry.count = 0;
     entry.resetAt = now + RATE_LIMIT_WINDOW_MS;
   }
   entry.count++;
   rateLimitMap.set(ip, entry);
+  persistRateLimit(ip, entry.count, entry.resetAt - RATE_LIMIT_WINDOW_MS);
   return entry.count <= RATE_LIMIT_MAX_REQUESTS;
 }
 
@@ -382,6 +411,45 @@ function checkCors(req, res) {
     res.setHeader('Vary', 'Origin');
   }
   return true;
+}
+
+// M4: helmet-style security headers. HSTS is only emitted when the connection is
+// actually behind TLS (socket.encrypted) or explicitly enabled via CHESS_HSTS=1,
+// so the local plain-HTTP dev server never advertises HSTS incorrectly.
+function isBehindTls(req) {
+  return !!(req.socket && req.socket.encrypted) || process.env.CHESS_HSTS === '1';
+}
+
+function buildCsp() {
+  if (process.env.CHESS_CSP) return process.env.CHESS_CSP;
+  // The app is a no-build-step vanilla JS SPA with one inline <script> (SW reg)
+  // and an inline <style> block, and an optional WebAssembly engine path.
+  return [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "worker-src 'self' blob:",
+    "media-src 'self' blob: data:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+    "form-action 'self'"
+  ].join('; ');
+}
+
+function applySecurityHeaders(req, res) {
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '0');
+  res.setHeader('X-Download-Options', 'noopen');
+  res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+  res.setHeader('Content-Security-Policy', buildCsp());
+  if (isBehindTls(req)) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
 }
 
 function isPathAllowed(reqPath) {
@@ -724,6 +792,7 @@ function createServer() {
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    applySecurityHeaders(req, res);
 
     if (req.method === 'OPTIONS') {
       const origin = req.headers.origin;
@@ -1092,6 +1161,12 @@ module.exports = {
   checkRateLimit,
   botService,
   BOT_LEVELS,
+  applySecurityHeaders,
+  buildCsp,
+  isBehindTls,
+  loadRateLimit,
+  persistRateLimit,
+  rateLimitKey,
   getRoomSseLog: (roomId) => roomSseLog.get(roomId) || [],
   getRoomSseSeq: (roomId) => roomSseSeq.get(roomId) || 0,
   clearRoomSseState: (roomId) => {
