@@ -335,6 +335,7 @@ const ALLOWED_FILES = new Set([
     'chess960.js',
     'time-control.js',
     'tablebase.js',
+    'arena.js',
     'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'

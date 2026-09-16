@@ -26,6 +26,7 @@ const PRECACHE_ASSETS = [
     '/chess960.js',
     '/time-control.js',
     '/tablebase.js',
+    '/arena.js',
     '/ui.js',
   '/manifest.webmanifest',
   '/assets/icon.svg'
