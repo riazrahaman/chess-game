@@ -258,6 +258,7 @@ const ALLOWED_FILES = new Set([
   'game-report.js',
   'accessibility-voice.js',
   'rating.js',
+  'ratings-pool.js',
   'puzzle-service.js',
   'puzzle-rating.js',
   'puzzle-storm.js',

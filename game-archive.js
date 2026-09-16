@@ -306,6 +306,18 @@ class SqliteStorageAdapter {
         updated_at INTEGER NOT NULL,
         PRIMARY KEY (kind, id)
       );
+      CREATE TABLE IF NOT EXISTS ratings_pool (
+        pool TEXT NOT NULL,
+        player_id TEXT NOT NULL,
+        username TEXT NOT NULL,
+        rating REAL NOT NULL,
+        rd REAL NOT NULL,
+        vol REAL NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (pool, player_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_ratings_pool_rank
+        ON ratings_pool(pool, rating DESC);
       CREATE TABLE IF NOT EXISTS puzzle_reviews (
         puzzle_id TEXT PRIMARY KEY,
         next_due_at INTEGER NOT NULL,
@@ -439,6 +451,58 @@ class SqliteStorageAdapter {
     return row ? Object.assign({}, row) : null;
   }
 
+  savePoolRating(pool, playerId, ratingData) {
+    if (!pool || !playerId || !ratingData) return null;
+    const entry = {
+      pool: String(pool),
+      playerId: String(playerId),
+      username: String(ratingData.username || playerId),
+      rating: ratingData.rating,
+      rd: ratingData.rd,
+      vol: ratingData.vol,
+      updatedAt: Date.now()
+    };
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO ratings_pool
+        (pool, player_id, username, rating, rd, vol, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(entry.pool, entry.playerId, entry.username, entry.rating, entry.rd, entry.vol, entry.updatedAt);
+    return entry;
+  }
+
+  getPoolRating(pool, playerId) {
+    if (!pool || !playerId) return null;
+    const row = this.db.prepare(
+      'SELECT * FROM ratings_pool WHERE pool = ? AND player_id = ?'
+    ).get(String(pool), String(playerId));
+    return row ? {
+      pool: row.pool,
+      playerId: row.player_id,
+      username: row.username,
+      rating: row.rating,
+      rd: row.rd,
+      vol: row.vol,
+      updatedAt: row.updated_at
+    } : null;
+  }
+
+  listPoolRatings(pool) {
+    if (!pool) return [];
+    const rows = this.db.prepare(
+      'SELECT * FROM ratings_pool WHERE pool = ? ORDER BY rating DESC, player_id ASC'
+    ).all(String(pool));
+    return rows.map(row => ({
+      pool: row.pool,
+      playerId: row.player_id,
+      username: row.username,
+      rating: row.rating,
+      rd: row.rd,
+      vol: row.vol,
+      updatedAt: row.updated_at
+    }));
+  }
+
   savePuzzleReview(reviewRecord) {
     if (!reviewRecord || !reviewRecord.puzzleId) return null;
     const stmt = this.db.prepare(`
@@ -490,6 +554,7 @@ class JsonFileStorageAdapter {
     this.games = new Map();
     this.evalCache = new Map();
     this.puzzleRatings = new Map();
+    this.ratingsPool = new Map();
     this.puzzleReviews = new Map();
     this._load();
   }
@@ -499,6 +564,7 @@ class JsonFileStorageAdapter {
       this.games = new Map();
       this.evalCache = new Map();
       this.puzzleRatings = new Map();
+      this.ratingsPool = new Map();
       this.puzzleReviews = new Map();
       return;
     }
@@ -526,6 +592,11 @@ class JsonFileStorageAdapter {
               this.puzzleRatings.set(k, v);
             }
           }
+          if (parsed.ratingsPool && typeof parsed.ratingsPool === 'object') {
+            for (const [k, v] of Object.entries(parsed.ratingsPool)) {
+              this.ratingsPool.set(k, v);
+            }
+          }
           if (parsed.puzzleReviews && typeof parsed.puzzleReviews === 'object') {
             for (const [k, v] of Object.entries(parsed.puzzleReviews)) {
               this.puzzleReviews.set(k, v);
@@ -537,6 +608,7 @@ class JsonFileStorageAdapter {
       this.games = new Map();
       this.evalCache = new Map();
       this.puzzleRatings = new Map();
+      this.ratingsPool = new Map();
       this.puzzleReviews = new Map();
     }
   }
@@ -553,11 +625,15 @@ class JsonFileStorageAdapter {
       for (const [k, v] of this.puzzleRatings) {
         puzzleRatingsObj[k] = v;
       }
+      const ratingsPoolObj = {};
+      for (const [k, v] of this.ratingsPool) {
+        ratingsPoolObj[k] = v;
+      }
       const puzzleReviewsObj = {};
       for (const [k, v] of this.puzzleReviews) {
         puzzleReviewsObj[k] = v;
       }
-      const payload = JSON.stringify({ games, evalCache: evalCacheObj, puzzleRatings: puzzleRatingsObj, puzzleReviews: puzzleReviewsObj }, null, 2);
+      const payload = JSON.stringify({ games, evalCache: evalCacheObj, puzzleRatings: puzzleRatingsObj, ratingsPool: ratingsPoolObj, puzzleReviews: puzzleReviewsObj }, null, 2);
       const tempPath = `${this.filePath}.tmp.${Date.now()}`;
       fs.writeFileSync(tempPath, payload, 'utf8');
       fs.renameSync(tempPath, this.filePath);
@@ -656,6 +732,37 @@ class JsonFileStorageAdapter {
     if (!kind || !id) return null;
     const item = this.puzzleRatings.get(`${String(kind)}:${String(id)}`);
     return item ? Object.assign({}, item) : null;
+  }
+
+  savePoolRating(pool, playerId, ratingData) {
+    if (!pool || !playerId || !ratingData) return null;
+    const entry = {
+      pool: String(pool),
+      playerId: String(playerId),
+      username: String(ratingData.username || playerId),
+      rating: ratingData.rating,
+      rd: ratingData.rd,
+      vol: ratingData.vol,
+      updatedAt: Date.now()
+    };
+    this.ratingsPool.set(`${entry.pool}:${entry.playerId}`, entry);
+    this._saveToDisk();
+    return Object.assign({}, entry);
+  }
+
+  getPoolRating(pool, playerId) {
+    if (!pool || !playerId) return null;
+    const item = this.ratingsPool.get(`${String(pool)}:${String(playerId)}`);
+    return item ? Object.assign({}, item) : null;
+  }
+
+  listPoolRatings(pool) {
+    if (!pool) return [];
+    const poolKey = String(pool);
+    return Array.from(this.ratingsPool.values())
+      .filter(item => item.pool === poolKey)
+      .sort((left, right) => right.rating - left.rating || left.playerId.localeCompare(right.playerId))
+      .map(item => Object.assign({}, item));
   }
 
   savePuzzleReview(reviewRecord) {
@@ -817,6 +924,33 @@ class GameArchive {
     }
   }
 
+  savePoolRating(pool, playerId, ratingData) {
+    if (!this.storage || typeof this.storage.savePoolRating !== 'function') return null;
+    try {
+      return this.storage.savePoolRating(pool, playerId, ratingData);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  getPoolRating(pool, playerId) {
+    if (!this.storage || typeof this.storage.getPoolRating !== 'function') return null;
+    try {
+      return this.storage.getPoolRating(pool, playerId);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  listPoolRatings(pool) {
+    if (!this.storage || typeof this.storage.listPoolRatings !== 'function') return [];
+    try {
+      return this.storage.listPoolRatings(pool);
+    } catch (_) {
+      return [];
+    }
+  }
+
   savePuzzleReview(reviewRecord) {
     if (!this.storage || typeof this.storage.savePuzzleReview !== 'function') return null;
     try {
@@ -885,6 +1019,9 @@ if (typeof module !== 'undefined' && module.exports) {
     getEval: (fen) => getArchive().getEval(fen),
     savePuzzleRating: (kind, id, ratingData) => getArchive().savePuzzleRating(kind, id, ratingData),
     getPuzzleRating: (kind, id) => getArchive().getPuzzleRating(kind, id),
+    savePoolRating: (pool, playerId, ratingData) => getArchive().savePoolRating(pool, playerId, ratingData),
+    getPoolRating: (pool, playerId) => getArchive().getPoolRating(pool, playerId),
+    listPoolRatings: (pool) => getArchive().listPoolRatings(pool),
     savePuzzleReview: (reviewRecord) => getArchive().savePuzzleReview(reviewRecord),
     getPuzzleReview: (puzzleId) => getArchive().getPuzzleReview(puzzleId),
     fenCacheKey,
