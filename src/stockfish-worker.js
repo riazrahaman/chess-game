@@ -260,11 +260,13 @@ function generateCandidateMoves(parsedOrFen, options = {}) {
       }
 
       // Captures
+      const epRank = p.color === 'white' ? 5 : 4;
       for (const df of [-1, 1]) {
         const capFile = file + df;
         if (capFile >= 0 && capFile <= 7) {
           const capSq = `${String.fromCharCode(97 + capFile)}${nextRank}`;
-          if (isEnemySquare(capSq) || (parsed.enPassant && capSq === parsed.enPassant)) {
+          const isEp = rank === epRank && Boolean(parsed.enPassant) && capSq === parsed.enPassant;
+          if (isEnemySquare(capSq) || isEp) {
             if (nextRank === promoRank) {
               ['q', 'r', 'b', 'n'].forEach(pr => addMove(sq, capSq, pr));
             } else {
