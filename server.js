@@ -9,7 +9,7 @@ const gameArchive = require('./src/game-archive.js');
 const { BotService, BOT_LEVELS } = require('./src/bot-service.js');
 const botService = new BotService(seatAuthManager);
 
-const PORT = 39281;
+const PORT = process.env.PORT ? Number(process.env.PORT) : (process.env.CHESS_PORT ? Number(process.env.CHESS_PORT) : 39281);
 const DIR = __dirname;
 const STATE_FILE = process.env.CHESS_STATE_FILE || path.join(DIR, '.referee-state.json');
 const SSE_HEARTBEAT_MS = Number(process.env.CHESS_SSE_HEARTBEAT_MS) || 15000;
@@ -17,7 +17,8 @@ const SSE_WATCH_INTERVAL_MS = Number(process.env.CHESS_SSE_WATCH_INTERVAL_MS) ||
 
 const DEFAULT_ALLOWED_ORIGINS = [
   `http://localhost:${PORT}`,
-  `http://127.0.0.1:${PORT}`
+  `http://127.0.0.1:${PORT}`,
+  `http://0.0.0.0:${PORT}`
 ];
 
 function getAllowedOrigins() {
@@ -415,7 +416,17 @@ function sendJsonError(res, statusCode, message) {
 
 function isOriginAllowed(origin) {
   if (!origin) return true;
-  return getAllowedOrigins().includes(origin);
+  const allowed = getAllowedOrigins();
+  if (allowed.includes('*') || allowed.includes(origin)) return true;
+  if (!process.env.CHESS_ALLOWED_ORIGIN) {
+    try {
+      const url = new URL(origin);
+      if (url.hostname.endsWith('.onrender.com') || url.hostname === 'onrender.com') {
+        return true;
+      }
+    } catch (e) {}
+  }
+  return false;
 }
 
 function checkCors(req, res) {
@@ -435,7 +446,9 @@ function checkCors(req, res) {
 // actually behind TLS (socket.encrypted) or explicitly enabled via CHESS_HSTS=1,
 // so the local plain-HTTP dev server never advertises HSTS incorrectly.
 function isBehindTls(req) {
-  return !!(req.socket && req.socket.encrypted) || process.env.CHESS_HSTS === '1';
+  return !!(req && req.socket && req.socket.encrypted) ||
+    !!(req && req.headers && req.headers['x-forwarded-proto'] === 'https') ||
+    process.env.CHESS_HSTS === '1';
 }
 
 function buildCsp() {
@@ -840,7 +853,8 @@ function createServer() {
     if (!checkCors(req, res)) return;
 
     if (isApiRequest(urlPath)) {
-      const clientIp = req.socket.remoteAddress || '127.0.0.1';
+      const forwarded = req.headers && req.headers['x-forwarded-for'];
+      const clientIp = (forwarded ? forwarded.split(',')[0].trim() : (req.socket && req.socket.remoteAddress)) || '127.0.0.1';
       if (!checkRateLimit(clientIp)) {
         sendJsonError(res, 429, 'rate limit exceeded');
         return;
@@ -1206,8 +1220,9 @@ module.exports = {
 };
 
 if (require.main === module) {
-  const port = process.env.CHESS_PORT ? Number(process.env.CHESS_PORT) : PORT;
-  createServer().listen(port, '127.0.0.1', () => {
-    console.log(`Chess server running at http://127.0.0.1:${port}`);
+  const port = process.env.PORT ? Number(process.env.PORT) : (process.env.CHESS_PORT ? Number(process.env.CHESS_PORT) : PORT);
+  const host = process.env.HOST || '0.0.0.0';
+  createServer().listen(port, host, () => {
+    console.log(`Chess server running at http://${host}:${port}`);
   });
 }
