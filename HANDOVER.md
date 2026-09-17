@@ -92,6 +92,11 @@ This document records the operational state of the Chess Game project, including
       - In `ui.js`, updated `sendBotConfigUpdate` and `fetchBotConfig` to automatically claim the human player's seat opposite the bot (e.g., Playing White when Bot plays Black), and release it when bot mode is toggled off.
       - Preserved full multiplayer seat integrity (unauthorized spectators cannot reset or tamper with active human vs human or human vs bot matches).
       - Unit & integration tests: 44/44 passing (`p3-seat-selftest.js`).
+  16. `fix-pawn-en-passant-moves` (Rank-Eligible En Passant Move Generation): **DONE**
+      - Fixed `getPseudoLegalMoves` in `src/engine.js` so pawns can only capture en passant if they stand on rank 5 (White) or rank 4 (Black) and an opposing pawn exists on the adjacent target file.
+      - Hardened `makeMove` and `isMoveCapture` in `src/engine.js`, as well as `src/stockfish-worker.js`, to strictly require rank 5/4 for en passant execution.
+      - Fixed phantom diagonal move options onto empty en passant squares (e.g. `e2 -> f3` after `f2-f4`).
+      - Unit & integration tests: 164/164 passing (`test/engine-selftest.js`).
 
 ---
 
