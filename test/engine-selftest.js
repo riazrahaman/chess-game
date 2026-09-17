@@ -314,6 +314,22 @@ assert(afterEP.pieces['e5'] === null, 'Square e5 is now empty');
 let epExpiredBoard = makeMove(epBoard, 'h2', 'h3'); // white plays another move instead
 assert(epExpiredBoard.enPassant === null, 'En passant flag clears after another move');
 
+// Regression: Pawn on rank 2 cannot capture en passant onto rank 3
+let epRank2Board = createInitialBoard();
+epRank2Board = makeMove(epRank2Board, 'f2', 'f4'); // white f4 sets enPassant to f3
+assert(epRank2Board.enPassant === 'f3', 'En passant square is f3 after f2-f4');
+const e2PawnMoves = getLegalMoves(epRank2Board, 'e2', 'white');
+assert(!e2PawnMoves.includes('f3'), 'White pawn on e2 CANNOT capture diagonally to f3 en passant');
+assert(e2PawnMoves.includes('e3') && e2PawnMoves.includes('e4'), 'White pawn on e2 only moves forward to e3 and e4');
+
+// Regression: Pawn on rank 7 cannot capture en passant onto rank 6
+let epRank7Board = createInitialBoard();
+epRank7Board = makeMove(epRank7Board, 'e2', 'e4');
+epRank7Board = makeMove(epRank7Board, 'f7', 'f5'); // black f5 sets enPassant to f6
+assert(epRank7Board.enPassant === 'f6', 'En passant square is f6 after f7-f5');
+const e7PawnMoves = getLegalMoves(epRank7Board, 'e7', 'black');
+assert(!e7PawnMoves.includes('f6'), 'Black pawn on e7 CANNOT capture diagonally to f6 en passant');
+
 // 10. Pawn Promotion Tests
 let promoBoard = createInitialBoard();
 for (const sq in promoBoard.pieces) promoBoard.pieces[sq] = null;

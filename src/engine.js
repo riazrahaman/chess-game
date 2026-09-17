@@ -272,6 +272,7 @@ function getPseudoLegalMoves(board, square, color) {
     }
 
     // Pawn diagonal captures (including en passant)
+    const canEnPassant = Boolean(board.enPassant) && (r === (piece.color === 'white' ? 4 : 3));
     for (const df of [-1, 1]) {
       const capF = f + df;
       if (isValidCoords(capF, nextR)) {
@@ -279,8 +280,11 @@ function getPseudoLegalMoves(board, square, color) {
         const targetPiece = board.pieces?.[destSq];
         if (targetPiece && targetPiece.color === opponent) {
           moves.push(destSq);
-        } else if (board.enPassant === destSq) {
-          moves.push(destSq);
+        } else if (canEnPassant && board.enPassant === destSq) {
+          const capturedPawn = board.pieces?.[toSquare(capF, r)];
+          if (capturedPawn && capturedPawn.type === 'p' && capturedPawn.color === opponent) {
+            moves.push(destSq);
+          }
         }
       }
     }
@@ -462,7 +466,8 @@ function makeMove(board, from, to, promotion = 'q') {
   let isCapture = newBoard.pieces[to] !== null;
 
   // 1. En Passant capture execution
-  if (pieceType === 'p' && to === board.enPassant && fromFile !== toFile && !newBoard.pieces[to]) {
+  const expectedEpRank = pieceColor === 'white' ? '5' : '4';
+  if (pieceType === 'p' && to === board.enPassant && fromFile !== toFile && fromRank === expectedEpRank && !newBoard.pieces[to]) {
     const capturedPawnSquare = `${toFile}${fromRank}`;
     newBoard.pieces[capturedPawnSquare] = null;
     isCapture = true;
@@ -686,8 +691,9 @@ function moveToSan(board, moveStr) {
   }
 
   const destinationPiece = board.pieces[to];
+  const expectedEpRank = piece.color === 'white' ? '5' : '4';
   const capture = Boolean(destinationPiece) ||
-    (piece.type === 'p' && board.enPassant === to && !destinationPiece);
+    (piece.type === 'p' && from[1] === expectedEpRank && board.enPassant === to && !destinationPiece);
   const letters = { k: 'K', q: 'Q', r: 'R', b: 'B', n: 'N' };
   let san = piece.type === 'p' ? '' : letters[piece.type];
 
