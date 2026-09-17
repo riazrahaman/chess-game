@@ -112,6 +112,12 @@ Open `http://127.0.0.1:39281` in your browser to play.
 
 ---
 
+## Repository Layout
+
+- `src/` — all source modules (referee, rules engine, game archive, bot, engine worker, UI, and every feature module).
+- `test/` — all `*-selftest.js` suites (run with `node test/<name>-selftest.js`).
+- Repo root — `server.js` (entrypoint), `index.html`, `manifest.webmanifest`, `service-worker.js` (kept at root for scope `/`), plus `docs/`, `scripts/`, `assets/`.
+
 ## Test Suites & Quality Verification
 
 Run the complete test suite:
@@ -122,79 +128,79 @@ npm test
 Or run individual verification suites:
 ```bash
 # Core engine, pieces & security
-node engine-selftest.js
-node pieces-selftest.js
-node security-selftest.js
+node test/engine-selftest.js
+node test/pieces-selftest.js
+node test/security-selftest.js
 
 # Phase 3 Multi-Room, SQLite & Seat Auth
-node p3-multiroom-selftest.js
-node p3-sqlite-selftest.js
-node p3-seat-selftest.js
+node test/p3-multiroom-selftest.js
+node test/p3-sqlite-selftest.js
+node test/p3-seat-selftest.js
 
 # Tier 0 Draw Rules, Flag Fall & Dead-Code
-node t0-draw-flagfall-selftest.js
-node t0-deadcode-selftest.js
+node test/t0-draw-flagfall-selftest.js
+node test/t0-deadcode-selftest.js
 
 # Engine & Mobile Visuals
-node p2-stockfish-selftest.js
-node t1-mobile-visuals-selftest.js
+node test/p2-stockfish-selftest.js
+node test/t1-mobile-visuals-selftest.js
 
 # Social & Time Controls
-node p3-social-timecontrol-selftest.js
+node test/p3-social-timecontrol-selftest.js
 
 # AI Features (Bot, Puzzles, Coach, Report, Voice/Accessibility)
-node c5-ai-bot-selftest.js
-node c7-ai-puzzles-selftest.js
-node c2-c4-coach-selftest.js
-node c6-ai-report-selftest.js
-node c8-d4-voice-selftest.js
+node test/c5-ai-bot-selftest.js
+node test/c7-ai-puzzles-selftest.js
+node test/c2-c4-coach-selftest.js
+node test/c6-ai-report-selftest.js
+node test/c8-d4-voice-selftest.js
 
 # Differential Engine Verification (200 random games vs chess.js, 37,800+ plies)
-node differential-selftest.js
+node test/differential-selftest.js
 
 # Rating Engine
-node rating-selftest.js
+node test/rating-selftest.js
 
 # Puzzles & Training
-node puzzle-service-selftest.js
-node puzzle-rating-selftest.js
-node puzzle-storm-selftest.js
-node daily-puzzle-selftest.js
-node puzzle-repetition-selftest.js
-node study-tree-selftest.js
-node openings-explorer-selftest.js
-node eval-graph-selftest.js
-node puzzle-racer-selftest.js
+node test/puzzle-service-selftest.js
+node test/puzzle-rating-selftest.js
+node test/puzzle-storm-selftest.js
+node test/daily-puzzle-selftest.js
+node test/puzzle-repetition-selftest.js
+node test/study-tree-selftest.js
+node test/openings-explorer-selftest.js
+node test/eval-graph-selftest.js
+node test/puzzle-racer-selftest.js
 
 # Accounts, Ratings & Matchmaking
-node accounts-selftest.js
-node ratings-pool-selftest.js
-node lobby-selftest.js
-node arena-selftest.js
+node test/accounts-selftest.js
+node test/ratings-pool-selftest.js
+node test/lobby-selftest.js
+node test/arena-selftest.js
 
 # Platform (PWA, SSE, Security)
-node pwa-selftest.js
-node sse-hardening-selftest.js
-node security-headers-selftest.js
+node test/pwa-selftest.js
+node test/sse-hardening-selftest.js
+node test/security-headers-selftest.js
 
 # Breadth (Analysis, Accessibility, Game Modes)
-node masters-db-selftest.js
-node acpl-selftest.js
-node a11y-intents-selftest.js
-node chess960-selftest.js
-node fen-setup-selftest.js
-node time-control-selftest.js
-node tablebase-selftest.js
+node test/masters-db-selftest.js
+node test/acpl-selftest.js
+node test/a11y-intents-selftest.js
+node test/chess960-selftest.js
+node test/fen-setup-selftest.js
+node test/time-control-selftest.js
+node test/tablebase-selftest.js
 
 # Bets (Social, Variants, i18n)
-node social-graph-selftest.js
-node chat-upgrades-selftest.js
-node correspondence-selftest.js
-node personality-bots-selftest.js
-node pov-export-selftest.js
-node embed-viewer-selftest.js
-node variants-selftest.js
-node i18n-selftest.js
+node test/social-graph-selftest.js
+node test/chat-upgrades-selftest.js
+node test/correspondence-selftest.js
+node test/personality-bots-selftest.js
+node test/pov-export-selftest.js
+node test/embed-viewer-selftest.js
+node test/variants-selftest.js
+node test/i18n-selftest.js
 ```
 
 ---

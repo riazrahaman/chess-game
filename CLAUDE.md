@@ -6,6 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A local-first, vanilla-JS chess app with an authoritative Node.js referee backend, a Lightweight Local Heuristic Engine analysis worker (with Stockfish 17 UCI protocol compatibility), AI bot opponents, AI coach & move explanations, mistake puzzle generator, post-game prose reports, voice move recognition, blind accessibility mode, and multi-room multiplayer over SSE. No build step, no framework, no bundler — plain `<script>` files served directly by `server.js`.
 
+## Repository layout
+
+- `src/` — all source modules (referee-service, rules-engine, engine, game-archive, bot-service, seat-auth, stockfish-worker, ui.js + its sibling modules, and every feature module). `referee-helper.cjs` also lives here.
+- `test/` — all `*-selftest.js` suites (run with `node test/<name>-selftest.js`).
+- Repo root — `server.js` (entrypoint), `index.html`, `manifest.webmanifest`, `service-worker.js` (must stay at root for scope `/`), `CBURNETT-LICENSE.txt`, `package.json`, `eslint.config.js`, plus `docs/`, `scripts/`, `assets/`.
+
+Internal `require()` calls are relative (e.g. `require('./rules-engine.js')` inside `src/`), so they remain correct because all modules live together in `src/`. `server.js` requires via `./src/<name>.js`; selftests require via `../src/<name>.js`. Browser-side static serving resolves against `src/` (script `src="src/<name>.js"`), and `server.js`'s `ALLOWED_FILES` lists `src/<name>.js` entries.
+
 ## Commands
 
 ```bash
@@ -23,57 +31,57 @@ npm run check                # lint + test:unit
 There is no test framework/runner — each `*-selftest.js` file is a standalone Node script with its own assertions that exits non-zero on failure. Run any single suite directly:
 
 ```bash
-node engine-selftest.js              # core engine + referee (159 tests)
-node pieces-selftest.js              # SVG piece rendering (32 tests)
-node security-selftest.js            # CORS, path traversal, body limits (58 tests)
-node differential-selftest.js        # 200 random games vs chess.js (37,800+ plies)
-node p3-multiroom-selftest.js        # multi-room isolation & routing
-node p3-sqlite-selftest.js           # SQLite archive CRUD + PGN import/export + eval cache (101 tests)
-node p3-seat-selftest.js             # seat tokens, heartbeats & mutation security (41 tests)
-node t0-draw-flagfall-selftest.js     # draw claims & flag fall timeouts (51 tests)
-node t0-deadcode-selftest.js         # rate limiting, NTP sync, idempotency & Gate-4 module checks (21 tests)
-node p2-stockfish-selftest.js        # local heuristic engine, WASM bridge & UCI protocol (58 tests)
-node p2-review-selftest.js           # win-probability logistic curve & move classification (51 tests)
-node rating-selftest.js              # Glicko-2 rating engine (36 tests)
-node t1-mobile-visuals-selftest.js   # pointer events, bevel framing & piece shadows (16 tests)
-node p3-social-timecontrol-selftest.js # time controls, chat, rematch & spectator presence (10 tests)
-node c5-ai-bot-selftest.js           # Play vs Computer levels 1-8 bot opponent (10 tests)
-node bot-tactics-selftest.js         # bot tactical strength & opening book
-node c7-ai-puzzles-selftest.js       # blunder puzzle generator & retry mode (6 tests)
-node c2-c4-coach-selftest.js         # why move explanations & coach mode hints (6 tests)
-node c6-ai-report-selftest.js        # auto post-game report & annotated PGN (5 tests)
-node c8-d4-voice-selftest.js         # voice move recognition, audio announcements & blind mode (7 tests)
-node puzzle-service-selftest.js      # lichess puzzle CSV import + UCI->SAN (11 tests)
-node puzzle-rating-selftest.js       # puzzle Glicko-2 rating loop (9 tests)
-node puzzle-storm-selftest.js        # puzzle storm + seeded RNG (9 tests)
-node daily-puzzle-selftest.js        # daily puzzle date-seeded pick (6 tests)
-node puzzle-repetition-selftest.js   # spaced-repetition mistake review (24 tests)
-node study-tree-selftest.js          # studies variation tree + PGN/RAV round-trip (49 tests)
-node openings-explorer-selftest.js   # real opening explorer (TSV + personal stats) (35 tests)
-node eval-graph-selftest.js          # interactive eval graph click-to-jump (51 tests)
-node accounts-selftest.js            # accounts & profiles (scrypt auth) (8 tests)
-node ratings-pool-selftest.js        # per-time-control Glicko-2 pools & leaderboards (10 tests)
-node lobby-selftest.js               # lobby seeks/challenges/matchmaking (9 tests)
-node pwa-selftest.js                 # manifest + service worker structural validation (9 tests)
-node sse-hardening-selftest.js       # event-driven emits + Last-Event-ID replay (16 tests)
-node security-headers-selftest.js    # CSP/HSTS/helmet headers + persistent rate limiting (17 tests)
-node masters-db-selftest.js          # masters-DB mistake whitelist (book-theory reclassification) (10 tests)
-node acpl-selftest.js                # ACPL + move-time stats + phase-segmented accuracy (10 tests)
-node puzzle-racer-selftest.js        # multiplayer puzzle race (streak multipliers, seeded) (10 tests)
-node a11y-intents-selftest.js        # text entry + touch gestures + voice intents (14 tests)
-node chess960-selftest.js            # Fischer Random position gen + castling rules (14 tests)
-node fen-setup-selftest.js           # FEN validation + referee setup command (10 tests)
-node time-control-selftest.js        # per-color clocks, delay/Bronstein, odds, TC labels (20 tests)
-node tablebase-selftest.js           # lichess Syzygy tablebase probe + offline fallback (12 tests)
-node arena-selftest.js               # arena tournaments (Swiss pairing, tie-breaks, berserk) (13 tests)
-node social-graph-selftest.js        # social graph (follow/block/friends) (12 tests)
-node chat-upgrades-selftest.js       # chat upgrades (reactions, moderation, move refs) (9 tests)
-node correspondence-selftest.js      # correspondence mode (day clocks, conditional premoves) (10 tests)
-node personality-bots-selftest.js    # personality bots (5 personas, play styles) (9 tests)
-node pov-export-selftest.js          # annotated-POV PGN export + summary card (8 tests)
-node embed-viewer-selftest.js        # embeddable viewer (FEN→SVG + iframe snippet) (9 tests)
-node variants-selftest.js            # variants (Crazyhouse/Atomic/KOTH/Three-Check) (10 tests)
-node i18n-selftest.js                # i18n layer (en/es/fr catalog + interpolation) (10 tests)
+node test/engine-selftest.js              # core engine + referee (159 tests)
+node test/pieces-selftest.js              # SVG piece rendering (32 tests)
+node test/security-selftest.js            # CORS, path traversal, body limits (58 tests)
+node test/differential-selftest.js        # 200 random games vs chess.js (37,800+ plies)
+node test/p3-multiroom-selftest.js        # multi-room isolation & routing
+node test/p3-sqlite-selftest.js           # SQLite archive CRUD + PGN import/export + eval cache (101 tests)
+node test/p3-seat-selftest.js             # seat tokens, heartbeats & mutation security (41 tests)
+node test/t0-draw-flagfall-selftest.js     # draw claims & flag fall timeouts (51 tests)
+node test/t0-deadcode-selftest.js         # rate limiting, NTP sync, idempotency & Gate-4 module checks (21 tests)
+node test/p2-stockfish-selftest.js        # local heuristic engine, WASM bridge & UCI protocol (58 tests)
+node test/p2-review-selftest.js           # win-probability logistic curve & move classification (51 tests)
+node test/rating-selftest.js              # Glicko-2 rating engine (36 tests)
+node test/t1-mobile-visuals-selftest.js   # pointer events, bevel framing & piece shadows (16 tests)
+node test/p3-social-timecontrol-selftest.js # time controls, chat, rematch & spectator presence (10 tests)
+node test/c5-ai-bot-selftest.js           # Play vs Computer levels 1-8 bot opponent (10 tests)
+node test/bot-tactics-selftest.js         # bot tactical strength & opening book
+node test/c7-ai-puzzles-selftest.js       # blunder puzzle generator & retry mode (6 tests)
+node test/c2-c4-coach-selftest.js         # why move explanations & coach mode hints (6 tests)
+node test/c6-ai-report-selftest.js        # auto post-game report & annotated PGN (5 tests)
+node test/c8-d4-voice-selftest.js         # voice move recognition, audio announcements & blind mode (7 tests)
+node test/puzzle-service-selftest.js      # lichess puzzle CSV import + UCI->SAN (11 tests)
+node test/puzzle-rating-selftest.js       # puzzle Glicko-2 rating loop (9 tests)
+node test/puzzle-storm-selftest.js        # puzzle storm + seeded RNG (9 tests)
+node test/daily-puzzle-selftest.js        # daily puzzle date-seeded pick (6 tests)
+node test/puzzle-repetition-selftest.js   # spaced-repetition mistake review (24 tests)
+node test/study-tree-selftest.js          # studies variation tree + PGN/RAV round-trip (49 tests)
+node test/openings-explorer-selftest.js   # real opening explorer (TSV + personal stats) (35 tests)
+node test/eval-graph-selftest.js          # interactive eval graph click-to-jump (51 tests)
+node test/accounts-selftest.js            # accounts & profiles (scrypt auth) (8 tests)
+node test/ratings-pool-selftest.js        # per-time-control Glicko-2 pools & leaderboards (10 tests)
+node test/lobby-selftest.js               # lobby seeks/challenges/matchmaking (9 tests)
+node test/pwa-selftest.js                 # manifest + service worker structural validation (9 tests)
+node test/sse-hardening-selftest.js       # event-driven emits + Last-Event-ID replay (16 tests)
+node test/security-headers-selftest.js    # CSP/HSTS/helmet headers + persistent rate limiting (17 tests)
+node test/masters-db-selftest.js          # masters-DB mistake whitelist (book-theory reclassification) (10 tests)
+node test/acpl-selftest.js                # ACPL + move-time stats + phase-segmented accuracy (10 tests)
+node test/puzzle-racer-selftest.js        # multiplayer puzzle race (streak multipliers, seeded) (10 tests)
+node test/a11y-intents-selftest.js        # text entry + touch gestures + voice intents (14 tests)
+node test/chess960-selftest.js            # Fischer Random position gen + castling rules (14 tests)
+node test/fen-setup-selftest.js           # FEN validation + referee setup command (10 tests)
+node test/time-control-selftest.js        # per-color clocks, delay/Bronstein, odds, TC labels (20 tests)
+node test/tablebase-selftest.js           # lichess Syzygy tablebase probe + offline fallback (12 tests)
+node test/arena-selftest.js               # arena tournaments (Swiss pairing, tie-breaks, berserk) (13 tests)
+node test/social-graph-selftest.js        # social graph (follow/block/friends) (12 tests)
+node test/chat-upgrades-selftest.js       # chat upgrades (reactions, moderation, move refs) (9 tests)
+node test/correspondence-selftest.js      # correspondence mode (day clocks, conditional premoves) (10 tests)
+node test/personality-bots-selftest.js    # personality bots (5 personas, play styles) (9 tests)
+node test/pov-export-selftest.js          # annotated-POV PGN export + summary card (8 tests)
+node test/embed-viewer-selftest.js        # embeddable viewer (FEN→SVG + iframe snippet) (9 tests)
+node test/variants-selftest.js            # variants (Crazyhouse/Atomic/KOTH/Three-Check) (10 tests)
+node test/i18n-selftest.js                # i18n layer (en/es/fr catalog + interpolation) (10 tests)
 ```
 
 Suites not wired into `npm run check`/`npm test` (still runnable standalone, useful for targeted debugging): `draw-selftest.js`, `p1-annotations-selftest.js`, `p1-audio-selftest.js`, `p1-premove-selftest.js`, `p1-scrubber-selftest.js`, `p2-multipv-selftest.js`, `p2-opening-selftest.js`, `p3-lag-selftest.js`, `gate3-selftest.js`, `gate4-selftest.js`, `gate5-selftest.js`. If you add a new feature area's selftest, wire it into both `test:unit` and `lint` in `package.json` (per the checklist below) so it isn't silently orphaned like these.
