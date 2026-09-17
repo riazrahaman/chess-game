@@ -154,7 +154,7 @@ test('unknown odds type falls back to none', () => {
 // --- Section 6: referee per-color support (backwards-compatible) ---
 
 async function runRefereeTests() {
-    var tmp = fs.mkdtempSync(os.tmpdir() + 'g3tc-');
+    var tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'g3tc-'));
     var ref = new referee.RefereeService({
         roomId: 'g3-tc',
         stateFile: path.join(tmp, 's.json'),
