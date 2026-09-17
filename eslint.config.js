@@ -52,7 +52,7 @@ export default [
     }
   },
   {
-    files: ['server.js', 'engine.js', 'referee-service.js', 'rules-engine.js', 'game-archive.js', 'bot-service.js', 'stockfish-worker.js', 'move-review.js', 'seat-auth.js'],
+    files: ['server.js', 'src/engine.js', 'src/referee-service.js', 'src/rules-engine.js', 'src/game-archive.js', 'src/bot-service.js', 'src/stockfish-worker.js', 'src/move-review.js', 'src/seat-auth.js'],
     languageOptions: {
       globals: {
         require: 'readonly',
