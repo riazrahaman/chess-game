@@ -20,7 +20,7 @@ function assert(condition, message) {
 }
 
 async function main() {
-  console.log('--- Running Phase 2 Stockfish 17 NNUE WASM Self-Tests ---\n');
+  console.log('--- Running Phase 2 Local Engine / WASM-bridge Self-Tests ---\n');
 
   // 1. parseFen tests
   const startFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
@@ -48,7 +48,7 @@ async function main() {
   // Test UCI initialization handshake
   engine.processCommand('uci');
   assert(outputLines.includes('id name Lightweight Local Engine (PST+Material)'), 'engine responds with honest id name Lightweight Local Engine');
-  assert(outputLines.includes('id alias Stockfish 17 NNUE WASM'), 'engine provides Stockfish 17 NNUE WASM alias for compatibility');
+  assert(!outputLines.some(l => /alias/i.test(l) || /stockfish 17/i.test(l)), 'engine must NOT claim a Stockfish alias it does not have (B8)');
   assert(outputLines.some(l => l.includes('option name MultiPV')), 'engine declares MultiPV option');
   assert(outputLines.some(l => l.includes('option name Threads')), 'engine declares Threads option');
   assert(outputLines[outputLines.length - 1] === 'uciok', 'engine concludes uci command with uciok');
@@ -217,14 +217,14 @@ async function main() {
   wasmNoPv._processEngineLine('info depth 10 seldepth 12 nodes 5000');
   assert(wasmNoPv.lastMultiPvResults.length === 0, 'WasmEngine ignores info lines without pv');
 
-  console.log('\n--- Phase 2 Stockfish 17 NNUE WASM Self-Test Summary ---');
+  console.log('\n--- Phase 2 Local Engine / WASM-bridge Self-Test Summary ---');
   console.log(`Passed: ${passed}`);
   console.log(`Failed: ${failed}`);
 
   if (failed > 0) {
     process.exit(1);
   }
-  console.log('\nAll Phase 2 Stockfish 17 NNUE WASM self-tests PASSED successfully!');
+  console.log('\nAll Phase 2 local engine self-tests PASSED successfully!');
 }
 
 main().catch(err => {

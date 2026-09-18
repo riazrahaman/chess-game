@@ -67,7 +67,7 @@ async function runTests() {
   for (let lvl = 1; lvl <= 8; lvl++) {
     const profile = BOT_LEVELS[lvl];
     assert(profile.name, `Level ${lvl} has a name`);
-    assert(profile.rating >= 800 && profile.rating <= 2200, `Level ${lvl} rating within 800-2200`);
+    assert(profile.rating >= 600 && profile.rating <= 1400, `Level ${lvl} rating within honest 600-1400 band (E2)`);
     assert(profile.depth >= 1 && profile.depth <= 4, `Level ${lvl} depth between 1 and 4`);
     assert(typeof profile.greeting === 'string', `Level ${lvl} has flavor greeting`);
   }
