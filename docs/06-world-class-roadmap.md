@@ -139,13 +139,13 @@ Only after E1a is stable.
 - After E1b: implement levels via real engine with `UCI_LimitStrength` / `UCI_Elo` (Stockfish supports 1320–3190) plus depth/time caps; keep the human-delay simulation.
 - Wire `personality-bots.js` — its `pickMove` is real (±40 cp bias on `.score`/`.activity`) but nothing produces those fields. Feed it MultiPV candidates from E1b.
 
-### E3 Real opening data `[server + display]` — M
+### E3 Real opening data `[server + display]` — M — **done (Wave 2: data/openings.tsv CC0; fabricated stats deleted)**
 - Ship the lichess `chess-openings` TSV (CC0, ~3,500 lines) via `openings-explorer.js:loadFromTSV`; load it in `index.html`; delete the fabricated `stats`/`frequency` fields from `openings-db.js` and the "illustrative" caveat.
 - Personal stats from the archive (`personalExplorer`) — inject the real `game-archive.js` backend.
 - Bot opening book: derive from the TSV + masters data, not fabricated percentages.
 - Masters win-rates: either import a real sample (lichess masters DB API `explorer.lichess.ovh/masters`, proxied) or remove the numbers and the "real-data subset" comment from `masters-db.js`.
 
-### E4 Real puzzle data `[server]` — M
+### E4 Real puzzle data `[server]` — M — **done (Wave 2: 8,861-row CC0 sample + full-dump importer, SQLite, lichess-shaped routes)**
 - Actually import the lichess puzzle CSV (CC0, 6.1M rows; ship a themed 50–100k subset in-repo, full import as an admin script) into a real SQLite `puzzles` table in `game-archive.js`; add routes `/api/puzzle/daily|next|batch/:theme|dashboard/:days|activity` (lichess-shaped).
 - Use lila's `puzzleTheme.xml` as the canonical theme taxonomy.
 
@@ -165,7 +165,7 @@ a phone (all header toggles — the least important ones), and **Play White / Pl
 the fold on mobile**. No onboarding, no empty state, no "what do I do now". Three engine arrows and two
 self-disclaiming panels at the starting position. 30/31 visible controls are under 44 px.
 
-### R1 Hash-routed shell `[display]` — M
+### R1 Hash-routed shell `[display]` — M — **done (Wave 2: shell.js + Home/Play/Analysis/Puzzles/Compete/Profile/Settings; Library placeholder)**
 A ~100-line `src/shell.js` toggling `<section data-view>` on `#/route`; no server change. Views:
 
 | View | Contents | Modules it finally exposes |
@@ -183,22 +183,22 @@ Structural changes that make this cheap:
 - Split `ui.js` along view boundaries (`ui-play.js`, `ui-analysis.js`, `ui-transport.js`) and lazy-load per-view scripts with `document.createElement('script')` on first route entry — drops ~200 KB from first paint, no bundler.
 - **Stop shipping server-only modules to the browser** (`game-archive.js`, `arena.js`, `social-graph.js`, `correspondence.js`) — these need routes, not script tags.
 
-### R2 Server routes + tables for the dark server modules `[server]` — M each
+### R2 Server routes + tables for the dark server modules `[server]` — M each — **accounts/ratings/lobby/arena/social done (Wave 2); correspondence + studies still open**
 `accounts.js` → **done server-side in `0b25073`** (`/api/auth/*`, `/api/profile`, SQLite `accounts`/`sessions`); remaining: B11 + profile view; `ratings-pool.js` → rate every
 human-vs-human result on game end (referee `onGameEnd` hook) + `/api/leaderboard/:tc`; `lobby.js` →
 `/api/lobby/seek|challenge|accept` + SSE lobby channel; `arena.js` → `/api/arena/*`; `social-graph.js` →
 `/api/social/*` + table; `correspondence.js` → referee day-clock mode; `study-tree.js` → `/api/studies/*`.
 Each is 1–3 days because the library and its tests already exist.
 
-### R3 First-run onboarding `[display]` — S
+### R3 First-run onboarding `[display]` — S — **done (Home cards, Wave 2)**
 Mode chooser on first visit; "You are a spectator — Play White / Play Black / vs Computer" banner when
 unseated; empty-state copy that tells the user the next action; hide engine arrows at ply 0 by default.
 
-### R4 Wire the accessibility modules already written `[display]` — S
+### R4 Wire the accessibility modules already written `[display]` — S — **done (Wave 2, Worker A)**
 `a11y-text-entry.js` (typed SAN/UCI + action words), `a11y-gestures.js` (swipe nav in blind mode),
 `voice-intents.js` (resign/draw/hint by voice). Three green libraries, zero call sites.
 
-### R5 Wire ACPL + masters whitelist into Game Review `[display]` — S
+### R5 Wire ACPL + masters whitelist into Game Review `[display]` — S — **done in the Analysis view (Wave 2, Worker D)**
 `acpl.js` phase accuracy and `masters-db.js:whitelistMistakes` are exactly what the review panel needs
 and neither is called.
 

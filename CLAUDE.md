@@ -42,7 +42,11 @@ node test/p3-seat-selftest.js             # seat tokens, heartbeats & mutation s
 node test/t0-draw-flagfall-selftest.js     # draw claims & flag fall timeouts (51 tests)
 node test/t0-deadcode-selftest.js         # rate limiting, NTP sync, idempotency & Gate-4 module checks (21 tests)
 node test/p2-stockfish-selftest.js        # PST fallback engine, WASM bridge & UCI protocol (58 tests)
-node test/wave1-engine-selftest.js        # proof a real engine ships: vendored SF19 wasm, allowlist/precache, CSP, engine runs (14 tests)
+node test/wave1-engine-selftest.js
+node test/wave2-puzzles-selftest.js       # puzzle routes, server-side solve verification, storm, review (15 tests)
+node test/wave2-play-settings-selftest.js # Play view structure, Settings view, a11y wiring (20 tests)
+node test/wave2-social-selftest.js        # lobby/leaderboard/arena/social routes + rating-on-game-end (14 tests)
+node test/wave2-analysis-selftest.js      # openings lookup/personal, fen validate, no fabricated stats (9 tests)        # proof a real engine ships: vendored SF19 wasm, allowlist/precache, CSP, engine runs (14 tests)
 node test/p2-review-selftest.js           # win-probability logistic curve & move classification (51 tests)
 node test/rating-selftest.js              # Glicko-2 rating engine (36 tests)
 node test/t1-mobile-visuals-selftest.js   # pointer events, bevel framing & piece shadows (16 tests)
@@ -133,6 +137,7 @@ server.js            HTTP API, static file serving, SSE stream (event-driven emi
 
 ### Client-side (all plain scripts loaded by `index.html`, no bundler)
 
+- `shell.js` — hash-routed site shell (`#/`, `#/play`, `#/analysis`, `#/puzzles`, `#/library`, `#/compete`, `#/me`, `#/settings`); feature views register with `Shell.registerView` (contract in `HANDOVER.md` §7). Views: `ui-puzzles.js`, `ui-analysis.js`, `ui-compete.js`, `ui-profile.js`, `ui-settings.js`.
 - `ui.js` — the orchestrator: SSE/poll receiver and diff-based board reconciliation, pointer events touch/mouse drag-and-drop, move tree scrubber, multi-premove queueing (up to 5 plies), right-click annotation canvas, audio/haptics, seat management, clock-tick interpolation (render-only — never mutates authoritative time), theme switching (`[data-theme]` / `[data-mode=dark]`). Split into sibling modules loaded before it: `ui-sound.js` (audio/haptics), `ui-theme.js` (theme switching), `ui-annotations.js` (annotation canvas), `ui-archive.js` (archived-game view), `ui-auth.js` (sign-in modal / account bar).
 - `rating.js` — Glicko-2 rating engine (createPlayer / updateRating / rateMatches / expectedScore / confidenceInterval).
 - `pieces.js` — inline SVG chess pieces (Colin M.L. Burnett cburnett artwork, `CBURNETT-LICENSE.txt`).
@@ -141,19 +146,19 @@ server.js            HTTP API, static file serving, SSE stream (event-driven emi
 - `ai-coach.js` — plain-English move explanations (`explainMove`) and real-time coaching suggestions on active turn (`getCoachHint`).
 - `game-report.js` — auto post-game narrative report generation (`generatePostGameReport`), accuracy summary, turning point swing analysis, endgame performance, and annotated PGN with NAG glyphs and eval comments.
 - `accessibility-voice.js` — natural spoken English move announcements via SpeechSynthesis API, voice move input recognition via Web Speech API, and blind accessibility mode controller with keyboard grid navigation.
-- `openings-db.js` — ECO opening database (prefix matching, master win rates) and the SVG evaluation-graph math.
-- `puzzle-service.js` — lichess puzzle CSV import (UCI→SAN conversion via chess.js) into an **in-memory** store (no SQLite table yet, no CSV shipped, no route, not loaded by `index.html` — roadmap E4); filterable themed subsets.
+- `openings-db.js` — bundled ECO name/prefix matcher for the Play explorer (names only — the fabricated win-rates were removed in Wave 2) and the SVG evaluation-graph math.
+- `puzzle-service.js` — lichess puzzle CSV import (UCI→SAN via chess.js) into the SQLite `puzzles` table in `game-archive.js`; `data/puzzles-sample.csv` (8,861 CC0 rows) is seeded on first `/api/puzzle/*` request; `scripts/import-puzzles.mjs` streams the full 6M-row dump. Routes in `routes-puzzles.js`, UI in `ui-puzzles.js`.
 - `puzzle-rating.js` — puzzle-vs-player Glicko-2 rating loop (each solve scored as a game, time bonus).
 - `puzzle-storm.js` — timed Puzzle Storm sessions (deterministic seeded RNG, escalating difficulty) + `daily-puzzle.js` date-seeded daily pick.
 - `puzzle-repetition.js` — Chessable-style spaced-repetition mistake review (expanding intervals, persisted per player).
 - `study-tree.js` — pure-data variation tree with `toPGN`/`fromPGN` RAV round-trip (Studies substrate).
-- `openings-explorer.js` — real opening explorer: lichess TSV import + personal archive stats (no fabricated win-rates).
+- `openings-explorer.js` — real opening explorer over `data/openings.tsv` (lichess chess-openings, CC0, 3,810 lines): prefix→continuation index, `isKnownLine`, personal archive W/D/L. Routes in `routes-openings.js` (`/api/openings/lookup|personal`, `/api/fen/validate`); also the L1–L4 bot opening book.
 - `eval-graph.js` — interactive click-to-jump eval graph with per-ply tooltips (SAN/eval/ACPL delta).
 - `accounts.js` — accounts & profiles (Node `crypto.scrypt` hashing with per-user salt, `timingSafeEqual` verification, `publicAccount()` strips hash/salt, archive-based `playerProfile` aggregation). Server-side store in `src/accounts.db` (`accounts` + `sessions`), Google Identity Services sign-in via `GOOGLE_CLIENT_ID` env var, routes `/api/auth/*` + `/api/profile`; client UI in `ui-auth.js`.
 - `ratings-pool.js` — per-time-control Glicko-2 rating pools (provisional `RD>110` handling, bot games explicitly unrated) + leaderboards, persisted via `game-archive.js`.
-- `lobby.js` — lobby seeks/challenges/matchmaking (rating brackets with mutual tolerance, seeded-RNG tie-break, room-id validation).
+- `lobby.js` — lobby seeks/accept/pairings (rating brackets, seeded-RNG tie-break, room-id validation); served by `routes-social.js` (`/api/lobby/*`, `/api/leaderboard/:tc`, `/api/arena/*`, `/api/social/*`) with `rating-hook.js` rating signed-in human games on game end and `social-store.js` (`social.db`) persisting arenas + the social graph. UI: `ui-compete.js`, `ui-profile.js`.
 - `service-worker.js` — PWA service worker (precache + cache-first GET + navigate fallback) + `manifest.webmanifest`.
-- `masters-db.js` — compact frequency-sorted master opening book; `whitelistMistakes` reclassifies book-theory moves (≥2 master games) from blunder/mistake to best.
+- `masters-db.js` — book membership = presence on a named lichess opening line (no game counts; the earlier uncited numbers were removed); `whitelistMistakes` reclassifies known-book moves from blunder/mistake to best.
 - `acpl.js` — ACPL (average centipawn loss), move-time stats, phase-segmented accuracy (opening/middlegame/endgame).
 - `puzzle-racer.js` — multiplayer puzzle race (seeded sequence, streak multipliers ×2 capped ×8).
 - `a11y-text-entry.js` / `a11y-gestures.js` / `voice-intents.js` — typed command entry, touch swipe gestures, and voice intent routing for accessibility.

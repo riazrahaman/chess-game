@@ -242,7 +242,14 @@ Shell.onChange(({ id, params }) => {});         // route listener
 |---|---|---|---|---|
 | Step 0 — Playwright suites green | lead | DONE | 21c2c92 | room-aware scripts, seat release on bot off, serialised bot config |
 | R1 — `shell.js` router, nav, Home cards, view sections, CSS | lead | DONE | (this commit) | base-href click delegation; hash preserved across the room rewrite |
-| R1 — Play view slimming / Assist drawer / Settings view absorbs header toggles | Worker A | PLANNED | — | |
-| Puzzles view + `/api/puzzle/*` + real puzzle data (E4, P-series wiring) | Worker B | PLANNED | — | |
-| Compete + Profile views + lobby/ratings/arena/social routes (R2) | Worker C | PLANNED | — | |
-| Analysis view + real openings data (E3) + acpl/masters/tablebase/pov wiring (R5) | Worker D | PLANNED | — | |
+| R1/R3/R4 — Play view slimming, Assist drawer, Settings view, a11y modules wired | Worker A | DONE | 1a5e6fe…e4e2ef0 | above-fold controls 16→11 (390px), <44px targets 33→1; typed/voice commands + swipes live; 2 latent voice bugs fixed |
+| E4 — Puzzles: 8,861 CC0 lichess rows, SQLite tables, `/api/puzzle/*`, Daily/Rated/Custom/Storm/Review view | Worker B | DONE | 1493b02…bd73995 | server-side solve verification, Glicko-2 puzzle rating, spaced repetition |
+| R2 — rating on game end, lobby/leaderboard/arena/social routes, Compete + Profile views | Worker C | DONE | 3a879b8…a50513c | only signed-in human-vs-human games are rated; found SW `/api` cache bug (fixed d85baa9) |
+| E3/R5 — real chess-openings TSV (3,810 lines), fabricated stats deleted, Analysis view with own engine worker | Worker D | DONE | f0ff460…762893f | `/api/openings/*`, `/api/fen/validate`; tablebase parser fixed for the real lichess shape |
+
+**Wave 2 result (lead):** `KNOWN_DARK` 30 → 11 (remaining: chess960, variants, chat-upgrades, correspondence,
+personality-bots, i18n, puzzle-racer, study-tree, fen-setup, game-archive/time-control browser copies). All views
+render at 390px with 0 console errors; `smoke-test` + `test-ui-features` PASS. Follow-ups: Library view is still a
+placeholder (archive modal remains the entry point); `personal` openings stats can't bind games to a player until
+accounts bind archived games; `scripts/test-analysis-view.mjs` needs port parameterisation before joining
+`test:browser`; `'unsafe-inline'` still in `script-src`.
