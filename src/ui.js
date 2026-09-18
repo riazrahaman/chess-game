@@ -781,7 +781,7 @@ function showUiError(message) {
 
 async function submitMoveToReferee(moveStr) {
   const roomParam = getCurrentRoomId() !== 'default' ? `?room=${encodeURIComponent(getCurrentRoomId())}` : '';
-  const currentTurn = (refereeState && refereeState.board && refereeState.board.turn) || 'white';
+  const currentTurn = (previousRefereeState && previousRefereeState.board && previousRefereeState.board.turn) || 'white';
   if (!currentSeatRole) {
     try {
       await claimSeat(currentTurn);
