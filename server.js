@@ -565,6 +565,40 @@ function isDotfile(relPath) {
   return relPath.split('/').some(seg => seg.startsWith('.'));
 }
 
+// D2: static files under src/ and assets/ are safe to revalidate via ETag /
+// Last-Modified. Everything else (index.html, service-worker.js, manifest,
+// licence) keeps the global no-store policy.
+function isRevalidatableStatic(rel) {
+  return rel.startsWith('src/') || rel.startsWith('assets/');
+}
+
+function weakEtag(stats) {
+  return 'W/"' + stats.size.toString(16) + '-' + Math.floor(stats.mtimeMs).toString(16) + '"';
+}
+
+function etagMatches(headerValue, etag) {
+  const strip = v => v.trim().replace(/^W\//, '');
+  const want = strip(etag);
+  return String(headerValue).split(',').some(v => {
+    const t = v.trim();
+    return t === '*' || strip(t) === want;
+  });
+}
+
+function isFreshRequest(req, etag, mtime) {
+  const inm = req.headers['if-none-match'];
+  if (inm) return etagMatches(inm, etag);
+  const ims = req.headers['if-modified-since'];
+  if (ims) {
+    const since = Date.parse(ims);
+    if (!Number.isNaN(since)) {
+      // HTTP dates have 1s resolution; compare on whole seconds.
+      return Math.floor(mtime.getTime() / 1000) <= Math.floor(since / 1000);
+    }
+  }
+  return false;
+}
+
 function readJsonBody(req, maxBytes = MAX_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     let data = '';
@@ -1372,7 +1406,32 @@ function createServer() {
         return;
       }
       const ext = path.extname(filePath);
-      res.setHeader('Content-Type', MIME[ext] || 'application/octet-stream');
+      const mime = MIME[ext] || 'application/octet-stream';
+      res.setHeader('Content-Type', mime);
+
+      // D2: conditional caching for immutable-by-path static assets under
+      // src/ and assets/. index.html, service-worker.js, the manifest and
+      // the licence keep the global no-store/no-cache policy so the SW is
+      // always revalidated and new deploys are picked up immediately.
+      const rel = path.relative(SERVED_ROOT, filePath).split(path.sep).join('/');
+      if (isRevalidatableStatic(rel)) {
+        const etag = weakEtag(stats);
+        const lastModified = stats.mtime.toUTCString();
+        res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+        res.setHeader('ETag', etag);
+        res.setHeader('Last-Modified', lastModified);
+        if (isFreshRequest(req, etag, stats.mtime)) {
+          res.statusCode = 304;
+          res.end();
+          return;
+        }
+      }
+
+      if (req.method === 'HEAD') {
+        res.end();
+        return;
+      }
+
       fs.createReadStream(filePath).pipe(res);
     });
   });
