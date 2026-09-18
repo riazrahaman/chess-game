@@ -16,12 +16,15 @@ function profileEsc(value) {
 }
 
 async function profileFetch(path, options) {
-  const opts = Object.assign({ credentials: 'include' }, options || {});
+  const opts = Object.assign({ credentials: 'include', cache: 'no-store' }, options || {});
   if (opts.body && typeof opts.body !== 'string') {
     opts.body = JSON.stringify(opts.body);
     opts.headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
   }
-  const res = await fetch(path, opts);
+  // service-worker.js is cache-first for same-origin GETs, so (like ui.js's
+  // /api/state poll) bust the cache with a timestamp on every read.
+  const url = (!opts.method || opts.method === 'GET') ? path + (path.includes('?') ? '&' : '?') + '_t=' + Date.now() : path;
+  const res = await fetch(url, opts);
   let json = null;
   try { json = await res.json(); } catch (_) { json = null; }
   return { ok: res.ok, status: res.status, body: json || {} };
