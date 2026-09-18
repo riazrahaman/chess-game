@@ -69,18 +69,21 @@ const cmd = (ref, type, args) => ref.enqueue({ id: 'b3-' + (++seq), type, args: 
     assert.strictEqual(s.positions[s.positions.length - 1].fen, s.fen);
   });
 
-  await atest('referee policy: threefold auto-draws and claimableDraw clears on game over', async () => {
+  await atest('threefold repetition is claimable (G4b) and claimableDraw clears after the claim', async () => {
     // After the undo it is black to move (…5.Bb5). Shuffle Nc6-b8-c6 / Bb5-a4-b5
-    // twice so the position recurs a third time. The referee auto-draws here
-    // (t0-draw-flagfall policy), so the claim flow is for 50-move positions.
+    // twice so the position recurs a third time.
     const shuffle = ['c6b8', 'b5a4', 'b8c6', 'a4b5', 'c6b8', 'b5a4', 'b8c6', 'a4b5'];
-    let last = null;
     for (const m of shuffle) {
-      last = await cmd(ref, 'move', { move: m });
-      assert(last.ok, 'shuffle move ' + m + ' rejected: ' + last.error);
+      const r = await cmd(ref, 'move', { move: m });
+      assert(r.ok, 'shuffle move ' + m + ' rejected: ' + r.error);
     }
-    const s = ref.getState();
-    assert(s.gameOver && s.drawReason === 'threefold', 'auto-draw on threefold');
+    let s = ref.getState();
+    assert(!s.gameOver, 'threefold is a claim, not an automatic draw');
+    assert.deepStrictEqual(s.claimableDraw, { claimable: true, reason: 'threefold' });
+    const claim = await cmd(ref, 'draw', { action: 'claim' });
+    assert(claim.ok && claim.draw && claim.drawReason === 'threefold', 'claim accepted: ' + JSON.stringify(claim.error));
+    s = ref.getState();
+    assert(s.gameOver);
     assert.strictEqual(s.claimableDraw, null, 'no claim once the game is over');
     assert.strictEqual(s.positions.length, s.history.length + 1);
   });

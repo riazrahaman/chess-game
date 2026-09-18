@@ -311,6 +311,24 @@
   }
 
   /**
+   * Draws the referee applies WITHOUT a claim (FIDE Art. 9.6 / lichess):
+   * fivefold repetition, 75-move rule, insufficient material. Threefold and
+   * the 50-move rule are left to claimableDraw() (G4b policy, 2026-09-18).
+   */
+  function automaticDraw(boardOrFen, history) {
+    if (isFivefoldRepetition(boardOrFen, history)) {
+      return { draw: true, reason: 'fivefold' };
+    }
+    if (isDrawBySeventyfiveMoves(boardOrFen)) {
+      return { draw: true, reason: 'seventyfive-move' };
+    }
+    if (isInsufficientMaterial(boardOrFen)) {
+      return { draw: true, reason: 'insufficient' };
+    }
+    return { draw: false, reason: null };
+  }
+
+  /**
    * Check whether a claimable draw condition exists (for draw-claim flow).
    * Claimable: threefold repetition, 50-move rule.
    * NOT claimable: fivefold, 75-move (automatic), insufficient (automatic).
@@ -401,6 +419,7 @@
     isDrawBySeventyfiveMoves: isDrawBySeventyfiveMoves,
     isInsufficientMaterial: isInsufficientMaterial,
     evaluateDraw: evaluateDraw,
+    automaticDraw: automaticDraw,
     claimableDraw: claimableDraw,
     getGameStatus: getGameStatus,
     san: san,
