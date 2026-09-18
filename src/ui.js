@@ -2744,7 +2744,15 @@ function updateBotUI(botConfig) {
   }
 }
 
-async function sendBotConfigUpdate() {
+// Bot config updates swap seats (bot + human); two in flight at once race each
+// other into 409 'seat occupied' replies, so they are serialised here.
+let botConfigChain = Promise.resolve();
+function sendBotConfigUpdate() {
+  botConfigChain = botConfigChain.then(() => sendBotConfigUpdateNow()).catch(() => {});
+  return botConfigChain;
+}
+
+async function sendBotConfigUpdateNow() {
   const toggle = document.getElementById('bot-toggle');
   const levelSelect = document.getElementById('bot-level-select');
   const colorSelect = document.getElementById('bot-color-select');
@@ -2769,13 +2777,21 @@ async function sendBotConfigUpdate() {
             await leaveSeat();
           }
           await claimSeat(humanColor);
+          seatAutoClaimedByBot = !!currentSeatRole;
         }
+      } else if (seatAutoClaimedByBot && currentSeatRole) {
+        // Symmetric with the auto-claim above: a seat we took only because
+        // bot mode needed a human side is released when bot mode ends.
+        await leaveSeat();
+        seatAutoClaimedByBot = false;
       }
     }
   } catch (e) {
     console.error('Failed to update bot config', e);
   }
 }
+
+let seatAutoClaimedByBot = false;
 
 function setupBotUI() {
   const toggle = document.getElementById('bot-toggle');
