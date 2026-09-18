@@ -90,17 +90,17 @@ rematch `decline` arm. No orphan client fetches.
 
 | # | Bug | Where | Layer | Size | Status (2026-09-18) |
 |---|---|---|---|---|---|
-| B1 | **White clock counts down before the game starts.** `interpolatedActiveSeconds` subtracts wall-time since `refereeClockAt`, which is stamped on *any* state arrival with no "game started" guard. Screenshot shows 9:57 while `/api/state` says 600/600. The display layer is fabricating authoritative state. Guard on `moveStartTs > 0` / `history.length > 0`. | `ui.js:192-199`, `ui.js:1165` | display | S | in progress |
-| B2 | **Room chat is hidden.** `<details id="graph-panel">` is never closed; the parser swallows `#chat-panel` into the collapsed "Evaluation history" disclosure. | `index.html:1089`, `:1095-1104` | display | S | in progress |
+| B1 | **White clock counts down before the game starts.** `interpolatedActiveSeconds` subtracts wall-time since `refereeClockAt`, which is stamped on *any* state arrival with no "game started" guard. Screenshot shows 9:57 while `/api/state` says 600/600. The display layer is fabricating authoritative state. Guard on `moveStartTs > 0` / `history.length > 0`. | `ui.js:192-199`, `ui.js:1165` | display | S | **done** 3245d37 |
+| B2 | **Room chat is hidden.** `<details id="graph-panel">` is never closed; the parser swallows `#chat-panel` into the collapsed "Evaluation history" disclosure. | `index.html:1089`, `:1095-1104` | display | S | **done** 152aadd |
 | B3 | **Gate-4 guard is string-matched and this call site slips past it.** `computeHistoryPositions` calls `engineLookup['create'+'InitialBoard']` and `['make'+'Move']` (`ui.js:786-787`); the concatenated names don't match the `makeMove(` / `createInitialBoard(` string checks in `t0-deadcode-selftest.js:97-98` and `gate4-selftest.js:184`, so at runtime ui.js does invoke the engine mutators (display-only scrubber replay, but the guard no longer catches the next real violation). Fix structurally: have the referee ship per-ply FENs (`/api/positions` or in `stateView`) and delete the workaround; then make the test un-dodgeable (AST or runtime spy). | `ui.js:783-801` (call at 786-787) | referee + display | S/M | deferred (own commit) |
-| B4 | **Draw negotiation is half-wired** (see dead routes above). Render `state.drawOffer`, add Accept/Decline, add a "Claim draw" button when `claimableDraw` is truthy. | `ui.js:1802`, `server.js:917-929` | display | S | in progress |
-| B5 | **`showUiError` permanently clobbers `#status`**; command errors use a second channel (`#command-status`). Unify on one auto-dismissing toast. | `ui.js:738-745` | display | S | in progress |
-| B6 | **Polling never stops.** `pollReferee` re-polls `/api/state` every 600 ms forever, even with SSE open; no client backoff, no `Last-Event-ID`; Playwright `networkidle` never settles. Back off to 10–15 s liveness when SSE `onopen`, resume 600 ms on `onerror`. | `ui.js:1378-1411`, `1439-1470` | display | S | in progress |
-| B7 | **Selftests leave 571 residue files** (`.referee-journal-*`, `.referee-state*`) in the repo root; CLAUDE.md claims they restore on exit. | test harness | server | S | in progress |
+| B4 | **Draw negotiation is half-wired** (see dead routes above). Render `state.drawOffer`, add Accept/Decline, add a "Claim draw" button when `claimableDraw` is truthy. | `ui.js:1802`, `server.js:917-929` | display | S | **done** e2855fa |
+| B5 | **`showUiError` permanently clobbers `#status`**; command errors use a second channel (`#command-status`). Unify on one auto-dismissing toast. | `ui.js:738-745` | display | S | **done** 4f1892a |
+| B6 | **Polling never stops.** `pollReferee` re-polls `/api/state` every 600 ms forever, even with SSE open; no client backoff, no `Last-Event-ID`; Playwright `networkidle` never settles. Back off to 10–15 s liveness when SSE `onopen`, resume 600 ms on `onerror`. | `ui.js:1378-1411`, `1439-1470` | display | S | **done** 5b38dfc |
+| B7 | **Selftests leave 571 residue files** (`.referee-journal-*`, `.referee-state*`) in the repo root; CLAUDE.md claims they restore on exit. | test harness | server | S | **done** 4757c9d |
 | B8 | **Worker still self-identifies as `id alias Stockfish 17 NNUE WASM`** over UCI (`stockfish-worker.js:600`) and the selftest requires it. Remove the alias when the real engine ships (or now). | worker | display | S | **done** 8c42752 |
 | B9 | Tracked non-product files: `game-log.md` (AI-vs-AI agent log) and `brief.html` (orchestration brief). Remove from the repo. | root | — | S | awaiting confirmation |
-| B10 | `ALLOWED_FILES` lists nonexistent `src/stockfish.js` / `src/stockfish.wasm`; dead client fallbacks at `ui.js:1089-1094`. | server.js:311-312 | server | S | in progress |
-| B11 | **New (2026-09-18): `src/ui-auth.js` is loaded by `index.html:1268` but not in `ALLOWED_FILES` or `PRECACHE_ASSETS` → 404.** The entire Sign In / Google / New Room UI shipped in `0b25073` is inert. Add to both lists (CLAUDE.md checklist step 5). Consider a `reachability-selftest.js` assertion that every `<script src>` in `index.html` is in `ALLOWED_FILES`. | `index.html:1268`, `server.js:303` | server | S | in progress |
+| B10 | `ALLOWED_FILES` lists nonexistent `src/stockfish.js` / `src/stockfish.wasm`; dead client fallbacks at `ui.js:1089-1094`. | server.js:311-312 | server | S | **done** dcf8033+e78d409 |
+| B11 | **New (2026-09-18): `src/ui-auth.js` is loaded by `index.html:1268` but not in `ALLOWED_FILES` or `PRECACHE_ASSETS` → 404.** The entire Sign In / Google / New Room UI shipped in `0b25073` is inert. Add to both lists (CLAUDE.md checklist step 5). Consider a `reachability-selftest.js` assertion that every `<script src>` in `index.html` is in `ALLOWED_FILES`. | `index.html:1268`, `server.js:303` | server | S | **done** 2c30698+5533297 |
 | B12 | **New: Google OAuth `client_secret_*.apps.googleusercontent.com.json` is sitting untracked in the repo root** and `.gitignore` does not match it. One `git add .` away from a leaked secret. Add `client_secret*.json` to `.gitignore`, move the secret to an env var (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`), and rotate it if it was ever pushed. | repo root, `.gitignore` | server | S | **done** e3b18dd |
 
 ---
@@ -134,7 +134,7 @@ board; you ship nothing. https://github.com/lichess-org/external-engine — M.
 `crossOriginIsolated === true`; COEP will block `tablebase.lichess.ovh` unless proxied through `server.js`.
 Only after E1a is stable.
 
-### E2 Honest bot ladder `[server]` — S (now), then re-calibrate after E1
+### E2 Honest bot ladder `[server]` — S (now), then re-calibrate after E1 — **relabel + dedupe done 8c42752 / 5533297**
 - Relabel levels 1–8 to observed strength (≈ 600–1400 today). Remove the duplicate configs (5≡6, 7≡8).
 - After E1b: implement levels via real engine with `UCI_LimitStrength` / `UCI_Elo` (Stockfish supports 1320–3190) plus depth/time caps; keep the human-delay simulation.
 - Wire `personality-bots.js` — its `pickMove` is real (±40 cp bias on `.score`/`.activity`) but nothing produces those fields. Feed it MultiPV candidates from E1b.
@@ -149,7 +149,7 @@ Only after E1a is stable.
 - Actually import the lichess puzzle CSV (CC0, 6.1M rows; ship a themed 50–100k subset in-repo, full import as an admin script) into a real SQLite `puzzles` table in `game-archive.js`; add routes `/api/puzzle/daily|next|batch/:theme|dashboard/:days|activity` (lichess-shaped).
 - Use lila's `puzzleTheme.xml` as the canonical theme taxonomy.
 
-### E5 Documentation truth pass `[docs]` — S
+### E5 Documentation truth pass `[docs]` — S — **CLAUDE.md done 8c42752**; RECOMMENDATIONS.md strike-through and B9 file removal still open
 Update CLAUDE.md (DB path, fen-setup, puzzle-service storage), strike the false "Done" marks in
 RECOMMENDATIONS.md with a pointer to this file, remove `game-log.md` / `brief.html`.
 
@@ -207,12 +207,12 @@ Measured: **433 KB uncompressed first load** (32 scripts = 369 KB + 65 KB HTML),
 **nothing is compressed**; `Cache-Control: no-store` is set globally (`server.js:833`) including static
 files; **no ETag / Last-Modified / 304**; keep-alive on.
 
-- D1 gzip/brotli via `zlib` when `Accept-Encoding` allows — S.
-- D2 `Cache-Control: public, max-age=31536000, immutable` for `/src/*` and `/assets/*` with a content-hash query param stamped by a tiny `scripts/stamp-assets.js`; keep `no-store` for `/api/*` only; ETag from mtime+size — S.
-- D3 Precache `stockfish-worker.js` (and the engine WASM after E1a); reconcile `PRECACHE_ASSETS` with `ALLOWED_FILES`; PNG icons (192/512) for install prompts — S.
+- D1 gzip/brotli via `zlib` when `Accept-Encoding` allows — S. **Done 498e2d1** (`ui.js` 118 KB → 30 KB gzip / 26 KB br).
+- D2 `Cache-Control: public, max-age=31536000, immutable` for `/src/*` and `/assets/*` with a content-hash query param stamped by a tiny `scripts/stamp-assets.js`; keep `no-store` for `/api/*` only; ETag from mtime+size — S. **Done 539c7cc** (chose `max-age=0, must-revalidate` + weak ETag + 304; no hashing).
+- D3 Precache `stockfish-worker.js` (and the engine WASM after E1a); reconcile `PRECACHE_ASSETS` with `ALLOWED_FILES`; PNG icons (192/512) for install prompts — S. **Worker + reconciliation done 45b6383**; PNG icons still open.
 - D4 CSP hardening: `'wasm-unsafe-eval'`, drop `'unsafe-eval'` and `'unsafe-inline'` (move the SW-registration inline script to a file; hash the stylesheet or externalise it). `frame-ancestors 'none'` contradicts `embed-viewer.js` — add a dedicated `/embed/:id` route with a permissive frame policy — S.
 - D5 `connect-src` allowlist for `tablebase.lichess.ovh` (or proxy it) — S.
-- D6 SSE-first transport (B6) and client `Last-Event-ID` resume — S.
+- D6 SSE-first transport (B6) and client `Last-Event-ID` resume — S. **Poll backoff done 5b38dfc**; `Last-Event-ID` resume still open.
 - D7 `historyToSan` (`engine.js:727-736`) replays from the initial board with disambiguation on every state: 8.3 ms at 200 plies, ~0.9 s cumulative. Have the referee include SAN per ply in `stateView` so the client never recomputes it (also removes the Gate-4 workaround, B3) — S.
 
 ---
@@ -298,7 +298,7 @@ variants, e-board, OCR.
 **Definition of Done, revised.** A feature is Done only when all four hold: (1) module + selftest green,
 (2) reachable — script loaded *and* called *or* route mounted, with a visible affordance, (3) real data
 behind it (no fabricated statistics; caveat labels are not a substitute), (4) an entry in
-`scripts/test-ui-features.mjs` exercises it in the browser. Add a `reachability-selftest.js` that fails
+`scripts/test-ui-features.mjs` exercises it in the browser. **Shipped 8400e06 (25 assertions, `KNOWN_DARK`=30, wired into `test:unit`+`lint`).** Add a `reachability-selftest.js` that fails
 when a module in `index.html` has zero call sites or a `src/` module is neither loaded nor required — and wire it
 into both `test:unit` and `lint` in `package.json`, otherwise it joins the orphaned `gate3/4/5-selftest.js` suites.
 
