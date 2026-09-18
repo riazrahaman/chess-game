@@ -757,7 +757,7 @@
         .skip-link { position: fixed; top: -80px; left: 20px; z-index: 300; padding: 12px; background: var(--panel-bg); color: var(--text-color); }
         .skip-link:focus { top: 12px; }
         .app-header, .workspace, .app-footer { max-width: 1120px; margin-inline: auto; }
-        .app-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 22px 0 18px; border-bottom: 1px solid var(--panel-border); }
+        .app-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 18px 0 14px; border-bottom: 1px solid var(--panel-border); }
         .brand { display: flex; align-items: center; gap: 14px; }
         .brand-mark { display: grid; grid-template-columns: repeat(2, 9px); gap: 3px; transform: rotate(-8deg); }
         .brand-mark i { width: 9px; height: 9px; background: var(--accent); }
@@ -881,14 +881,17 @@
         <button id="blind-mode-toggle" title="Toggle Blind Accessibility Mode (Shortcut: B)">Blind Mode: Off</button>
         <span id="voice-transcript-status" style="display:none; font-size:0.75rem; padding:2px 6px; border-radius:4px; background:rgba(37,99,235,0.1); color:var(--text-color);"></span>
     </div>
-    <div id="account-bar" style="display:flex; align-items:center; gap:6px; margin-left:auto;">
-        <div id="account-user-badge" style="display:none; align-items:center; gap:6px; font-size:0.8rem; font-weight:600; padding:2px 8px; border-radius:12px; background:var(--panel-bg); border:1px solid var(--panel-border);">
+    <div id="account-bar" style="display:flex; align-items:center; gap:8px; margin-left:auto;">
+        <div id="account-user-badge" style="display:none; align-items:center; gap:6px; font-size:0.8rem; font-weight:600; padding:3px 10px; border-radius:12px; background:var(--panel-bg); border:1px solid var(--panel-border);">
             <img id="account-user-avatar-img" src="" alt="Avatar" style="display:none; width:20px; height:20px; border-radius:50%; object-fit:cover;">
             <span id="account-user-avatar-text" style="display:inline-block; width:20px; height:20px; border-radius:50%; background:#2563eb; color:#fff; text-align:center; line-height:20px; font-size:11px;">?</span>
             <span id="account-username">Guest</span>
         </div>
-        <button id="auth-sign-in-btn" type="button" style="font-size:0.8rem; padding:4px 10px;">Sign In</button>
-        <button id="auth-sign-out-btn" type="button" class="hidden" style="font-size:0.8rem; padding:4px 10px;">Sign Out</button>
+        <button id="auth-sign-in-btn" type="button" style="display:inline-flex; align-items:center; gap:6px; font-size:0.8rem; font-weight:600; padding:6px 12px; border-radius:6px; background:var(--panel-bg); color:var(--text-color); border:1px solid var(--panel-border); cursor:pointer;">
+            <svg width="14" height="14" viewBox="0 0 24 24"><path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.36 24 12 24z"/><path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.36 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/></svg>
+            <span>Sign in with Google</span>
+        </button>
+        <button id="auth-sign-out-btn" type="button" class="hidden" style="font-size:0.8rem; padding:6px 12px;">Sign Out</button>
     </div>
     <div id="accessibility-announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true" style="position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;"></div>
     </header>
@@ -953,6 +956,10 @@
             <button id="claim-white-btn" type="button" style="font-size:0.75rem; padding:2px 8px;">Play White</button>
             <button id="claim-black-btn" type="button" style="font-size:0.75rem; padding:2px 8px;">Play Black</button>
             <button id="leave-seat-btn" type="button" class="hidden" style="font-size:0.75rem; padding:2px 8px;">Leave Seat</button>
+            <button id="quick-google-signin-btn" type="button" style="display:inline-flex; align-items:center; gap:4px; font-size:0.75rem; padding:2px 8px; border-radius:4px; background:var(--panel-bg); color:var(--text-color); border:1px solid var(--panel-border); font-weight:600; cursor:pointer;" title="Sign in with Google">
+                <svg width="12" height="12" viewBox="0 0 24 24"><path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.36 24 12 24z"/><path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.36 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/></svg>
+                <span>Google Login</span>
+            </button>
             <span id="spectator-badge" style="font-size:0.75rem; padding:2px 6px; border-radius:4px; background:#e0e7ff; color:#3730a3; font-weight:600;" title="Spectators count">👁 0</span>
             <span id="ping-badge" style="font-size:0.72rem; padding:2px 6px; border-radius:4px; background:#f1f5f9; color:#64748b; font-weight:600;" title="Network Latency">--ms</span>
         </div>
@@ -1199,11 +1206,15 @@
                 <p style="margin: 0 0 14px; font-size: 0.85rem; color: var(--muted); line-height: 1.4;">
                     Sign in with your Google account to keep your rating, game history, and analysis saved across devices.
                 </p>
-                <div id="google-btn-wrapper" style="display: flex; justify-content: center; min-height: 44px; margin-bottom: 14px;">
+                <div id="google-btn-wrapper" style="display: flex; flex-direction: column; align-items: center; gap: 10px; min-height: 44px; margin-bottom: 14px;">
                     <div id="g-signin-container"></div>
+                    <button id="google-quick-demo-btn" type="button" style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; max-width: 280px; padding: 10px 14px; font-size: 0.88rem; font-weight: 600; border-radius: 6px; border: 1px solid #dadce0; background: #ffffff; color: #3c4043; cursor: pointer; box-shadow: 0 1px 2px rgba(60,64,67,0.1);">
+                        <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.36 24 12 24z"/><path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.36 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/></svg>
+                        <span>Continue with Google</span>
+                    </button>
                 </div>
-                <div id="google-config-hint" style="display: none; padding: 10px; border-radius: 6px; background: rgba(234, 179, 8, 0.15); border: 1px solid rgba(234, 179, 8, 0.4); font-size: 0.8rem; color: var(--text-color); margin-bottom: 12px;">
-                    Google Client ID not configured on server yet. You can sign in using username/password or add <code>GOOGLE_CLIENT_ID</code> to your deployment environment.
+                <div id="google-config-hint" style="display: none; padding: 10px 12px; border-radius: 6px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); font-size: 0.8rem; color: var(--text-color); margin-bottom: 12px; line-height: 1.4;">
+                    <strong>ℹ️ Quick Google Session:</strong> Click <em>Continue with Google</em> for an instant Google account session. To link your official Google Cloud OAuth credentials, add <code>GOOGLE_CLIENT_ID</code> to your Render environment variables.
                 </div>
             </div>
 

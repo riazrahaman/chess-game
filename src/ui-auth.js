@@ -13,6 +13,7 @@ function updateAuthUI(user) {
   const avatarText = document.getElementById('account-user-avatar-text');
   const signInBtn = document.getElementById('auth-sign-in-btn');
   const signOutBtn = document.getElementById('auth-sign-out-btn');
+  const quickGoogleBtn = document.getElementById('quick-google-signin-btn');
 
   if (user) {
     if (badge) badge.style.display = 'inline-flex';
@@ -30,10 +31,12 @@ function updateAuthUI(user) {
     }
     if (signInBtn) signInBtn.classList.add('hidden');
     if (signOutBtn) signOutBtn.classList.remove('hidden');
+    if (quickGoogleBtn) quickGoogleBtn.style.display = 'none';
   } else {
     if (badge) badge.style.display = 'none';
     if (signInBtn) signInBtn.classList.remove('hidden');
     if (signOutBtn) signOutBtn.classList.add('hidden');
+    if (quickGoogleBtn) quickGoogleBtn.style.display = 'inline-flex';
   }
 }
 
@@ -58,6 +61,7 @@ let googleClientId = null;
 async function initGoogleSignIn() {
   const container = document.getElementById('g-signin-container');
   const hint = document.getElementById('google-config-hint');
+  const demoBtn = document.getElementById('google-quick-demo-btn');
   if (!container) return;
 
   try {
@@ -73,11 +77,13 @@ async function initGoogleSignIn() {
   if (!googleClientId) {
     if (hint) hint.style.display = 'block';
     if (container) container.style.display = 'none';
+    if (demoBtn) demoBtn.style.display = 'inline-flex';
     return;
   }
 
   if (hint) hint.style.display = 'none';
   if (container) container.style.display = 'block';
+  if (demoBtn) demoBtn.style.display = 'none';
 
   function renderGsiButton() {
     if (typeof window.google === 'undefined' || !window.google.accounts || !window.google.accounts.id) return;
@@ -179,9 +185,46 @@ function setupAuthUI() {
   const passwordInput = document.getElementById('auth-password-input');
   const errorEl = document.getElementById('auth-modal-error');
 
+  const quickGoogleBtn = document.getElementById('quick-google-signin-btn');
+  const demoGoogleBtn = document.getElementById('google-quick-demo-btn');
+
   if (signInBtn) signInBtn.onclick = openAuthModal;
+  if (quickGoogleBtn) quickGoogleBtn.onclick = openAuthModal;
   if (closeBtn) closeBtn.onclick = closeAuthModal;
   if (guestBtn) guestBtn.onclick = closeAuthModal;
+
+  if (demoGoogleBtn) {
+    demoGoogleBtn.onclick = async () => {
+      try {
+        const res = await fetch('/api/auth/google', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            demoUser: {
+              name: 'Google Player',
+              email: 'google.player@gmail.com'
+            }
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data.ok && data.user) {
+          updateAuthUI(data.user);
+          closeAuthModal();
+        } else {
+          if (errorEl) {
+            errorEl.textContent = (data && data.error) || 'Failed to sign in.';
+            errorEl.style.display = 'block';
+          }
+        }
+      } catch (err) {
+        if (errorEl) {
+          errorEl.textContent = err.message || 'Error connecting to auth server.';
+          errorEl.style.display = 'block';
+        }
+      }
+    };
+  }
 
   if (signOutBtn) {
     signOutBtn.onclick = async () => {
