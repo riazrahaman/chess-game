@@ -1096,13 +1096,8 @@ function getFenFromStateOrBoard(state) {
   if (state && typeof state.fen === 'string' && state.fen) return state.fen;
   const boardObj = (state && state.board) || (state && state.pieces ? state : board);
   if (!boardObj || !boardObj.pieces) return null;
-  if (typeof boardToFen === 'function') {
-    try { return boardToFen(boardObj); } catch (e) {}
-  }
-  const rules = typeof RulesEngine !== 'undefined' ? RulesEngine : null;
-  if (rules && typeof rules.boardToFen === 'function') {
-    try { return rules.boardToFen(boardObj); } catch (e) {}
-  }
+  // The browser has no RulesEngine / boardToFen global (those live server-side
+  // in rules-engine.js), so build the FEN placement string directly.
   try {
     const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
     const rows = [];
