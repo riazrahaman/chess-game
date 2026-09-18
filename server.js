@@ -1459,6 +1459,8 @@ function createServer() {
         return;
       }
 
+      if (require('./src/routes-puzzles.js').handlePuzzleRoute(req, res, urlPath, { sendJson, sendJsonError, readJsonBody, getAuthUser, parseCookies, gameArchive })) return; // Wave 2 E4: /api/puzzle/*
+
       sendJsonError(res, 404, 'not found');
       return;
     }
