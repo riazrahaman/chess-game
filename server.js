@@ -354,6 +354,7 @@ const ALLOWED_FILES = new Set([
   'src/ui-auth.js',
   'src/shell.js',
   'src/ui-puzzles.js',
+  'src/ui-settings.js',
   'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'

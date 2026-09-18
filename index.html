@@ -878,6 +878,66 @@
             #shell-nav { margin-left: 0; width: 100%; order: 10; }
             #shell-nav a { min-height: 44px; padding: 8px 12px; }
         }
+        /* ---- Wave 2 R1 (Worker A): Play view slimming, Assist drawer, Settings view ---- */
+        #settings-link { display: inline-flex; align-items: center; justify-content: center; min-width: 40px; min-height: 40px; border: 1px solid var(--panel-border); border-radius: 6px; background: var(--panel-bg); color: var(--text-color); text-decoration: none; font-size: 18px; line-height: 1; }
+        #settings-link:hover { background: var(--accent-soft); border-color: var(--accent); }
+        body[data-shell-view="settings"] #settings-link { border-color: var(--accent); color: var(--accent); }
+        .play-card { margin-top: 12px; padding: 12px; background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 8px; }
+        .play-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+        .play-card-title { font-family: Georgia, "Times New Roman", serif; font-size: 16px; letter-spacing: -.3px; }
+        .play-card-label { color: var(--muted); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; font-weight: 600; }
+        #new-game-card .room-line { justify-content: flex-start; }
+        #new-game-card #seat-bar { margin: 10px 0 !important; }
+        #new-game-card #vs-computer-bar { margin-top: 0 !important; background: transparent !important; }
+        .play-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+        .play-card-actions #new-game { flex: 1 1 100%; min-height: 44px; font-size: 14px; }
+        .play-card-actions #copy-room-link, .play-card-actions #new-room-btn { flex: 1 1 0; min-height: 36px; }
+        #command-controls { grid-template-columns: repeat(12, minmax(0, 1fr)); margin: 12px 0 0; }
+        #command-controls > button { grid-column: span 3; }
+        #command-controls #copy-pgn, #command-controls #game-archive-btn, #command-controls #game-review-btn { grid-column: span 4; }
+        #assist-drawer summary { display: flex; align-items: baseline; gap: 8px; cursor: pointer; min-height: 32px; font-size: 13px; font-weight: 600; list-style: none; }
+        #assist-drawer summary::-webkit-details-marker { display: none; }
+        #assist-drawer summary::before { content: "▸"; color: var(--muted); font-size: 12px; }
+        #assist-drawer[open] summary::before { content: "▾"; }
+        #assist-drawer summary .supporting-copy { margin: 0; font-weight: 400; }
+        #assist-drawer #eval-bar-container { margin: 10px 0 8px; height: 16px; }
+        #assist-drawer #multipv-container { margin: 8px 0 0; padding: 10px; }
+        .assist-actions { margin-top: 8px; }
+        .assist-actions #coach-hint-btn { width: 100%; }
+        #a11y-panel .section-label { margin-bottom: 8px; }
+        #a11y-command-form { display: flex; flex-wrap: wrap; gap: 6px; }
+        #a11y-command-input { flex: 1 1 160px; min-width: 0; padding: 8px 10px; font-size: 13px; }
+        #a11y-command-feedback:empty { display: none; }
+        #a11y-command-feedback[data-state="error"] { color: #b91c1c; }
+        #a11y-command-feedback[data-state="ok"] { color: var(--accent); }
+        #a11y-panel #theme-bar { margin-top: 10px; gap: 6px; }
+        #a11y-panel #voice-transcript-status { margin-top: 6px; }
+        .settings-view { max-width: 720px; }
+        .settings-group { margin-top: 16px; padding: 14px 16px; background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 8px; }
+        .settings-group h3 { margin: 0 0 4px; font-family: Georgia, "Times New Roman", serif; font-size: 17px; font-weight: 400; letter-spacing: -.3px; }
+        .settings-group > .supporting-copy { margin: 0 0 8px; }
+        .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--panel-row-border, var(--panel-border)); }
+        .settings-row:first-of-type { border-top: 0; }
+        .settings-row-text { min-width: 0; }
+        .settings-row-text strong { display: block; font-size: 13px; }
+        .settings-row-text span { display: block; color: var(--muted); font-size: 11px; line-height: 1.4; }
+        .settings-row-control { flex-shrink: 0; display: flex; align-items: center; gap: 6px; }
+        .settings-row-control button, .settings-row-control select { min-height: 40px; min-width: 120px; }
+        .settings-row-control button.active { background: var(--accent-soft); border-color: var(--accent); }
+        .settings-shortcuts { margin-top: 10px; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 6px; }
+        .settings-shortcuts li { font-size: 12px; color: var(--muted); }
+        .settings-shortcuts kbd { display: inline-block; min-width: 18px; padding: 1px 5px; border: 1px solid var(--panel-border); border-radius: 4px; background: var(--panel-bg); color: var(--text-color); font-size: 11px; text-align: center; }
+        @media (max-width: 679px) {
+            #status-panel button, #status-panel select, #status-panel input[type="text"], #assist-drawer summary, #settings-link, #scrubber-controls button, #chat-send-btn, .settings-row-control button, .settings-row-control select { min-height: 44px; }
+            #status-panel input[type="checkbox"] { width: 24px; height: 24px; }
+            #vs-computer-bar label { min-height: 44px; }
+            #command-controls > button { grid-column: span 6; }
+            #command-controls #copy-pgn, #command-controls #game-archive-btn, #command-controls #game-review-btn { grid-column: span 4; }
+            .play-card-actions #copy-room-link, .play-card-actions #new-room-btn { flex-basis: 100%; }
+            .play-card-actions #copy-room-link, .play-card-actions #new-room-btn, #graph-panel summary, #account-bar button { min-height: 44px; }
+            .settings-row { flex-wrap: wrap; }
+            .settings-row-control, .settings-row-control button, .settings-row-control select { width: 100%; }
+        }
     </style>
 </head>
 <body>
@@ -885,23 +945,6 @@
     <header class="app-header">
     <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><div><h1>Chess UI</h1><p>A little space to think.</p></div></div>
     <nav id="shell-nav" aria-label="Site"></nav>
-    <div id="theme-bar">
-        <label for="theme-board-select">Board:</label>
-        <select id="theme-board-select">
-            <option value="classic">Classic</option>
-            <option value="classic-dark">Classic Dark</option>
-            <option value="slate">Slate</option>
-            <option value="walnut">Walnut</option>
-            <option value="colorblind">Colorblind-Safe</option>
-            <option value="colorblind-dark">Colorblind-Safe (Dark)</option>
-        </select>
-        <button id="theme-mode-toggle">Dark mode</button>
-        <button id="sound-toggle">Sound: On</button>
-        <button id="voice-toggle" title="Toggle voice move announcements (Shortcut: V)">Voice: Off</button>
-        <button id="mic-move-btn" title="Speak move using microphone (Shortcut: M)">🎤 Mic</button>
-        <button id="blind-mode-toggle" title="Toggle Blind Accessibility Mode (Shortcut: B)">Blind Mode: Off</button>
-        <span id="voice-transcript-status" style="display:none; font-size:0.75rem; padding:2px 6px; border-radius:4px; background:rgba(37,99,235,0.1); color:var(--text-color);"></span>
-    </div>
     <div id="account-bar" style="display:flex; align-items:center; gap:8px; margin-left:auto;">
         <div id="account-user-badge" style="display:none; align-items:center; gap:6px; font-size:0.8rem; font-weight:600; padding:3px 10px; border-radius:12px; background:var(--panel-bg); border:1px solid var(--panel-border);">
             <img id="account-user-avatar-img" src="" alt="Avatar" style="display:none; width:20px; height:20px; border-radius:50%; object-fit:cover;">
@@ -913,15 +956,12 @@
             <span>Sign in with Google</span>
         </button>
         <button id="auth-sign-out-btn" type="button" class="hidden" style="font-size:0.8rem; padding:6px 12px;">Sign Out</button>
+        <a id="settings-link" href="#/settings" aria-label="Settings" title="Settings"><span aria-hidden="true">⚙</span></a>
     </div>
     <div id="accessibility-announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true" style="position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;"></div>
     </header>
     <main id="workspace" class="workspace" tabindex="-1" data-view="play">
     <div id="game-container">
-        <div id="eval-bar-container" role="progressbar" aria-label="Engine Evaluation" aria-valuenow="50" aria-valuemin="0" aria-valuemax="100">
-            <div id="eval-bar-fill"></div>
-            <span id="eval-score-text">+0.0</span>
-        </div>
         <div id="board-shell">
             <div id="rank-labels" aria-hidden="true"></div>
             <div id="board-wrapper" style="position: relative;">
@@ -944,98 +984,153 @@
             </div>
         </div>
         <div id="material-advantage">Material even</div>
-        <div id="multipv-container">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                <span id="analysis-engine-label" style="font-weight: 600; font-size: 0.85rem;">Position analysis · loading engine…</span>
-                <select id="multipv-select" aria-label="Engine lines count" style="font-size: 0.8rem; padding: 2px 4px; border-radius: 4px;">
-                    <option value="1">1 Line</option>
-                    <option value="2">2 Lines</option>
-                    <option value="3" selected>3 Lines</option>
-                </select>
-            </div>
-            <div id="multipv-lines" style="font-size: 0.82rem;"></div>
-            <p id="analysis-engine-caveat" class="supporting-copy">Loading the analysis engine… evaluations appear once it is ready.</p>
-        </div>
     </div>
     <section id="status-panel" aria-label="Game controls">
         <p class="section-label">Your board</p>
-        <div class="room-line">
-        <span id="room-badge" style="margin-left: 8px; font-size: 0.85rem; font-weight: bold; background: #e2e8f0; padding: 2px 8px; border-radius: 4px;">Room: default</span>
-        <select id="time-control-select" aria-label="Game time control" style="font-size: 0.78rem; padding: 2px 6px; border-radius: 4px;">
-            <option value="bullet_1_0">Bullet 1+0</option>
-            <option value="blitz_3_2">Blitz 3+2</option>
-            <option value="blitz_5_3">Blitz 5+3</option>
-            <option value="rapid_10_0">Rapid 10+0</option>
-            <option value="rapid_10_15" selected>Rapid 10+15</option>
-            <option value="classical_15_10">Classical 15+10</option>
-        </select>
-        <button id="copy-room-link" type="button" style="font-size: 0.8rem; padding: 2px 6px;">Copy Room Link</button>
-        <button id="new-room-btn" type="button" style="font-size: 0.8rem; padding: 2px 6px;">New Room</button>
-        </div>
-        <div id="seat-bar" style="display:inline-flex; align-items:center; gap:6px; margin-left:12px;">
-            <span id="seat-badge" style="font-size:0.75rem; padding:2px 6px; border-radius:4px; background:#e2e8f0; font-weight:600;">Unseated</span>
-            <button id="claim-white-btn" type="button" style="font-size:0.75rem; padding:2px 8px;">Play White</button>
-            <button id="claim-black-btn" type="button" style="font-size:0.75rem; padding:2px 8px;">Play Black</button>
-            <button id="leave-seat-btn" type="button" class="hidden" style="font-size:0.75rem; padding:2px 8px;">Leave Seat</button>
-            <button id="quick-google-signin-btn" type="button" style="display:inline-flex; align-items:center; gap:4px; font-size:0.75rem; padding:2px 8px; border-radius:4px; background:var(--panel-bg); color:var(--text-color); border:1px solid var(--panel-border); font-weight:600; cursor:pointer;" title="Sign in with Google">
-                <svg width="12" height="12" viewBox="0 0 24 24"><path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.36 24 12 24z"/><path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.36 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/></svg>
-                <span>Google Login</span>
-            </button>
-            <span id="spectator-badge" style="font-size:0.75rem; padding:2px 6px; border-radius:4px; background:#e0e7ff; color:#3730a3; font-weight:600;" title="Spectators count">👁 0</span>
-            <span id="ping-badge" style="font-size:0.72rem; padding:2px 6px; border-radius:4px; background:#f1f5f9; color:#64748b; font-weight:600;" title="Network Latency">--ms</span>
-        </div>
-        <div id="vs-computer-bar" style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:8px; padding:6px 10px; background:var(--panel-bg); border:1px solid var(--panel-border); border-radius:6px; font-size:0.8rem;">
-            <label style="display:flex; align-items:center; gap:4px; font-weight:600; cursor:pointer;">
-                <input type="checkbox" id="bot-toggle" /> Play vs Computer
-            </label>
-            <select id="bot-level-select" style="font-size:0.78rem; padding:2px 6px; border-radius:4px;">
-                <option value="1">Level 1 (Novice ~800)</option>
-                <option value="2">Level 2 (Apprentice ~1000)</option>
-                <option value="3" selected>Level 3 (Casual ~1200)</option>
-                <option value="4">Level 4 (Club ~1400)</option>
-                <option value="5">Level 5 (Tactician ~1600)</option>
-                <option value="6">Level 6 (Strong Club ~1800)</option>
-                <option value="7">Level 7 (Advanced ~2000)</option>
-                <option value="8">Level 8 (Expert ~2300)</option>
-            </select>
-            <select id="bot-color-select" style="font-size:0.78rem; padding:2px 6px; border-radius:4px;">
-                <option value="black" selected>Bot plays Black</option>
-                <option value="white">Bot plays White</option>
-            </select>
-            <span id="bot-status-badge" style="font-size:0.72rem; padding:2px 6px; border-radius:4px; background:#f1f5f9; color:#64748b; font-weight:600;">Bot: Off</span>
-        </div>
         <p id="board-instructions" class="visually-hidden">Use the arrow keys to move between squares. Press Enter or Space to select a piece or move it.</p>
         <div id="info">Turn: White</div>
         <div id="status" aria-live="polite">Status: Ongoing</div>
         <div id="connection-status" role="status" aria-live="polite" data-state="connecting">Connecting to referee…</div>
         <div id="command-status" role="status" aria-live="assertive" data-state="idle"></div>
         <button id="retry-command" class="hidden" type="button">Retry last action</button>
-        <div id="command-controls">
-            <button id="new-game" type="button">New Game</button>
-            <button id="game-review-btn" type="button">Game Review</button>
-            <button id="game-archive-btn" type="button">Game Archive</button>
-            <button id="copy-pgn" type="button">Copy PGN</button>
-            <button id="flip-board" type="button">Flip</button>
+
+        <!-- R1: one "New game" card — time control, seat, computer opponent, one primary button. -->
+        <div id="new-game-card" class="play-card" role="group" aria-labelledby="new-game-card-title">
+            <div class="play-card-head">
+                <span id="new-game-card-title" class="play-card-title">New game</span>
+                <span id="room-badge" style="margin-left: 8px; font-size: 0.85rem; font-weight: bold; background: #e2e8f0; padding: 2px 8px; border-radius: 4px;">Room: default</span>
+            </div>
+            <div class="room-line">
+                <label for="time-control-select" class="play-card-label">Time</label>
+                <select id="time-control-select" aria-label="Game time control" style="font-size: 0.78rem; padding: 2px 6px; border-radius: 4px;">
+                    <option value="bullet_1_0">Bullet 1+0</option>
+                    <option value="blitz_3_2">Blitz 3+2</option>
+                    <option value="blitz_5_3">Blitz 5+3</option>
+                    <option value="rapid_10_0">Rapid 10+0</option>
+                    <option value="rapid_10_15" selected>Rapid 10+15</option>
+                    <option value="classical_15_10">Classical 15+10</option>
+                </select>
+            </div>
+            <div id="seat-bar" style="display:inline-flex; align-items:center; gap:6px; margin-left:12px;">
+                <span id="seat-badge" style="font-size:0.75rem; padding:2px 6px; border-radius:4px; background:#e2e8f0; font-weight:600;">Unseated</span>
+                <button id="claim-white-btn" type="button" style="font-size:0.75rem; padding:2px 8px;">Play White</button>
+                <button id="claim-black-btn" type="button" style="font-size:0.75rem; padding:2px 8px;">Play Black</button>
+                <button id="leave-seat-btn" type="button" class="hidden" style="font-size:0.75rem; padding:2px 8px;">Leave Seat</button>
+                <button id="quick-google-signin-btn" type="button" style="display:inline-flex; align-items:center; gap:4px; font-size:0.75rem; padding:2px 8px; border-radius:4px; background:var(--panel-bg); color:var(--text-color); border:1px solid var(--panel-border); font-weight:600; cursor:pointer;" title="Sign in with Google">
+                    <svg width="12" height="12" viewBox="0 0 24 24"><path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.36 24 12 24z"/><path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.36 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/></svg>
+                    <span>Google Login</span>
+                </button>
+                <span id="spectator-badge" style="font-size:0.75rem; padding:2px 6px; border-radius:4px; background:#e0e7ff; color:#3730a3; font-weight:600;" title="Spectators count">👁 0</span>
+                <span id="ping-badge" style="font-size:0.72rem; padding:2px 6px; border-radius:4px; background:#f1f5f9; color:#64748b; font-weight:600;" title="Network Latency">--ms</span>
+            </div>
+            <div id="vs-computer-bar" style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:8px; padding:6px 10px; background:var(--panel-bg); border:1px solid var(--panel-border); border-radius:6px; font-size:0.8rem;">
+                <label style="display:flex; align-items:center; gap:4px; font-weight:600; cursor:pointer;">
+                    <input type="checkbox" id="bot-toggle" /> Play vs Computer
+                </label>
+                <select id="bot-level-select" style="font-size:0.78rem; padding:2px 6px; border-radius:4px;">
+                    <option value="1">Level 1 (Novice ~800)</option>
+                    <option value="2">Level 2 (Apprentice ~1000)</option>
+                    <option value="3" selected>Level 3 (Casual ~1200)</option>
+                    <option value="4">Level 4 (Club ~1400)</option>
+                    <option value="5">Level 5 (Tactician ~1600)</option>
+                    <option value="6">Level 6 (Strong Club ~1800)</option>
+                    <option value="7">Level 7 (Advanced ~2000)</option>
+                    <option value="8">Level 8 (Expert ~2300)</option>
+                </select>
+                <select id="bot-color-select" style="font-size:0.78rem; padding:2px 6px; border-radius:4px;">
+                    <option value="black" selected>Bot plays Black</option>
+                    <option value="white">Bot plays White</option>
+                </select>
+                <span id="bot-status-badge" style="font-size:0.72rem; padding:2px 6px; border-radius:4px; background:#f1f5f9; color:#64748b; font-weight:600;">Bot: Off</span>
+            </div>
+            <div class="play-card-actions">
+                <button id="new-game" type="button">New Game</button>
+                <button id="copy-room-link" type="button" style="font-size: 0.8rem; padding: 2px 6px;">Copy Room Link</button>
+                <button id="new-room-btn" type="button" style="font-size: 0.8rem; padding: 2px 6px;">New Room</button>
+            </div>
+        </div>
+
+        <!-- R1: game commands stay visible, grouped. -->
+        <div id="command-controls" role="group" aria-label="Game commands">
             <button id="resign" type="button">Resign</button>
             <button id="offer-draw" type="button">Draw</button>
             <button id="undo" type="button">Undo</button>
-            <button id="claim-draw" type="button" class="hidden" style="grid-column: span 2; background: #0f766e; border-color: #0f766e; color: #fff; font-weight: 600;">Claim draw</button>
-            <div id="draw-offer-banner" class="hidden" role="status" aria-live="polite" style="grid-column: span 4; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; padding: 8px 12px; background: rgba(15, 118, 110, 0.08); border: 1px solid rgba(15, 118, 110, 0.35); border-radius: 6px; font-size: 0.82rem;">
+            <button id="flip-board" type="button">Flip</button>
+            <button id="copy-pgn" type="button">Copy PGN</button>
+            <button id="game-archive-btn" type="button">Game Archive</button>
+            <button id="game-review-btn" type="button">Game Review</button>
+            <button id="claim-draw" type="button" class="hidden" style="grid-column: span 6; background: #0f766e; border-color: #0f766e; color: #fff; font-weight: 600;">Claim draw</button>
+            <div id="draw-offer-banner" class="hidden" role="status" aria-live="polite" style="grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; padding: 8px 12px; background: rgba(15, 118, 110, 0.08); border: 1px solid rgba(15, 118, 110, 0.35); border-radius: 6px; font-size: 0.82rem;">
                 <span id="draw-offer-text" style="font-weight: 600; color: #0f766e;"></span>
                 <span id="draw-offer-actions" style="display: flex; gap: 6px;">
                     <button id="accept-draw" type="button" style="padding: 4px 10px; background: #0f766e; border-color: #0f766e; color: #fff; font-weight: 600;">Accept</button>
                     <button id="decline-draw" type="button" style="padding: 4px 10px;">Decline</button>
                 </span>
             </div>
-            <button id="coach-hint-btn" type="button" style="grid-column: span 2; background: #d97706; border-color: #d97706; color: #fff; font-weight: 600;">Coach Hint 💡</button>
-            <button id="rematch-btn" type="button" class="hidden" style="grid-column: span 4; background: #059669; border-color: #059669; color: #fff; font-weight: 600;">Offer Rematch</button>
+            <button id="rematch-btn" type="button" class="hidden" style="grid-column: 1 / -1; background: #059669; border-color: #059669; color: #fff; font-weight: 600;">Offer Rematch</button>
         </div>
-        <div id="coach-hint-banner" class="hidden" style="margin-top: 8px; padding: 8px 12px; background: rgba(217, 119, 6, 0.08); border: 1px solid rgba(217, 119, 6, 0.3); border-radius: 6px; font-size: 0.82rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                <span style="font-weight: 600; color: #b45309;">Coach Advice &amp; Hint</span>
-                <button id="close-coach-hint" type="button" style="background: none; border: none; font-size: 0.8rem; cursor: pointer; color: #b45309;">✕</button>
+
+        <!-- R1: Assist — engine eval + lines live in an opt-in drawer (closed by default,
+             open/closed remembered in localStorage). Coach Hint sits beside it. -->
+        <div id="assist-block" class="play-card">
+            <details id="assist-drawer">
+                <summary><span class="play-card-title">Assist</span> <span class="supporting-copy">Engine evaluation &amp; candidate lines</span></summary>
+                <div id="eval-bar-container" role="progressbar" aria-label="Engine Evaluation" aria-valuenow="50" aria-valuemin="0" aria-valuemax="100">
+                    <div id="eval-bar-fill"></div>
+                    <span id="eval-score-text">+0.0</span>
+                </div>
+                <div id="multipv-container">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        <span id="analysis-engine-label" style="font-weight: 600; font-size: 0.85rem;">Position analysis · loading engine…</span>
+                        <select id="multipv-select" aria-label="Engine lines count" style="font-size: 0.8rem; padding: 2px 4px; border-radius: 4px;">
+                            <option value="1">1 Line</option>
+                            <option value="2">2 Lines</option>
+                            <option value="3" selected>3 Lines</option>
+                        </select>
+                    </div>
+                    <div id="multipv-lines" style="font-size: 0.82rem;"></div>
+                    <p id="analysis-engine-caveat" class="supporting-copy">Loading the analysis engine… evaluations appear once it is ready.</p>
+                </div>
+            </details>
+            <div class="assist-actions">
+                <button id="coach-hint-btn" type="button" style="background: #d97706; border-color: #d97706; color: #fff; font-weight: 600;">Coach Hint 💡</button>
             </div>
-            <div id="coach-hint-text"></div>
+            <div id="coach-hint-banner" class="hidden" style="margin-top: 8px; padding: 8px 12px; background: rgba(217, 119, 6, 0.08); border: 1px solid rgba(217, 119, 6, 0.3); border-radius: 6px; font-size: 0.82rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <span style="font-weight: 600; color: #b45309;">Coach Advice &amp; Hint</span>
+                    <button id="close-coach-hint" type="button" style="background: none; border: none; font-size: 0.8rem; cursor: pointer; color: #b45309;">✕</button>
+                </div>
+                <div id="coach-hint-text"></div>
+            </div>
+        </div>
+
+        <!-- R4: typed move/command entry (a11y-text-entry.js) + mic. The display &
+             accessibility toggles below travel to the Settings view while it is open. -->
+        <div id="a11y-panel" class="play-card" role="group" aria-labelledby="a11y-panel-title">
+            <p id="a11y-panel-title" class="section-label">Accessibility &amp; display</p>
+            <form id="a11y-command-form" autocomplete="off">
+                <label for="a11y-command-input" class="visually-hidden">Type a move or a command</label>
+                <input id="a11y-command-input" type="text" inputmode="text" maxlength="40" placeholder="Type a move (e4, Nf3, e2e4) or a command (resign, draw, undo, hint)" aria-describedby="a11y-command-feedback" />
+                <button id="a11y-command-submit" type="submit">Go</button>
+                <button id="mic-move-btn" type="button" title="Speak move using microphone (Shortcut: M)">🎤 Mic</button>
+            </form>
+            <div id="a11y-command-feedback" role="status" aria-live="polite" class="supporting-copy"></div>
+            <span id="voice-transcript-status" style="display:none; font-size:0.75rem; padding:2px 6px; border-radius:4px; background:rgba(37,99,235,0.1); color:var(--text-color);"></span>
+            <div id="theme-bar">
+                <label for="theme-board-select">Board:</label>
+                <select id="theme-board-select">
+                    <option value="classic">Classic</option>
+                    <option value="classic-dark">Classic Dark</option>
+                    <option value="slate">Slate</option>
+                    <option value="walnut">Walnut</option>
+                    <option value="colorblind">Colorblind-Safe</option>
+                    <option value="colorblind-dark">Colorblind-Safe (Dark)</option>
+                </select>
+                <button id="theme-mode-toggle">Dark mode</button>
+                <button id="sound-toggle">Sound: On</button>
+                <button id="voice-toggle" title="Toggle voice move announcements (Shortcut: V)">Voice: Off</button>
+                <button id="blind-mode-toggle" title="Toggle Blind Accessibility Mode (Shortcut: B)">Blind Mode: Off</button>
+            </div>
         </div>
     </section>
     <div id="history-container">
@@ -1341,6 +1436,7 @@
        <script src="src/ui-auth.js"></script>
        <script src="src/shell.js"></script>
        <script src="src/ui-puzzles.js"></script>
+       <script src="src/ui-settings.js"></script>
        <script src="src/ui.js"></script>
     <script>
         if ('serviceWorker' in navigator) {
