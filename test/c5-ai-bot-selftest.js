@@ -20,6 +20,7 @@ process.env.CHESS_JOURNAL_FILE = path.join(B7_TMP_DIR, '.referee-journal.jsonl')
 process.on('exit', () => { try { fs.rmSync(B7_TMP_DIR, { recursive: true, force: true }); } catch (_) {} });
 const { createServer, botService, BOT_LEVELS } = require('../server.js');
 const referee = require('../src/referee-service.js');
+const engineServer = require('../src/engine-server.js');
 
 let server;
 let baseUrl;
@@ -73,21 +74,32 @@ async function runTests() {
   assert(htmlContent.includes('id="bot-status-badge"'), 'index.html must contain #bot-status-badge');
   console.log('✔ Passed: All Play vs Computer UI elements verified in index.html');
 
-  // Test 3: Bot Levels and Personalities
+  // Test 3: Bot Levels (E1b/E2: real-engine ladder, Skill Level for L1-L3,
+  // UCI_Elo 1320-3190 for L4-L8, every level capped by depth or movetime).
   assert.strictEqual(Object.keys(BOT_LEVELS).length, 8, '8 distinct bot levels must exist');
   for (let lvl = 1; lvl <= 8; lvl++) {
     const profile = BOT_LEVELS[lvl];
     assert(profile.name, `Level ${lvl} has a name`);
-    assert(profile.rating >= 600 && profile.rating <= 1400, `Level ${lvl} rating within honest 600-1400 band (E2)`);
-    assert(profile.depth >= 1 && profile.depth <= 4, `Level ${lvl} depth between 1 and 4`);
+    assert(profile.rating >= 800 && profile.rating <= 2300, `Level ${lvl} rating within the ~800-2300 engine band (E2)`);
     assert(typeof profile.greeting === 'string', `Level ${lvl} has flavor greeting`);
+    const hasSkill = profile.skill !== null;
+    const hasElo = profile.elo !== null;
+    assert(hasSkill !== hasElo, `Level ${lvl} uses exactly one of Skill Level / UCI_Elo`);
+    if (hasSkill) assert(profile.skill >= 0 && profile.skill <= 20, `Level ${lvl} Skill Level 0-20`);
+    if (hasElo) assert(profile.elo >= engineServer.UCI_ELO_MIN && profile.elo <= engineServer.UCI_ELO_MAX, `Level ${lvl} UCI_Elo in Stockfish range`);
+    assert(profile.depth !== null || profile.movetime !== null, `Level ${lvl} has a depth or movetime cap`);
+    if (profile.movetime !== null) assert(profile.movetime <= 800, `Level ${lvl} movetime <= 800ms keeps the server responsive`);
+    if (lvl >= 3) assert.strictEqual(profile.blunderRate, 0, `Level ${lvl} has no forced blunders`);
+    if (lvl >= 5) assert.strictEqual(profile.useBook, false, `Level ${lvl} plays the engine move, not the illustrative book`);
+    if (lvl >= 2) assert(profile.rating > BOT_LEVELS[lvl - 1].rating, `Level ${lvl} rating increases monotonically`);
   }
-  console.log('✔ Passed: All 8 bot profiles and persona configurations validated');
+  assert(engineServer.isAvailable(), 'vendored Stockfish 19 lite is available to the server');
+  console.log('✔ Passed: All 8 bot profiles validated against the real-engine ladder');
 
-  // Test 4: Bot move generation across levels
+  // Test 4: Bot move generation across levels (async: engine runs in a worker thread)
   const startFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
   for (let lvl = 1; lvl <= 8; lvl++) {
-    const move = botService.computeBotMove(startFen, lvl);
+    const move = await botService.computeBotMove(startFen, lvl);
     assert(typeof move === 'string' && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(move), `Bot level ${lvl} produces legal UCI move: ${move}`);
   }
   console.log('✔ Passed: Bot move generation verified across all levels 1–8');
@@ -131,8 +143,8 @@ async function runTests() {
   assert.strictEqual(moveRes.status, 200);
   assert(moveRes.json.ok);
 
-  // Wait 600ms for bot think delay and move execution
-  await new Promise(r => setTimeout(r, 650));
+  // Wait for bot think delay (200-450ms) + Level 4 movetime (300ms) + engine queue
+  await new Promise(r => setTimeout(r, 2000));
 
   // Verify referee state now has 2 moves in history (White's move + Bot's move)
   const stateRes = await request(`/api/state?room=${room}`);
@@ -155,8 +167,8 @@ async function runTests() {
     body: { enabled: true, level: 2, color: 'white' }
   });
 
-  // Wait 600ms for White bot opening move
-  await new Promise(r => setTimeout(r, 650));
+  // Wait for White bot opening move (think delay + book/engine)
+  await new Promise(r => setTimeout(r, 1500));
 
   const whiteBotState = await request(`/api/state?room=${roomWhiteBot}`);
   assert.strictEqual(whiteBotState.status, 200);
@@ -175,11 +187,13 @@ async function runTests() {
 
   console.log('\nAll 10 tests passed successfully!');
   server.close();
+  await engineServer.shutdown();
   process.exit(0);
 }
 
-runTests().catch(err => {
+runTests().catch(async (err) => {
   console.error('Test failure:', err);
   if (server) server.close();
+  try { await engineServer.shutdown(); } catch (_) {}
   process.exit(1);
 });
