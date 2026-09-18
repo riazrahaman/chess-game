@@ -293,6 +293,9 @@ const MIME = {
   '.webmanifest': 'application/manifest+json',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
+  // B10: kept for the future real engine build. 'src/stockfish.js' and
+  // 'src/stockfish.wasm' do not exist in the repo yet, so they are NOT in
+  // ALLOWED_FILES; re-add them there when the WASM engine actually ships.
   '.wasm': 'application/wasm'
 };
 
@@ -310,8 +313,6 @@ const ALLOWED_FILES = new Set([
   'src/ui-archive.js',
   'src/pieces.js',
   'src/stockfish-worker.js',
-  'src/stockfish.js',
-  'src/stockfish.wasm',
   'src/move-review.js',
   'src/openings-db.js',
   'src/game-archive.js',
