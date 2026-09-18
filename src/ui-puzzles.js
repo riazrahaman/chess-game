@@ -138,8 +138,8 @@
   .pz-tabs button { min-height: 40px; padding: 6px 14px; border-radius: 20px; }
   .pz-tabs button[aria-selected="true"] { background: var(--accent, #355a42); color: var(--panel-bg, #fff); border-color: var(--accent, #355a42); }
   .pz-board-wrap { position: relative; }
-  .pz-board { display: grid; grid-template-columns: repeat(8, 1fr); width: 100%; aspect-ratio: 1 / 1; border: 3px solid var(--board-border, #333); border-radius: 6px; overflow: hidden; user-select: none; touch-action: manipulation; }
-  .pz-sq { position: relative; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .pz-board { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); width: 100%; aspect-ratio: 1 / 1; border: 3px solid var(--board-border, #333); border-radius: 6px; overflow: hidden; user-select: none; touch-action: manipulation; }
+  .pz-sq { position: relative; display: flex; align-items: center; justify-content: center; cursor: pointer; min-width: 0; min-height: 0; }
   .pz-sq.light { background: var(--sq-white, #eeeed2); }
   .pz-sq.dark { background: var(--sq-black, #769656); }
   .pz-sq.last::after { content: ''; position: absolute; inset: 0; background: var(--last-move, rgba(255,193,77,0.45)); pointer-events: none; }
