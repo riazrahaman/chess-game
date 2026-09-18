@@ -10,6 +10,10 @@ let legalMoves = [];
 let whiteTime = null;
 let blackTime = null;
 let refereeClockAt = null;
+// B1: true only once the referee reports the game has actually started
+// (history non-empty, moveStartTs running). Before that, clocks render the
+// referee value verbatim — no interpolation, so a fresh game shows full time.
+let refereeClockRunning = false;
 let clockTickInterval = null;
 let moveHistory = [];
 let lastKnownStateJson = "";
@@ -194,6 +198,9 @@ function formatTime(seconds) {
 function interpolatedActiveSeconds() {
   if (whiteTime === null || blackTime === null || refereeClockAt === null) return null;
   if (gameOver) return turn === 'white' ? whiteTime : blackTime;
+  // B1: the referee only starts a clock after the first move. Until then
+  // nothing is elapsing, so show the reported value unchanged.
+  if (!refereeClockRunning) return turn === 'white' ? whiteTime : blackTime;
   const elapsedMs = Date.now() - refereeClockAt;
   const elapsed = Math.max(0, elapsedMs / 1000);
   if (turn === 'white') return Math.max(0, whiteTime - elapsed);
@@ -1175,6 +1182,12 @@ function applyRefereeState(state) {
     // A8: stamp the moment referee truth arrived so render-only interpolation
     // can subtract elapsed seconds between polls. This never mutates the truth.
     refereeClockAt = Date.now();
+    // B1: interpolate only once the referee says the game is underway. The
+    // referee keeps moveStartTs at 0 until the first move lands (and zeroes it
+    // again at game end); history is the primary signal, moveStartTs secondary.
+    const historyLength = Array.isArray(state.history) ? state.history.length : 0;
+    const moveStartTs = typeof state.moveStartTs === 'number' ? state.moveStartTs : null;
+    refereeClockRunning = !gameOver && historyLength > 0 && (moveStartTs === null || moveStartTs > 0);
     ensureClockTick();
   }
   let lastMove = null;
@@ -1782,6 +1795,7 @@ function initGame() {
   whiteTime = null;
   blackTime = null;
   refereeClockAt = null;
+  refereeClockRunning = false;
   moveHistory = [];
   refereeStatus = 'ongoing';
   gameOver = false;
