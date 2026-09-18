@@ -3,33 +3,52 @@
 /**
  * bot-service.js
  * C5: Play vs Computer (Levels 1–8 AI Opponent Bot)
- * Autonomous bot opponent using local heuristic engine with strength levels,
+ * Autonomous bot opponent driven by Stockfish 19 lite (engine-server.js,
+ * worker thread) with the PST heuristic engine as fallback, strength levels,
  * humanized think delays, flavor commentary, and referee integration.
  */
 
 const stockfishWorker = require('./stockfish-worker.js');
 const rulesEngine = require('./rules-engine.js');
 const openingsDb = require('./openings-db.js');
+let engineServer = null;
+try {
+  engineServer = require('./engine-server.js');
+} catch (_) {
+  engineServer = null; // vendored engine missing: PST fallback only
+}
 
-// Ratings are HONEST ESTIMATES for the built-in PST+material heuristic engine
-// (no quiescence search, depth <= 4). They were relabelled on 2026-09-18 from an
-// earlier 800-2200 ladder that overstated strength by ~800 points (see
-// docs/06-world-class-roadmap.md, E2). Re-calibrate when a real engine ships (E1).
+// E1b/E2 — the ladder is implemented on the real engine (Stockfish 19 lite,
+// `engine-server.js`, in a worker thread). Per level we set either
+// `Skill Level` (0–20, L1–L3) or `UCI_LimitStrength` + `UCI_Elo` (L4–L8),
+// plus a depth/movetime cap so the server stays responsive.
 //
-// `topN`: when > 1 the bot picks uniformly among the top-N engine lines whose
-// score is within `topNMarginCp` of the best, which is what separates levels
-// 5/6 and 7/8 (previously identical configurations with different labels).
+// `rating` values are "~" ESTIMATES. L4–L8 quote the UCI_Elo target we hand
+// Stockfish. That option is calibrated by the Stockfish team for the
+// full-strength engine at roughly classical time controls; the 1 MB "lite"
+// net searching for <= 600 ms is somewhat weaker than the number it targets,
+// so treat these as upper bounds until measured against real players.
+// L1–L3 use Skill Level at a fixed shallow depth (Skill 0 at depth 1 is far
+// below the 1320 floor of UCI_Elo) and are rough guesses.
+//
+// `blunderRate` (a uniformly random legal move, rolled in this file) is kept
+// only for L1–L2 to mimic the "hangs a piece" errors of true beginners.
+// `useBook`: consult the openings-db book (L1–L4 only). Its move frequencies
+// are illustrative, not real statistics (roadmap E3), so real-engine levels
+// just play the engine's move.
 const BOT_LEVELS = {
-  1: { level: 1, name: 'Novice Bot', rating: 600, depth: 1, blunderRate: 0.35, topN: 1, greeting: 'Hi! Let’s have a fun match!' },
-  2: { level: 2, name: 'Apprentice Bot', rating: 700, depth: 1, blunderRate: 0.20, topN: 1, greeting: 'Watch out for my knights!' },
-  3: { level: 3, name: 'Casual Bot', rating: 850, depth: 2, blunderRate: 0.10, topN: 1, greeting: 'Let’s battle for the center.' },
-  4: { level: 4, name: 'Club Bot', rating: 1000, depth: 2, blunderRate: 0.02, topN: 1, greeting: 'I’m watching every tactical pin and fork.' },
-  5: { level: 5, name: 'Tactician Bot', rating: 1100, depth: 3, blunderRate: 0.00, topN: 3, greeting: 'Solid openings and steady calculation.' },
-  6: { level: 6, name: 'Strong Club Bot', rating: 1200, depth: 3, blunderRate: 0.00, topN: 1, greeting: 'Preparing a positional plan.' },
-  7: { level: 7, name: 'Advanced Bot', rating: 1300, depth: 4, blunderRate: 0.00, topN: 2, greeting: 'Calculation initiated. Every tempo counts.' },
-  8: { level: 8, name: 'Expert Bot', rating: 1400, depth: 4, blunderRate: 0.00, topN: 1, greeting: 'Maximum precision for this engine.' }
+  1: { level: 1, name: 'Novice Bot', rating: 800, skill: 0, elo: null, depth: 1, movetime: null, blunderRate: 0.10, useBook: true, greeting: 'Hi! Let’s have a fun match!' },
+  2: { level: 2, name: 'Apprentice Bot', rating: 1000, skill: 2, elo: null, depth: 2, movetime: null, blunderRate: 0.04, useBook: true, greeting: 'Watch out for my knights!' },
+  3: { level: 3, name: 'Casual Bot', rating: 1200, skill: 5, elo: null, depth: 4, movetime: null, blunderRate: 0, useBook: true, greeting: 'Let’s battle for the center.' },
+  4: { level: 4, name: 'Club Bot', rating: 1400, skill: null, elo: 1400, depth: null, movetime: 300, blunderRate: 0, useBook: true, greeting: 'I’m watching every tactical pin and fork.' },
+  5: { level: 5, name: 'Tactician Bot', rating: 1600, skill: null, elo: 1600, depth: null, movetime: 400, blunderRate: 0, useBook: false, greeting: 'Solid openings and steady calculation.' },
+  6: { level: 6, name: 'Strong Club Bot', rating: 1800, skill: null, elo: 1800, depth: null, movetime: 500, blunderRate: 0, useBook: false, greeting: 'Preparing a positional plan.' },
+  7: { level: 7, name: 'Advanced Bot', rating: 2000, skill: null, elo: 2000, depth: null, movetime: 600, blunderRate: 0, useBook: false, greeting: 'Calculation initiated. Every tempo counts.' },
+  8: { level: 8, name: 'Expert Bot', rating: 2300, skill: null, elo: 2300, depth: null, movetime: 600, blunderRate: 0, useBook: false, greeting: 'Maximum precision. Stockfish 19 at ~2300.' }
 };
-const TOP_N_MARGIN_CP = 60;
+// Search cap for the legacy PST fallback engine (`stockfish-worker.js`), used
+// only when the real engine is unavailable or rejects.
+const PST_FALLBACK_DEPTH = { 1: 1, 2: 1, 3: 2, 4: 2, 5: 3, 6: 3, 7: 4, 8: 4 };
 
 class BotService {
   constructor(seatAuthManager) {
@@ -102,25 +121,39 @@ class BotService {
     };
     this.rooms.set(roomId, state);
 
+    // Warm the real engine so its one-time init overlaps the human's first move.
+    if (engineServer && engineServer.isAvailable()) {
+      engineServer.getEngine().ready().catch(() => {});
+    }
+
     return {
       ok: true,
       ...this.getBotConfig(roomId)
     };
   }
 
-  computeBotMove(fen, level = 3, moveHistory = []) {
+  /**
+   * Pick the bot's move for `fen` at `level`. Async: the real engine runs in
+   * a worker thread. Resolves to a UCI string or null when no legal move.
+   * Order: opening book (L1–L4, first 10 plies) → blunder roll (L1–L2) →
+   * Stockfish 19 via engine-server.js → PST fallback (stockfish-worker.js).
+   */
+  async computeBotMove(fen, level = 3, moveHistory = []) {
     const profile = BOT_LEVELS[level] || BOT_LEVELS[3];
     const parsed = typeof fen === 'string' ? stockfishWorker.parseFen(fen) : fen;
     if (!parsed) return null;
 
     const candidateMoves = stockfishWorker.generateCandidateMoves(parsed);
     if (!candidateMoves || candidateMoves.length === 0) return null;
+    const isLegal = (uci) => candidateMoves.some(m => m.uci === uci);
 
     const fenStr = typeof fen === 'string' ? fen : (rulesEngine ? rulesEngine.boardToFen(fen) : '');
     const isStartPos = fenStr.startsWith('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR');
 
-    // 1. Opening book check (first 10 plies)
-    if (openingsDb && typeof openingsDb.findOpening === 'function') {
+    // 1. Opening book (L1–L4 only, first 10 plies). Frequencies in
+    //    openings-db.js are illustrative, so the pick is uniform among the
+    //    listed book moves rather than weighted by them.
+    if (profile.useBook && openingsDb && typeof openingsDb.findOpening === 'function') {
       const history = Array.isArray(moveHistory) ? moveHistory : [];
       const canConsultBook = history.length > 0 ? (history.length < 10) : isStartPos;
       if (canConsultBook) {
@@ -128,41 +161,44 @@ class BotService {
         if (opening && opening.popularMoves && opening.popularMoves.length > 0) {
           const isExactMatch = opening.isExact || (history.length === 0 && isStartPos);
           if (isExactMatch) {
-            const followBook = profile.blunderRate === 0 || Math.random() > profile.blunderRate;
-            if (followBook) {
-              const bookCandidates = level >= 5
-                ? [opening.popularMoves[0].uci]
-                : opening.popularMoves.map(m => m.uci);
-
-              const chosenBookMove = bookCandidates.find(bm => candidateMoves.some(m => m.uci === bm));
-              if (chosenBookMove) {
-                return chosenBookMove;
-              }
+            const bookCandidates = opening.popularMoves.map(m => m.uci).filter(isLegal);
+            if (bookCandidates.length > 0) {
+              return bookCandidates[Math.floor(Math.random() * bookCandidates.length)];
             }
           }
         }
       }
     }
 
-    // 2. Check blunder roll for lower difficulty levels
+    // 2. Blunder roll (L1–L2): a uniformly random legal move.
     if (profile.blunderRate > 0 && Math.random() < profile.blunderRate && candidateMoves.length > 1) {
-      const randomIndex = Math.floor(Math.random() * candidateMoves.length);
-      return candidateMoves[randomIndex].uci;
+      return candidateMoves[Math.floor(Math.random() * candidateMoves.length)].uci;
     }
 
-    // 3. Engine calculation with profile's configured depth.
-    //    topN > 1: choose among near-equal top lines so adjacent levels differ.
-    if (profile.topN > 1 && typeof stockfishWorker.evaluateMultiPV === 'function') {
-      const lines = stockfishWorker.evaluateMultiPV(parsed, profile.depth, profile.topN) || [];
-      const legal = lines.filter(l => l && candidateMoves.some(m => m.uci === l.bestMove));
-      if (legal.length > 0) {
-        const best = legal[0].scoreRaw;
-        const near = legal.filter(l => Math.abs(l.scoreRaw - best) <= TOP_N_MARGIN_CP);
-        return near[Math.floor(Math.random() * near.length)].bestMove;
+    // 3. Real engine. Any rejection (missing vendor files, crash, timeout)
+    //    falls through to the PST path so the bot never stalls.
+    if (engineServer && engineServer.isAvailable()) {
+      try {
+        const opts = {};
+        if (profile.depth !== null) opts.depth = profile.depth;
+        if (profile.movetime !== null) opts.movetime = profile.movetime;
+        if (profile.elo !== null) opts.elo = profile.elo;
+        if (profile.skill !== null) opts.skill = profile.skill;
+        const result = await engineServer.analyse(fenStr, opts);
+        if (result && result.bestMove && isLegal(result.bestMove)) {
+          return result.bestMove;
+        }
+      } catch (err) {
+        if (!this._warnedEngine) {
+          this._warnedEngine = true;
+          console.warn('bot-service: real engine unavailable, using PST fallback:', err && err.message);
+        }
       }
     }
-    const searchResult = stockfishWorker.findBestMove(parsed, { depth: profile.depth });
-    if (searchResult && searchResult.bestMove && candidateMoves.some(m => m.uci === searchResult.bestMove)) {
+
+    // 4. PST fallback (legacy heuristic engine, much weaker than the labels).
+    const searchResult = stockfishWorker.findBestMove(parsed, { depth: PST_FALLBACK_DEPTH[profile.level] || 2 });
+    if (searchResult && searchResult.bestMove && isLegal(searchResult.bestMove)) {
       return searchResult.bestMove;
     }
 
@@ -210,7 +246,7 @@ class BotService {
 
         const fen = freshRef.state.fen || rulesEngine.boardToFen(freshRef.state.board);
         const history = (freshRef.state && Array.isArray(freshRef.state.history)) ? freshRef.state.history : [];
-        const botMove = this.computeBotMove(fen, config.level, history);
+        const botMove = await this.computeBotMove(fen, config.level, history);
 
         if (botMove) {
           const cmdId = 'bot-' + config.color + '-' + Date.now() + '-' + Math.random().toString(36).slice(2);
@@ -254,5 +290,6 @@ class BotService {
 
 module.exports = {
   BotService,
-  BOT_LEVELS
+  BOT_LEVELS,
+  PST_FALLBACK_DEPTH
 };
