@@ -14,9 +14,16 @@
  * makeMove or createInitialBoard and never touches referee state.
  *
  * Public API:
- *   loadFromTSV(tsvText)        — parse TSV, populate internal map
+ *   loadFromTSV(tsvText)        — parse TSV, populate internal map. Accepts a
+ *                                 `uci`/`moves` column, or (Node only, via
+ *                                 chess.js) the lichess `pgn` SAN column.
+ *   loadFromFile(path)          — Node: read + loadFromTSV; returns the map
+ *   ensureDefaultLoaded()       — Node: load data/openings.tsv once (idempotent)
  *   getTSVMap()                 — retrieve the parsed TSV map
- *   exploreOpening(moves)       — lookup { eco, name, matchedPlies, isExact, stats? }
+ *   exploreOpening(moves)       — lookup { eco, name, pgn?, matchedPlies, isExact }
+ *   continuations(moves)        — next moves seen in TSV lines extending `moves`
+ *   linesExtending(moves)       — TSV entries whose move list strictly extends `moves`
+ *   isKnownLine(moves)          — `moves` is a TSV line or a prefix of one
  *   personalExplorer(archive, movesOrFen) — query archive for real win rates
  *   getBundledOpenings()        — returns the bundled real-data opening entries
  */
@@ -27,9 +34,14 @@
 
 let OpeningsDB = null;
 let GameArchive = null;
+let ChessCtor = null;   // chess.js (Node only) — SAN→UCI for the lichess `pgn` column
+let nodeFs = null;
+let nodePath = null;
 if (typeof require === 'function') {
   try { OpeningsDB = require('./openings-db.js'); } catch (_) {}
   try { GameArchive = require('./game-archive.js'); } catch (_) {}
+  try { ChessCtor = require('chess.js').Chess; } catch (_) {}
+  try { nodeFs = require('fs'); nodePath = require('path'); } catch (_) {}
 }
 if (!OpeningsDB && typeof window !== 'undefined') OpeningsDB = window.Openings;
 if (!GameArchive && typeof window !== 'undefined') GameArchive = window.GameArchive;
@@ -77,7 +89,12 @@ const BUNDLED_OPENINGS = [
  * where uci is a space-joined UCI move sequence (e.g. "e2e4 e7e5").  *
  * ------------------------------------------------------------------ */
 
-let _tsvMap = null; // Map<string, {eco, name, moves}>
+let _tsvMap = null; // Map<string, {eco, name, moves, pgn}>
+// Prefix index built alongside the map: key (space-joined UCI prefix, '' for
+// the start position) → Map<nextUci, count of TSV lines that continue with it>.
+// Counts are "named lines in the TSV", never game counts.
+let _prefixIndex = null;
+let _defaultLoadAttempted = false;
 
 /**
  * Parse a TSV string and populate the internal opening map.
@@ -111,6 +128,7 @@ function loadFromTSV(tsvText) {
   const uciCol = colIdx.uci != null ? colIdx.uci : (colIdx.moves != null ? colIdx.moves : null);
 
   const map = new Map();
+  const index = new Map();
 
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -119,23 +137,69 @@ function loadFromTSV(tsvText) {
     const cols = line.split('\t');
     const eco = (cols[ecoCol] || '').trim();
     const name = (cols[nameCol] || '').trim();
+    const pgn = colIdx.pgn != null && cols[colIdx.pgn] ? cols[colIdx.pgn].trim() : null;
 
     let movesArr = [];
     if (uciCol != null && cols[uciCol]) {
       movesArr = cols[uciCol].trim().split(/\s+/).filter(m => m.length > 0);
-    } else if (colIdx.pgn != null && cols[colIdx.pgn]) {
-      // If we have PGN but no UCI, try to extract moves from PGN movetext
-      movesArr = _pgnToUci(cols[colIdx.pgn].trim());
+    } else if (pgn) {
+      // lichess chess-openings ships SAN only; convert with chess.js (Node).
+      movesArr = _pgnToUci(pgn);
+      if (movesArr.length === 0) continue; // unconvertible row: skip, never guess
     }
 
     const key = movesArr.join(' ');
     if (key || eco) {
-      map.set(key, { eco, name, moves: movesArr });
+      const entry = { eco, name, moves: movesArr };
+      if (pgn) entry.pgn = pgn;
+      map.set(key, entry);
+      for (let k = 0; k < movesArr.length; k++) {
+        const prefix = movesArr.slice(0, k).join(' ');
+        let bucket = index.get(prefix);
+        if (!bucket) { bucket = new Map(); index.set(prefix, bucket); }
+        bucket.set(movesArr[k], (bucket.get(movesArr[k]) || 0) + 1);
+      }
     }
   }
 
   _tsvMap = map;
+  _prefixIndex = index;
   return map;
+}
+
+/**
+ * Node only: read a TSV file from disk and load it. Returns the map, or null
+ * when the file cannot be read (the caller degrades to bundled data).
+ * @param {string} filePath
+ */
+function loadFromFile(filePath) {
+  if (!nodeFs || typeof filePath !== 'string') return null;
+  try {
+    const text = nodeFs.readFileSync(filePath, 'utf8');
+    return loadFromTSV(text);
+  } catch (_) {
+    return null;
+  }
+}
+
+/** Default dataset location (repo `data/openings.tsv`; see data/README-openings.md). */
+function defaultTSVPath() {
+  if (!nodePath) return null;
+  return nodePath.join(__dirname, '..', 'data', 'openings.tsv');
+}
+
+/**
+ * Node only: load data/openings.tsv once. Idempotent; returns true when a
+ * non-empty TSV map is available (already loaded or loaded now).
+ */
+function ensureDefaultLoaded() {
+  if (_tsvMap && _tsvMap.size > 0) return true;
+  if (_defaultLoadAttempted) return false;
+  _defaultLoadAttempted = true;
+  const p = defaultTSVPath();
+  if (!p) return false;
+  const map = loadFromFile(p);
+  return !!(map && map.size > 0);
 }
 
 /**
@@ -155,20 +219,22 @@ function getBundledOpenings() {
 }
 
 /**
- * Best-effort conversion of PGN movetext to UCI moves.
- * This is a simple parser for standard algebraic notation; it does NOT
- * validate against a position (no makeMove calls).  It handles common
- * SAN patterns: piece moves, captures, castling, promotions, en passant.
- * If conversion fails, returns empty array.
+ * Convert PGN movetext (SAN) to UCI moves with chess.js (Node only; the
+ * browser build never receives the `pgn` column). Returns [] when chess.js is
+ * unavailable or the movetext is invalid — a row is then skipped, not guessed.
  *
  * @param {string} pgn  — PGN movetext (no headers)
  * @returns {string[]}  — UCI move strings (e.g. ['e2e4', 'e7e5'])
  */
 function _pgnToUci(pgn) {
-  if (!pgn) return [];
-  // This is a stub — real PGN→UCI requires position tracking which would
-  // need engine.js.  For the explorer, we expect TSV with UCI column.
-  return [];
+  if (!pgn || !ChessCtor) return [];
+  try {
+    const c = new ChessCtor();
+    c.loadPgn(String(pgn));
+    return c.history({ verbose: true }).map(m => m.from + m.to + (m.promotion || ''));
+  } catch (_) {
+    return [];
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -193,12 +259,14 @@ function exploreOpening(moves) {
   if (_tsvMap && _tsvMap.size > 0) {
     const result = _prefixLookup(_tsvMap, moves);
     if (result) {
-      return {
+      const out = {
         eco: result.entry.eco,
         name: result.entry.name,
         matchedPlies: result.matchedPlies,
         isExact: result.matchedPlies === moves.length
       };
+      if (result.entry.pgn) out.pgn = result.entry.pgn;
+      return out;
     }
   }
 
@@ -269,6 +337,85 @@ function _prefixLookupBundled(moves) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Continuations (what the TSV knows after a given move sequence)     *
+ * ------------------------------------------------------------------ */
+
+function _normalizeMoves(moves) {
+  if (Array.isArray(moves)) return moves.filter(m => typeof m === 'string' && m.length > 0);
+  if (typeof moves === 'string') return moves.trim().split(/\s+/).filter(m => m.length > 0);
+  return [];
+}
+
+/**
+ * TSV entries whose move list strictly extends `moves` (same prefix, longer).
+ * Empty when no TSV is loaded.
+ * @param {string[]|string} moves
+ * @returns {Array<{eco,name,moves,pgn?}>}
+ */
+function linesExtending(moves) {
+  if (!_tsvMap || _tsvMap.size === 0) return [];
+  const arr = _normalizeMoves(moves);
+  const n = arr.length;
+  const out = [];
+  for (const entry of _tsvMap.values()) {
+    if (entry.moves.length <= n) continue;
+    let ok = true;
+    for (let i = 0; i < n; i++) {
+      if (entry.moves[i] !== arr[i]) { ok = false; break; }
+    }
+    if (ok) out.push(entry);
+  }
+  return out;
+}
+
+/**
+ * Next moves seen in TSV lines that continue from `moves`.
+ * `lines` = how many named TSV lines continue with that move (NOT a game count).
+ * `eco`/`name` come from the position reached if it is itself named, else from
+ * the shortest named line through that move.
+ * @param {string[]|string} moves
+ * @returns {Array<{uci:string, lines:number, eco:string|null, name:string|null, named:boolean}>}
+ */
+function continuations(moves) {
+  if (!_prefixIndex) return [];
+  const arr = _normalizeMoves(moves);
+  const bucket = _prefixIndex.get(arr.join(' '));
+  if (!bucket) return [];
+  const out = [];
+  for (const [uci, lines] of bucket.entries()) {
+    const nextKey = arr.concat(uci).join(' ');
+    const direct = _tsvMap.get(nextKey);
+    let eco = null, name = null, named = false;
+    if (direct) {
+      eco = direct.eco; name = direct.name; named = true;
+    } else {
+      let best = null;
+      for (const e of linesExtending(arr.concat(uci))) {
+        if (!best || e.moves.length < best.moves.length) best = e;
+      }
+      if (best) { eco = best.eco; name = best.name; }
+    }
+    out.push({ uci, lines, eco, name, named });
+  }
+  out.sort((a, b) => b.lines - a.lines || a.uci.localeCompare(b.uci));
+  return out;
+}
+
+/**
+ * Is `moves` a known book line — exactly a TSV entry, or a prefix of one?
+ * The empty sequence (start position) is a prefix of every line.
+ * @param {string[]|string} moves
+ * @returns {boolean}
+ */
+function isKnownLine(moves) {
+  if (!_tsvMap || _tsvMap.size === 0) return false;
+  const arr = _normalizeMoves(moves);
+  const key = arr.join(' ');
+  if (_tsvMap.has(key)) return true;
+  return !!(_prefixIndex && _prefixIndex.has(key));
+}
+
+/* ------------------------------------------------------------------ *
  * Personal explorer (queries the game archive)                       *
  * ------------------------------------------------------------------ */
 
@@ -326,9 +473,10 @@ function personalExplorer(archive, movesOrFen) {
     const prefix = movesArr.join(' ');
     const matched = games.filter(function (g) {
       if (!g.moves || typeof g.moves !== 'string') return false;
-      // The moves field is space-joined UCI; check prefix
+      // The moves field is space-joined UCI; match whole plies only
+      // ('e7e8' must not match a game starting 'e7e8q ...').
       if (movesArr.length === 0) return true;
-      return g.moves.startsWith(prefix);
+      return g.moves === prefix || g.moves.startsWith(prefix + ' ');
     });
 
     const count = matched.length;
@@ -364,8 +512,14 @@ function personalExplorer(archive, movesOrFen) {
 
 const OpeningsExplorerAPI = {
   loadFromTSV,
+  loadFromFile,
+  ensureDefaultLoaded,
+  defaultTSVPath,
   getTSVMap,
   exploreOpening,
+  continuations,
+  linesExtending,
+  isKnownLine,
   personalExplorer,
   getBundledOpenings,
   BUNDLED_OPENINGS

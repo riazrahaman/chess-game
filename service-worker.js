@@ -44,6 +44,7 @@ const PRECACHE_ASSETS = [
   '/src/ui-settings.js',
   '/src/ui-compete.js',
   '/src/ui-profile.js',
+  '/src/ui-analysis.js',
   '/src/ui.js',
   '/manifest.webmanifest',
   '/assets/icon.svg'

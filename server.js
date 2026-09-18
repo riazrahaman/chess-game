@@ -359,6 +359,7 @@ const ALLOWED_FILES = new Set([
   'src/ui-settings.js',
   'src/ui-compete.js',
   'src/ui-profile.js',
+  'src/ui-analysis.js',
   'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'
@@ -1464,6 +1465,7 @@ function createServer() {
         handleGetGameEndpoint(req, res, decodeURIComponent(gameIdMatch[1]));
         return;
       }
+      if (require('./src/routes-openings.js').handleOpeningsRoute(req, res, urlPath, { sendJson, sendJsonError, readJsonBody })) return; // Wave 2 E3: /api/openings/*, /api/fen/validate
 
       if (require('./src/routes-puzzles.js').handlePuzzleRoute(req, res, urlPath, { sendJson, sendJsonError, readJsonBody, getAuthUser, parseCookies, gameArchive })) return; // Wave 2 E4: /api/puzzle/*
       if (SocialRoutes.handleSocialRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readBody, maxBodyBytes: MAX_BODY_BYTES, referee, seatAuth: seatAuthManager, isValidRoomId, accountsManager, gameArchive, ratingsStore: ratingHook.store, botService })) return; // Wave 2 R2: lobby/leaderboard/arena/social routes

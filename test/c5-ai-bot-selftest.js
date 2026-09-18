@@ -90,7 +90,7 @@ async function runTests() {
     assert(profile.depth !== null || profile.movetime !== null, `Level ${lvl} has a depth or movetime cap`);
     if (profile.movetime !== null) assert(profile.movetime <= 800, `Level ${lvl} movetime <= 800ms keeps the server responsive`);
     if (lvl >= 3) assert.strictEqual(profile.blunderRate, 0, `Level ${lvl} has no forced blunders`);
-    if (lvl >= 5) assert.strictEqual(profile.useBook, false, `Level ${lvl} plays the engine move, not the illustrative book`);
+    if (lvl >= 5) assert.strictEqual(profile.useBook, false, `Level ${lvl} plays the engine move, not the opening book`);
     if (lvl >= 2) assert(profile.rating > BOT_LEVELS[lvl - 1].rating, `Level ${lvl} rating increases monotonically`);
   }
   assert(engineServer.isAvailable(), 'vendored Stockfish 19 lite is available to the server');
