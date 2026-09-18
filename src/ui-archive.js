@@ -2,7 +2,7 @@
 // ui-archive.js — SQLite Game Archive & PGN Library UI extracted from ui.js.
 // Loaded as a classic <script> before ui.js. Shares global scope.
 // Depends on: liveHistory, liveBoard, moveHistory, historyPositions, viewedPly,
-//             historyToSan, buildPgn, pgnResultToken, computeHistoryPositions,
+//             sanListFromPositions, buildPgn, pgnResultToken, positionsToHistorySnapshots, livePositions,
 //             jumpToPly, updateHistoryUI, updateScrubberButtons,
 //             renderBoard, showUiError, runRefereeCommand, withRoomParam,
 //             getAuthHeaders, pollReferee, statusElement (all from ui.js / engine.js).
@@ -18,7 +18,7 @@ async function autoSaveFinishedGame(state) {
   lastAutoSavedGameId = gameSignature;
 
   const rawHistory = liveHistory;
-  const sanList = historyToSan(rawHistory);
+  const sanList = sanListFromPositions(livePositions, rawHistory);
   const resultToken = pgnResultToken();
   const pgnText = buildPgn(sanList, resultToken);
 
@@ -136,13 +136,16 @@ async function viewArchivedGame(gameId) {
         board: liveBoard,
         moves: moveHistory.slice(),
         positions: historyPositions.slice(),
+        livePositions: livePositions.slice(),
         viewedPly
       };
     }
     viewingArchivedGame = true;
 
     liveHistory = uciMoves.slice();
-    const sanHistory = historyToSan(uciMoves);
+    // B3: the server ships per-ply positions for archived games too.
+    livePositions = Array.isArray(game.positions) ? game.positions : [];
+    const sanHistory = sanListFromPositions(livePositions, uciMoves);
     const moves = [];
     for (let i = 0; i < uciMoves.length; i += 2) {
       moves.push({
@@ -153,9 +156,7 @@ async function viewArchivedGame(gameId) {
       });
     }
     moveHistory = moves;
-    if (typeof computeHistoryPositions === 'function') {
-      historyPositions = computeHistoryPositions(liveHistory);
-    }
+    historyPositions = positionsToHistorySnapshots(livePositions);
     jumpToPly(0);
     updateHistoryUI();
     if (statusElement) {
@@ -177,6 +178,7 @@ function exitArchivedGameView() {
   liveBoard = savedLiveStateBeforeArchive.board;
   moveHistory = savedLiveStateBeforeArchive.moves;
   historyPositions = savedLiveStateBeforeArchive.positions;
+  livePositions = savedLiveStateBeforeArchive.livePositions || [];
   viewedPly = savedLiveStateBeforeArchive.viewedPly;
   savedLiveStateBeforeArchive = null;
   renderBoard();

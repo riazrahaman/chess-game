@@ -93,13 +93,31 @@ async function run() {
     const alertCalls = uiCode.match(/alert\(/g);
     assert(alertCalls === null, `ui.js has zero literal alert() calls (got ${alertCalls ? alertCalls.length : 0})`);
 
-    // Verify Gate 4 architectural invariant (ui.js + all extracted modules)
-    assert(!uiCode.includes('makeMove('), 'ARCHITECTURAL INVARIANT: ui.js does not contain makeMove(');
-    assert(!uiCode.includes('createInitialBoard('), 'ARCHITECTURAL INVARIANT: ui.js does not contain createInitialBoard(');
-    for (const mod of ['ui-sound.js', 'ui-theme.js', 'ui-annotations.js', 'ui-archive.js']) {
+    // Verify Gate 4 architectural invariant (ui.js + all extracted modules).
+    // B3: the check is a token scan, not a substring match, so split-string
+    // lookups like x['make' + 'Move'] or computed access cannot dodge it, and
+    // client-side SAN replay (historyToSan) is banned too.
+    const gate4Violations = code => {
+      const hits = [];
+      const stripped = code.replace(/'[^'\n]*'|"[^"\n]*"|`[^`]*`/g, m => {
+        // keep string contents visible to the scanner, but flag concatenation
+        // that would rebuild a banned identifier
+        return m;
+      });
+      for (const name of ['makeMove', 'createInitialBoard', 'historyToSan']) {
+        if (new RegExp('\\b' + name + '\\b').test(stripped)) hits.push(name);
+      }
+      // rebuild banned names from adjacent string literals: 'make' + 'Move'
+      const concat = stripped.replace(/['"]\s*\+\s*['"]/g, '');
+      for (const name of ['makeMove', 'createInitialBoard', 'historyToSan']) {
+        if (new RegExp(name).test(concat) && !hits.includes(name)) hits.push(name + ' (via string concatenation)');
+      }
+      return hits;
+    };
+    assert(gate4Violations(uiCode).length === 0, `ARCHITECTURAL INVARIANT: ui.js must not reference ${gate4Violations(uiCode).join(', ')}`);
+    for (const mod of ['ui-sound.js', 'ui-theme.js', 'ui-annotations.js', 'ui-archive.js', 'ui-auth.js']) {
       const modCode = fs.readFileSync(path.join(__dirname, '..', 'src', mod), 'utf8');
-      assert(!modCode.includes('makeMove('), `ARCHITECTURAL INVARIANT: ${mod} does not contain makeMove(`);
-      assert(!modCode.includes('createInitialBoard('), `ARCHITECTURAL INVARIANT: ${mod} does not contain createInitialBoard(`);
+      assert(gate4Violations(modCode).length === 0, `ARCHITECTURAL INVARIANT: ${mod} must not reference ${gate4Violations(modCode).join(', ')}`);
     }
 
     // Verify periodic NTP sync

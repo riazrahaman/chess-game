@@ -62,6 +62,72 @@ function ensureClocks(s) {
   return s;
 }
 
+// B3: per-ply positions are referee-authoritative. Each entry is
+// { fen, san, lastMove } for ply 0..n so the client never replays moves.
+function positionEntry(board, moveStr, san) {
+  let fen = null;
+  try { fen = rulesEngine.boardToFen(board); } catch (_) {}
+  return {
+    fen,
+    san: san || null,
+    lastMove: moveStr ? { from: moveStr.slice(0, 2), to: moveStr.slice(2, 4) } : null
+  };
+}
+
+function safeSan(board, moveStr) {
+  try { return engine.moveToSan(board, moveStr); } catch (_) { return null; }
+}
+
+function refreshClaimableDraw(s) {
+  if (s.gameOver) { s.claimableDraw = null; return; }
+  try { s.claimableDraw = rulesEngine.claimableDraw(s.board, s.history); }
+  catch (_) { s.claimableDraw = null; }
+}
+
+// Legacy snapshots (pre-B3) have no positions; rebuild from the standard start
+// position when the replay lands on the snapshot's own FEN, otherwise expose
+// only the current position so the scrubber degrades instead of lying.
+function ensurePositions(s) {
+  const want = (s.history ? s.history.length : 0) + 1;
+  if (Array.isArray(s.positions) && s.positions.length === want) return s;
+  const positions = [];
+  try {
+    let b = engine.createInitialBoard();
+    positions.push(positionEntry(b, null, null));
+    for (const moveStr of (s.history || [])) {
+      const san = safeSan(b, moveStr);
+      b = engine.makeMove(b, moveStr.slice(0, 2), moveStr.slice(2, 4), moveStr[4]);
+      positions.push(positionEntry(b, moveStr, san));
+    }
+    const finalFen = positions[positions.length - 1].fen;
+    if (s.fen && finalFen && finalFen.split(' ')[0] !== s.fen.split(' ')[0]) throw new Error('mismatch');
+    s.positions = positions;
+  } catch (_) {
+    s.positions = [positionEntry(s.board, null, null)];
+  }
+  if (!Object.prototype.hasOwnProperty.call(s, 'claimableDraw')) refreshClaimableDraw(s);
+  return s;
+}
+
+// Pure helper for non-live histories (archive view): positions from the
+// standard start position. Returns null if any move is illegal.
+function buildPositions(history) {
+  try {
+    let b = engine.createInitialBoard();
+    const positions = [positionEntry(b, null, null)];
+    for (const moveStr of (history || [])) {
+      // chess.js validates legality here (engine.makeMove does not).
+      const san = rulesEngine.san(b, moveStr.slice(0, 2), moveStr.slice(2, 4), moveStr[4]);
+      if (!san) return null;
+      b = engine.makeMove(b, moveStr.slice(0, 2), moveStr.slice(2, 4), moveStr[4]);
+      positions.push(positionEntry(b, moveStr, san));
+    }
+    return positions;
+  } catch (_) {
+    return null;
+  }
+}
+
 function newGame(timeControl) {
   const board = engine.createInitialBoard();
   const tc = timeControl || { preset: 'rapid_10_15', baseSeconds: CLOCK_START_SECONDS, incrementSeconds: CLOCK_INCREMENT_SECONDS, name: 'Rapid 10+15' };
@@ -83,7 +149,9 @@ function newGame(timeControl) {
     drawOffer: null,
     rematchOffer: null,
     timeControl: tc,
-    fen: rulesEngine.boardToFen(board)
+    fen: rulesEngine.boardToFen(board),
+    positions: [positionEntry(board, null, null)],
+    claimableDraw: { claimable: false, reason: null }
   };
    return s;
 }
@@ -181,6 +249,7 @@ function rebuildState(history, moveTimestamps) {
   const s = newGame();
   s.history = [];
   s.moveTimestamps = [];
+  s.positions = [positionEntry(s.board, null, null)];
   let prevTs = 0;
   for (let i = 0; i < history.length; i++) {
     const moveStr = history[i];
@@ -194,9 +263,11 @@ function rebuildState(history, moveTimestamps) {
       s.elapsed[mover] = s.elapsed[mover] + delta;
     }
     s.clocks[mover] = Math.max(0, s.clocks[mover] - MOVE_TIME_COST_SECONDS);
+    const san = safeSan(s.board, moveStr);
     s.board = engine.makeMove(s.board, from, to, promo);
     s.history.push(moveStr);
     s.moveTimestamps.push(moveTs);
+    s.positions.push(positionEntry(s.board, moveStr, san));
     s.clocks[mover] = Math.min(CLOCK_START_SECONDS, s.clocks[mover] + CLOCK_INCREMENT_SECONDS);
     prevTs = moveTs;
   }
@@ -217,6 +288,7 @@ function rebuildState(history, moveTimestamps) {
     }
   }
   s.fen = rulesEngine.boardToFen(s.board);
+  refreshClaimableDraw(s);
   return s;
 }
 
@@ -297,9 +369,12 @@ function applyMove(s, moveStr, moveTs, lagCompMs = 0) {
   const from = moveStr.slice(0, 2);
   const to = moveStr.slice(2, 4);
   const promo = moveStr.length > 4 ? moveStr[4] : undefined;
+  const san = safeSan(s.board, moveStr);
   s.board = engine.makeMove(s.board, from, to, promo);
   s.history.push(moveStr);
   s.moveTimestamps.push(typeof moveTs === 'number' ? moveTs : 0);
+  if (!Array.isArray(s.positions)) ensurePositions(s);
+  s.positions.push(positionEntry(s.board, moveStr, san));
   const baseSec = (s.timeControl && typeof s.timeControl.baseSeconds === 'number') ? s.timeControl.baseSeconds : CLOCK_START_SECONDS;
   const incSec = (s.timeControl && typeof s.timeControl.incrementSeconds === 'number') ? s.timeControl.incrementSeconds : CLOCK_INCREMENT_SECONDS;
   s.clocks[turn] = Math.min(baseSec + 3600, s.clocks[turn] + incSec);
@@ -321,6 +396,7 @@ function applyMove(s, moveStr, moveTs, lagCompMs = 0) {
     }
   }
   s.fen = rulesEngine.boardToFen(s.board);
+  refreshClaimableDraw(s);
   return { flagged: false };
 }
 
@@ -340,7 +416,9 @@ function stateView(s) {
     elapsed: s.elapsed,
     board: renderAscii(s.board),
     history: historyStr(s.history),
-    plyCount: s.history.length
+    plyCount: s.history.length,
+    positions: s.positions || null,
+    claimableDraw: s.claimableDraw || null
   };
 }
 
@@ -367,7 +445,7 @@ class RefereeService {
     let snapMtime = 0;
     try {
       const raw = fs.readFileSync(this.stateFile, 'utf8');
-      snapshot = ensureClocks(JSON.parse(raw));
+      snapshot = ensurePositions(ensureClocks(JSON.parse(raw)));
       snapMtime = fs.statSync(this.stateFile).mtimeMs;
     } catch (_) { /* no snapshot */ }
 
@@ -408,7 +486,7 @@ class RefereeService {
     let snapMtime = 0;
     try {
       const raw = fs.readFileSync(this.stateFile, 'utf8');
-      snapshot = ensureClocks(JSON.parse(raw));
+      snapshot = ensurePositions(ensureClocks(JSON.parse(raw)));
       snapMtime = fs.statSync(this.stateFile).mtimeMs;
     } catch (_) { /* no snapshot */ }
     if (snapshot) {
@@ -599,6 +677,7 @@ class RefereeService {
   }
 
   _journalAndSnapshot(type, args, moveTs) {
+    if (this.state && this.state.gameOver) this.state.claimableDraw = null;
     this._journalSeq++;
     const entry = { seq: this._journalSeq, id: this._journalSeq, type, args, ts: (typeof moveTs === 'number' ? moveTs : Date.now()) };
     appendJournal(entry, this.journalFile);
@@ -776,7 +855,9 @@ class RefereeService {
       drawOffer: null,
       rematchOffer: null,
       timeControl: tc,
-      fen: rulesEngine.boardToFen(board)
+      fen: rulesEngine.boardToFen(board),
+      positions: [positionEntry(board, null, null)],
+      claimableDraw: { claimable: false, reason: null }
     };
     this._journalAndSnapshot('setup', { fen });
     return Object.assign({ ok: true, setup: true, fen: this.state.fen }, stateView(this.state));
@@ -881,6 +962,7 @@ function resetInstance(roomId) {
 
 module.exports = {
   RefereeService,
+  buildPositions,
   getReferee,
   resetInstance,
   getRoomStateFile,

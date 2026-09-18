@@ -181,7 +181,7 @@ async function main() {
   assert(/id="connection-status"[^>]*role="status"[^>]*aria-live="polite"/.test(html), 'connection changes have a polite status region');
   assert(/@media \(max-width: 720px\)/.test(html) && /@media \(max-height: 760px\)/.test(html), 'responsive rules cover mobile and short laptop viewports');
   assert(/@media \(prefers-reduced-motion: reduce\)/.test(html) && /transition-duration: 0\.01ms/.test(html), 'reduced-motion mode suppresses transitions and animations');
-  assert(!/\bmakeMove\s*\(|\bcreateInitialBoard\s*\(/.test(ui), 'UI never creates or mutates an authoritative chess board locally');
+  assert(!/\b(makeMove|createInitialBoard|historyToSan)\b/.test(ui) && !/(make|Initial|history)['"]\s*\+\s*['"](Move|Board|ToSan)/.test(ui), 'UI never creates, mutates, or replays an authoritative chess board locally (B3: token scan, concatenation-proof)');
 
   const harness = createHarness();
   const { context, elements, document, promoButtons } = harness;
