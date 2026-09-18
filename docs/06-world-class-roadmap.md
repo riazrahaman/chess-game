@@ -24,7 +24,7 @@ single biggest finding of this audit:
 
 | Claim | Reality (verified) |
 |---|---|
-| "X1 Stockfish WASM in the Web Worker — Done" | **No engine binary exists anywhere.** `stockfish-worker.js:768,978` fetches `src/stockfish.wasm`, which has never existed; `ALLOWED_FILES` (`server.js:311-312`) whitelists two nonexistent files; on failure it silently falls back to a PST+material heuristic. The selftest only string-matches `server.js`. |
+| "X1 Stockfish WASM in the Web Worker — Done" | **No engine binary exists anywhere.** `stockfish-worker.js:768,978` fetches `src/stockfish.wasm`, which has never existed; `ALLOWED_FILES` (`server.js:311-312`) whitelists two nonexistent files; on failure it silently falls back to a PST+material heuristic. The selftest only string-matches `server.js`. **→ fixed in Wave 1**: Stockfish 19 lite-single WASM vendored under `vendor/stockfish/` (96e5d51), loaded in the Worker and on the server; `test/wave1-engine-selftest.js` actually runs the engine. |
 | Bot levels "Novice 800 … GM 2200" (`index.html:954-961`) | Same PST engine, depth 1–4, **no quiescence search**, no TT, no iterative deepening. Depth-1 probe hangs a queen to a defended pawn. Honest strength ≈ **1000–1400**. Levels 5≡6 and 7≡8 are identical configs with different labels. |
 | "P1 Import lichess 6.1M puzzle CSV into SQLite — Done" | `puzzle-service.js` is **in-memory** (`replaceStore` :120-124), no CSV shipped, **no puzzles table**, **0 puzzles**, no route, not loaded by `index.html`. |
 | "A2.3 Real opening explorer — Done" | `openings-explorer.js` is **never loaded**. The UI still renders the 25-entry `openings-db.js` with **fabricated win-rates** (`ui.js:1946-1990`) — now with an "illustrative" caveat — and the bot uses those fabricated frequencies as its opening book. |
@@ -107,12 +107,12 @@ rematch `decline` arm. No orphan client fetches.
 
 ## 3. PHASE 1 — Credibility (do first; everything compounds on this)
 
-### E1 Ship a real engine `[display + server]` — **L, highest leverage in the codebase**
+### E1 Ship a real engine `[display + server]` — **L, highest leverage in the codebase** — **in progress (Wave 1, branch `feat/wave1-real-engine`)**
 
 Every AI feature — eval bar, CAPS accuracy, coach hints, mistake puzzles, ACPL, post-game report, bot
 strength — reads the same PST number. Verified 2026 integration path:
 
-**Phase E1a — client eval: `stockfish` npm v19.0.0, lite single-thread.**
+**Phase E1a — client eval: `stockfish` npm v19.0.0, lite single-thread.** — **in progress (Wave 1, branch `feat/wave1-real-engine`)** — vendored at `vendor/stockfish/` (not `src/`), GPL-3.0 accepted (`Copying.txt` + README + README.md Licence section); Worker A wires `stockfish-worker.js`/`ui.js` + `ALLOWED_FILES`/`PRECACHE_ASSETS`.
 - Files: `stockfish-19-lite-single.js` (21 KB) + `stockfish-19-lite-single.wasm` (**1.79 MB**, net compiled in — confirm no runtime `.nnue` fetch before precaching). Stockfish 19 released 2026-09-05 (SFNNv16 net). Sources: https://github.com/nmrugg/stockfish.js , https://stockfishchess.org/blog/2026/stockfish-19/
 - Copy into `src/`, add to `ALLOWED_FILES` (replacing the two phantom entries), serve `.wasm` as `application/wasm`, add to `PRECACHE_ASSETS`.
 - **No COOP/COEP needed** (single-thread). CSP: add `'wasm-unsafe-eval'` to `script-src` and then drop `'unsafe-eval'` (`server.js:454-471`).
@@ -120,7 +120,7 @@ strength — reads the same PST number. Verified 2026 integration path:
 - License: GPLv3 (the npm package's copyright line reads "(c) 2026, Chess.com, LLC" — **verify** the exact terms before shipping). The project owner must confirm GPL distribution is acceptable. If not, use E1c only.
 - Do NOT ship the 99 MB full-net build; do not precache any net > 2 MB.
 
-**Phase E1b — server-side engine for `bot-service.js`, reports and the eval cache (X3).**
+**Phase E1b — server-side engine for `bot-service.js`, reports and the eval cache (X3).** — **in progress (Wave 1, branch `feat/wave1-real-engine`)** — Option A chosen: same vendored WASM under Node (`src/engine-server.js`, Worker B).
 - Option A: same `stockfish` npm under Node in a `worker_thread`, one per active bot room, UCI over messages.
 - Note on `@lichess-org/stockfish-web` (alternative small-WASM + separate `.nnue` route): npm says AGPL-3.0-or-later while GitHub metadata says GPL-3.0 — **unresolved; treat as AGPL** until clarified.
 - Option B (strongest): native Stockfish 19 binary via `child_process.spawn` — on Render, vendor a Linux x86-64 binary or build in Docker; check `avx2/bmi2` on the dyno. Running server-side has no GPL distribution obligation.
@@ -134,7 +134,7 @@ board; you ship nothing. https://github.com/lichess-org/external-engine — M.
 `crossOriginIsolated === true`; COEP will block `tablebase.lichess.ovh` unless proxied through `server.js`.
 Only after E1a is stable.
 
-### E2 Honest bot ladder `[server]` — S (now), then re-calibrate after E1 — **relabel + dedupe done 8c42752 / 5533297**
+### E2 Honest bot ladder `[server]` — S (now), then re-calibrate after E1 — **relabel + dedupe done 8c42752 / 5533297**; real-engine ladder — **in progress (Wave 1, branch `feat/wave1-real-engine`)** (Worker B; `#bot-level-select` labels applied at merge)
 - Relabel levels 1–8 to observed strength (≈ 600–1400 today). Remove the duplicate configs (5≡6, 7≡8).
 - After E1b: implement levels via real engine with `UCI_LimitStrength` / `UCI_Elo` (Stockfish supports 1320–3190) plus depth/time caps; keep the human-delay simulation.
 - Wire `personality-bots.js` — its `pickMove` is real (±40 cp bias on `.score`/`.activity`) but nothing produces those fields. Feed it MultiPV candidates from E1b.
@@ -213,8 +213,8 @@ files; **no ETag / Last-Modified / 304**; keep-alive on.
 - D1 gzip/brotli via `zlib` when `Accept-Encoding` allows — S. **Done 498e2d1** (`ui.js` 118 KB → 30 KB gzip / 26 KB br).
 - D2 `Cache-Control: public, max-age=31536000, immutable` for `/src/*` and `/assets/*` with a content-hash query param stamped by a tiny `scripts/stamp-assets.js`; keep `no-store` for `/api/*` only; ETag from mtime+size — S. **Done 539c7cc** (chose `max-age=0, must-revalidate` + weak ETag + 304; no hashing).
 - D3 Precache `stockfish-worker.js` (and the engine WASM after E1a); reconcile `PRECACHE_ASSETS` with `ALLOWED_FILES`; PNG icons (192/512) for install prompts — S. **Worker + reconciliation done 45b6383**; PNG icons still open.
-- D4 CSP hardening: `'wasm-unsafe-eval'`, drop `'unsafe-eval'` and `'unsafe-inline'` (move the SW-registration inline script to a file; hash the stylesheet or externalise it). `frame-ancestors 'none'` contradicts `embed-viewer.js` — add a dedicated `/embed/:id` route with a permissive frame policy — S.
-- D5 `connect-src` allowlist for `tablebase.lichess.ovh` (or proxy it) — S.
+- D4 CSP hardening: `'wasm-unsafe-eval'`, drop `'unsafe-eval'` and `'unsafe-inline'` (move the SW-registration inline script to a file; hash the stylesheet or externalise it). `frame-ancestors 'none'` contradicts `embed-viewer.js` — add a dedicated `/embed/:id` route with a permissive frame policy — S. — **in progress (Wave 1, branch `feat/wave1-real-engine`)**: `'wasm-unsafe-eval'` in, `'unsafe-eval'` out, `worker-src 'self' blob:` kept; the redundant `onsubmit` attribute on `#chat-form` removed. **Still open**: `'unsafe-inline'` in `script-src` (only the SW-registration inline block remains — hash it from `index.html` at startup or externalise it), `style-src 'unsafe-inline'` (inline `<style>` + `style=""` attributes), and the `/embed/:id` frame policy.
+- D5 `connect-src` allowlist for `tablebase.lichess.ovh` (or proxy it) — S. — **in progress (Wave 1, branch `feat/wave1-real-engine`)**: `https://tablebase.lichess.ovh` added to `connect-src` (asserted in `security-headers-selftest`).
 - D6 SSE-first transport (B6) and client `Last-Event-ID` resume — S. **Poll backoff done 5b38dfc**; `Last-Event-ID` resume still open.
 - D7 `historyToSan` (`engine.js:727-736`) replays from the initial board with disambiguation on every state: 8.3 ms at 200 plies, ~0.9 s cumulative. Have the referee include SAN per ply in `stateView` so the client never recomputes it (also removes the Gate-4 workaround, B3) — S. **Done 10b3855** (`state.positions[].san`).
 
