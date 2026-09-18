@@ -616,7 +616,7 @@ function appendVary(res, value) {
 // Last-Modified. Everything else (index.html, service-worker.js, manifest,
 // licence) keeps the global no-store policy.
 function isRevalidatableStatic(rel) {
-  return rel.startsWith('src/') || rel.startsWith('assets/');
+  return rel.startsWith('src/') || rel.startsWith('assets/') || rel.startsWith('vendor/');
 }
 
 function weakEtag(stats) {

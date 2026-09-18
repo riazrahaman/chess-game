@@ -13,7 +13,7 @@ This document records the operational state of the Chess Game project, including
 ---
 
 ## 2. KANBAN STATUS (100% of All Tasks DONE)
-- Kanban API: `http://localhost:4100/api`
+- Kanban board: `https://agent-kanban-board.onrender.com` (code: `../agent-kanban-board`). Mutations need `KANBAN_AUTH_TOKEN` (Render-generated, not in any repo); until it is exported in the working session, task tracking lives in the status tables in this file (§5 Wave 0, §6 Wave 1). When the token is available: project `chess-game`, one card per roadmap item id (B1…, E1a…), role headers `X-Agent-Role: builder|reviewer|tester`, lifecycle BACKLOG→BUILDING→IN_REVIEW→IN_TEST→DONE.
 - All tasks have traversed the complete autonomous lifecycle (`BUILDING` → `IN_REVIEW` → `IN_TEST` → `DONE`):
   1. `chess-t0-seat-auth-heartbeat` (T0.2 & T0.3): **DONE**
      - Enforced caller authorization on `/api/reset`, `/api/undo`, `/api/draw`, and `/api/resign` via `validateMutation` in `SeatAuthManager`.
