@@ -3338,7 +3338,7 @@ function initRoomRouting() {
     }
     try {
       if (window.history && typeof window.history.replaceState === 'function') {
-        window.history.replaceState(null, '', '/game/' + encodeURIComponent(personalRoom));
+        window.history.replaceState(null, '', '/game/' + encodeURIComponent(personalRoom) + window.location.hash);
       }
     } catch (_) {}
   }
@@ -3399,3 +3399,25 @@ if (cachedState) {
   applyRefereeState(cachedState);
 }
 
+// Wave 2 (R1): shell integration. Display-only — reacts to route params by
+// driving existing controls; all game mutations still go through /api/*.
+if (typeof window !== 'undefined' && window.Shell && document.body) {
+  window.Shell.onChange(({ id, params }) => {
+    if (id !== 'play') return;
+    if (params.bot) {
+      const toggle = document.getElementById('bot-toggle');
+      if (toggle && !toggle.checked) {
+        toggle.checked = true;
+        toggle.dispatchEvent(new Event('change'));
+      }
+    }
+    if (params.invite) {
+      const copy = document.getElementById('copy-room-link');
+      if (copy) copy.click();
+    }
+    if (params.bot || params.invite) {
+      // Clean the one-shot params so a reload doesn't re-trigger them.
+      try { history.replaceState(null, '', window.location.pathname + window.location.search + '#/play'); } catch (_) {}
+    }
+  });
+}

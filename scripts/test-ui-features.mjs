@@ -31,7 +31,7 @@ async function testUiFeatures() {
     }
   });
 
-  await page.goto(URL, { waitUntil: 'domcontentloaded' });
+  await page.goto(URL + '#/play', { waitUntil: 'domcontentloaded' }); // Wave 2 shell: land on the Play view
   await page.waitForSelector('.chess-piece');
 
   // 1. Verify all modules loaded on window

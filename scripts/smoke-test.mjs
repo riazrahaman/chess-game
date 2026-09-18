@@ -152,7 +152,7 @@ async function main() {
     page.on('pageerror', err => process.stderr.write(`[browser pageerror] ${err.message}\n`));
 
     console.log('Opening', BASE_URL);
-    await page.goto(BASE_URL, { waitUntil: 'load' });
+    await page.goto(BASE_URL + '#/play', { waitUntil: 'load' }); // Wave 2 shell: land on the Play view
     try {
       pageRoom = await page.evaluate(() => (typeof getCurrentRoomId === 'function' ? getCurrentRoomId() : 'default'));
     } catch (_) { pageRoom = 'default'; }

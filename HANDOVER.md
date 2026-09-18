@@ -206,3 +206,43 @@ files 200 (`application/javascript` / `application/wasm`, ETag + `max-age=0, mus
 Merge-time follow-ups applied in 20fdcc6: `#bot-level-select` labels 800–2300, `vendor/` added to revalidatable static prefixes,
 `wave1-engine-selftest` wired into `test:unit` + `lint`. Known follow-ups: `'unsafe-inline'` in script-src (hash the SW-registration
 inline block), `personality-bots.pickMove` still not fed MultiPV candidates, `game-archive.saveEval` does not persist the `engine` field.
+
+---
+
+## 7. WAVE 2 — Site shell + reachability (branch `feat/wave2-shell`, started 2026-09-18)
+
+Roadmap §4 R1–R5 + E3/E4. Step 0 (lead): both Playwright suites made green again (they had been red since the
+auto-room commit, not since Wave 0/1 — commit 21c2c92). Step 1 (lead): `src/shell.js` hash router + view
+scaffolding so workers code against a fixed contract.
+
+### Shell view contract (`src/shell.js`)
+```js
+window.Shell.registerView({
+  id: 'puzzles',           // route #/puzzles → <section data-view="puzzles"> (already in index.html)
+  title: 'Puzzles', order: 30, nav: true,
+  mount(el, params) {},    // first navigation; build your DOM inside `el`
+  show(el, params) {},     // every navigation after mount (optional)
+  hide(el) {}              // navigating away (optional)
+});
+Shell.navigate('puzzles', { theme: 'fork' });   // → #/puzzles?theme=fork
+Shell.onChange(({ id, params }) => {});         // route listener
+```
+- Known view ids/sections: `home`, `play` (= existing `<main id="workspace">`), `analysis`, `puzzles`, `library`,
+  `compete`, `me`. Unregistered views show a placeholder; registering a `mount()` later takes over the section.
+- `index.html` has `<base href="/">`, so never write `href="#/x"` expecting same-document navigation from
+  code — use `Shell.navigate()`; the shell delegates clicks on `a[href^="#"]` for markup.
+- A plain visit lands on Home; `/game/<room>` links land on Play. Play params: `#/play?bot=1` enables the bot,
+  `#/play?invite=1` copies the room link.
+- Every new client module: `ALLOWED_FILES` (server.js) + `PRECACHE_ASSETS` (service-worker.js) + `<script>` in
+  index.html before `ui.js`, and it must have a call site or `test/reachability-selftest.js` fails. Wiring a
+  formerly-dark module = delete it from `KNOWN_DARK` there (the list may only shrink).
+- Browser suites: `scripts/smoke-test.mjs` / `test-ui-features.mjs` open `#/play` and use the page's own room.
+
+| Item | Owner | Status | Commit | Notes |
+|---|---|---|---|---|
+| Step 0 — Playwright suites green | lead | DONE | 21c2c92 | room-aware scripts, seat release on bot off, serialised bot config |
+| R1 — `shell.js` router, nav, Home cards, view sections, CSS | lead | DONE | (this commit) | base-href click delegation; hash preserved across the room rewrite |
+| R1 — Play view slimming / Assist drawer / Settings view absorbs header toggles | Worker A | PLANNED | — | |
+| Puzzles view + `/api/puzzle/*` + real puzzle data (E4, P-series wiring) | Worker B | PLANNED | — | |
+| Compete + Profile views + lobby/ratings/arena/social routes (R2) | Worker C | PLANNED | — | |
+| Analysis view + real openings data (E3) + acpl/masters/tablebase/pov wiring (R5) | Worker D | PLANNED | — | |

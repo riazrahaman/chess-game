@@ -858,12 +858,33 @@
             .app-footer { flex-direction: column; gap: 4px; }
         }
         @media (prefers-reduced-motion: reduce) { body *, body *::before, body *::after { animation: none !important; transition: none !important; } }
+    
+        /* ---- Shell (Wave 2 R1): hash-routed views ---- */
+        [data-view][hidden] { display: none !important; }
+        #shell-nav { display: flex; flex-wrap: wrap; gap: 4px; margin-left: 16px; }
+        #shell-nav a { padding: 6px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; color: var(--muted); text-decoration: none; min-height: 32px; display: inline-flex; align-items: center; }
+        #shell-nav a:hover { color: var(--text-color); background: var(--panel-bg); }
+        #shell-nav a[aria-current="page"] { color: var(--text-color); background: var(--panel-bg); border: 1px solid var(--panel-border); }
+        #views { max-width: 1120px; margin-inline: auto; padding-top: 16px; }
+        .shell-view h2 { font-family: var(--display-font, inherit); font-size: 1.6rem; margin: 8px 0 4px; }
+        .home-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 16px; }
+        .home-card { display: flex; flex-direction: column; gap: 6px; padding: 18px 16px; min-height: 120px; border: 1px solid var(--panel-border); border-radius: 10px; background: var(--panel-bg); color: var(--text-color); text-decoration: none; }
+        .home-card:hover, .home-card:focus-visible { border-color: var(--text-color); outline: none; }
+        .home-card strong { font-size: 1.05rem; }
+        .home-card span:last-child { font-size: 0.85rem; color: var(--muted); }
+        .home-card-icon { font-size: 1.6rem; line-height: 1; }
+        .shell-placeholder { padding: 24px 0; }
+        @media (max-width: 679px) {
+            #shell-nav { margin-left: 0; width: 100%; order: 10; }
+            #shell-nav a { min-height: 44px; padding: 8px 12px; }
+        }
     </style>
 </head>
 <body>
     <a class="skip-link" href="#workspace">Skip to game</a>
     <header class="app-header">
     <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><div><h1>Chess UI</h1><p>A little space to think.</p></div></div>
+    <nav id="shell-nav" aria-label="Site"></nav>
     <div id="theme-bar">
         <label for="theme-board-select">Board:</label>
         <select id="theme-board-select">
@@ -895,7 +916,7 @@
     </div>
     <div id="accessibility-announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true" style="position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;"></div>
     </header>
-    <main id="workspace" class="workspace" tabindex="-1">
+    <main id="workspace" class="workspace" tabindex="-1" data-view="play">
     <div id="game-container">
         <div id="eval-bar-container" role="progressbar" aria-label="Engine Evaluation" aria-valuenow="50" aria-valuemin="0" aria-valuemax="100">
             <div id="eval-bar-fill"></div>
@@ -1130,6 +1151,39 @@
         </div>
     </div>
     </main>
+    <div id="views">
+        <section class="shell-view home-view" data-view="home" hidden aria-labelledby="home-title">
+            <h2 id="home-title">What would you like to do?</h2>
+            <p class="supporting-copy">Referee-verified chess with a real Stockfish 19 engine. Pick a mode to begin.</p>
+            <div class="home-cards">
+                <a class="home-card" href="#/play?bot=1" data-home-action="bot">
+                    <span class="home-card-icon" aria-hidden="true">♞</span>
+                    <strong>Play vs Computer</strong>
+                    <span>Eight levels from ~800 to ~2300, powered by Stockfish 19.</span>
+                </a>
+                <a class="home-card" href="#/play?invite=1" data-home-action="friend">
+                    <span class="home-card-icon" aria-hidden="true">♔</span>
+                    <strong>Play a Friend</strong>
+                    <span>Start a room, copy the link, and play live with clocks and chat.</span>
+                </a>
+                <a class="home-card" href="#/puzzles" data-home-action="puzzles">
+                    <span class="home-card-icon" aria-hidden="true">✦</span>
+                    <strong>Puzzles</strong>
+                    <span>Daily puzzle, rated tactics, Storm, and spaced-repetition review.</span>
+                </a>
+                <a class="home-card" href="#/analysis" data-home-action="analysis">
+                    <span class="home-card-icon" aria-hidden="true">≡</span>
+                    <strong>Analysis</strong>
+                    <span>Engine lines, game review, opening explorer, and your mistakes.</span>
+                </a>
+            </div>
+        </section>
+        <section class="shell-view" data-view="analysis" hidden aria-label="Analysis"></section>
+        <section class="shell-view" data-view="puzzles" hidden aria-label="Puzzles"></section>
+        <section class="shell-view" data-view="library" hidden aria-label="Library"></section>
+        <section class="shell-view" data-view="compete" hidden aria-label="Compete"></section>
+        <section class="shell-view" data-view="me" hidden aria-label="Profile"></section>
+    </div>
     <footer class="app-footer"><span>Local chess. Your games stay on this server.</span><span>Engine: Stockfish 19 (GPL-3.0) — see vendor/stockfish/ · Pieces: cburnett (see CBURNETT-LICENSE.txt)</span><span>Arrow keys to navigate · Enter to select · Right-click to annotate</span></footer>
     <div id="promo-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="promo-title" aria-describedby="promo-description">
         <div id="promo-box">
@@ -1285,6 +1339,7 @@
        <script src="src/variants.js"></script>
        <script src="src/i18n.js"></script>
        <script src="src/ui-auth.js"></script>
+       <script src="src/shell.js"></script>
        <script src="src/ui.js"></script>
     <script>
         if ('serviceWorker' in navigator) {
