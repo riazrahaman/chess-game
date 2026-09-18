@@ -2,7 +2,7 @@
 //
 // Pure display layer: it renders its OWN small board (pieces.js SVG) inside the
 // `[data-view="puzzles"]` section and never touches the live #board or referee
-// state (Gate 4: no makeMove / createInitialBoard). Every move the player
+// state (Gate 4: no engine mutators). Every move the player
 // clicks is sent to POST /api/puzzle/:id/try and the SERVER decides legality
 // and correctness; the client only redraws the FEN the server reports.
 //
