@@ -1744,6 +1744,8 @@ function getSquareIdFromPoint(x, y) {
 function handlePointerDown(e, squareId) {
   if (e.button !== undefined && e.button !== 0) return;
   if (!isSquareDraggable(squareId)) return;
+  // R4: in blind mode touch swipes navigate the grid (a11y-gestures.js); never start a drag.
+  if (e.pointerType === 'touch' && typeof isBlindModeActive === 'function' && isBlindModeActive()) return;
 
   activePointerDrag = {
     fromSquare: squareId,
@@ -3111,27 +3113,198 @@ function setupAssistDrawer() {
 
 let accessibilityController = null;
 
-function handleVoiceTranscript(transcript) {
-  const AccessModule = (typeof window !== 'undefined' && window.AccessibilityVoice) || (typeof AccessibilityVoice !== 'undefined' ? AccessibilityVoice : null);
-  if (!AccessModule || !board) return;
+// ---------------------------------------------------------------------------
+// Wave 2 R4: accessibility modules wired to the existing referee-bound handlers.
+//   a11y-text-entry.js  → typed SAN/UCI + action words (#a11y-command-form)
+//   voice-intents.js    → spoken commands beyond moves (handleVoiceTranscript)
+//   a11y-gestures.js    → swipe navigation of the keyboard grid in blind mode
+// All three are pure parsers/input layers; every game mutation still goes
+// through the same button handlers / submitMoveToReferee → /api/* (Gate 4).
+// ---------------------------------------------------------------------------
 
+// Legal-move candidates for the current side, in the shape the parsers expect
+// ({ from, to, promo, san, uci }). Derived from the referee-reported board only.
+function buildLegalMoveCandidates() {
   const candidates = [];
+  if (!board) return candidates;
   for (const [from, p] of Object.entries(board.pieces || {})) {
-    if (p && p.color === turn) {
-      const dests = getLegalMoves(board, from, turn);
-      for (const to of dests) {
-        const isPromo = isPromotionMove(from, to);
-        const promos = isPromo ? ['q', 'r', 'b', 'n'] : [undefined];
-        for (const pr of promos) {
-          const san = typeof moveToSan === 'function' ? moveToSan(board, from, to, pr) : `${from}${to}`;
-          candidates.push({ from, to, promo: pr, san, uci: `${from}${to}${pr || ''}` });
-        }
+    if (!p || p.color !== turn) continue;
+    const dests = getLegalMoves(board, from, turn);
+    for (const to of dests) {
+      const promos = isPromotionMove(from, to) ? ['q', 'r', 'b', 'n'] : [undefined];
+      for (const pr of promos) {
+        const san = typeof moveToSan === 'function' ? moveToSan(board, from, to, pr) : `${from}${to}`;
+        candidates.push({ from, to, promo: pr, san, uci: `${from}${to}${pr || ''}` });
       }
     }
   }
+  return candidates;
+}
 
-  const match = AccessModule.parseSpokenMove(transcript, candidates);
+function a11yFeedback(text, state) {
+  const el = document.getElementById('a11y-command-feedback');
+  if (el) {
+    el.textContent = text || '';
+    if (state) el.setAttribute('data-state', state); else el.removeAttribute('data-state');
+  }
+  if (text && accessibilityController) accessibilityController.announceLive(text, state === 'error');
+}
+
+function clickIfActionable(id) {
+  const btn = document.getElementById(id);
+  if (!btn || btn.disabled || btn.classList.contains('hidden')) return false;
+  if (btn.closest('.hidden')) return false;
+  btn.click();
+  return true;
+}
+
+// Route a normalised action (from typed text, voice intent or spoken move
+// parser) to the existing UI handlers. Returns true when something happened.
+function dispatchA11yAction(action) {
+  switch (action) {
+    case 'resign':
+      if (clickIfActionable('resign')) { a11yFeedback('Resignation sent to the referee.', 'ok'); return true; }
+      a11yFeedback('Resign is not available right now.', 'error');
+      return false;
+    case 'draw':
+      if (clickIfActionable('offer-draw')) { a11yFeedback('Draw offer sent.', 'ok'); return true; }
+      a11yFeedback('A draw offer is already pending or not available.', 'error');
+      return false;
+    case 'accept_draw':
+      if (clickIfActionable('accept-draw')) { a11yFeedback('Draw accepted.', 'ok'); return true; }
+      if (clickIfActionable('claim-draw')) { a11yFeedback('Draw claimed.', 'ok'); return true; }
+      a11yFeedback('There is no draw offer to accept.', 'error');
+      return false;
+    case 'decline_draw':
+      if (clickIfActionable('decline-draw')) { a11yFeedback('Draw declined.', 'ok'); return true; }
+      a11yFeedback('There is no draw offer to decline.', 'error');
+      return false;
+    case 'undo':
+      if (clickIfActionable('undo')) { a11yFeedback('Undo requested.', 'ok'); return true; }
+      a11yFeedback('Undo is not available right now.', 'error');
+      return false;
+    case 'new_game':
+      if (clickIfActionable('new-game')) { a11yFeedback('New game requested.', 'ok'); return true; }
+      return false;
+    case 'hint': {
+      showCoachHint();
+      const hintText = document.getElementById('coach-hint-text');
+      const spoken = hintText && hintText.textContent ? hintText.textContent.replace(/\s+/g, ' ').trim() : '';
+      a11yFeedback(spoken ? 'Coach: ' + spoken.slice(0, 240) : 'Coach hint shown.', 'ok');
+      return true;
+    }
+    case 'best': {
+      setAssistDrawerOpen(true);
+      const line = Array.isArray(engineMultiPvLines) && engineMultiPvLines.length > 0 ? engineMultiPvLines[0] : null;
+      if (!line) { a11yFeedback('The engine has not reported a line for this position yet.', 'error'); return false; }
+      const score = typeof line.scoreCp === 'number' ? (line.scoreCp >= 0 ? '+' : '') + (line.scoreCp / 100).toFixed(2) : '';
+      a11yFeedback(`Engine's top move: ${line.from} to ${line.to}${score ? ' (' + score + ')' : ''}.`, 'ok');
+      return true;
+    }
+    case 'analyze':
+      setAssistDrawerOpen(true);
+      if (clickIfActionable('game-review-btn')) { a11yFeedback('Game review opened.', 'ok'); return true; }
+      a11yFeedback('Engine analysis opened.', 'ok');
+      return true;
+    case 'clocks': {
+      const w = document.getElementById('timer-white');
+      const b = document.getElementById('timer-black');
+      a11yFeedback([w && w.textContent, b && b.textContent].filter(Boolean).join('. ') || 'Clocks unavailable.', 'ok');
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
+function handleTypedCommand(text) {
+  const TextEntry = (typeof window !== 'undefined' && window.A11yTextEntry) || (typeof A11yTextEntry !== 'undefined' ? A11yTextEntry : null);
+  const raw = (text || '').trim();
+  if (!raw) return;
+  if (!TextEntry || typeof TextEntry.parseTextInput !== 'function') {
+    a11yFeedback('Typed commands are unavailable in this browser.', 'error');
+    return;
+  }
+  const parsed = TextEntry.parseTextInput(raw, buildLegalMoveCandidates());
+  if (!parsed) return;
+  if (parsed.action) { dispatchA11yAction(parsed.action); return; }
+  if (parsed.move) {
+    const { from, to, promo, san } = parsed.move;
+    a11yFeedback(`Submitting ${san || from + to}…`, 'ok');
+    submitMoveToReferee(from + to + (promo || ''));
+    return;
+  }
+  if (parsed.error === 'illegal') {
+    a11yFeedback(`${raw} is not a legal move in this position.`, 'error');
+  } else {
+    a11yFeedback(`Didn't understand "${raw}". Try a move like e4, Nf3 or e2e4, or a command: resign, draw, undo, hint.`, 'error');
+  }
+}
+
+function setupA11yCommandEntry() {
+  const form = document.getElementById('a11y-command-form');
+  const input = document.getElementById('a11y-command-input');
+  if (!form || !input) return;
+  form.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    handleTypedCommand(input.value);
+    input.value = '';
+  });
+}
+
+// Swipe navigation for blind mode: swipes move the roving cursor exactly like
+// the arrow keys; a tap re-announces the focused square. Only active while
+// blind mode is on so ordinary touch drag-and-drop is untouched otherwise.
+let a11yGestureController = null;
+
+function isBlindModeActive() {
+  return !!(accessibilityController && accessibilityController.blindModeEnabled);
+}
+
+function syncA11yGestures() {
+  if (a11yGestureController) a11yGestureController.setEnabled(isBlindModeActive());
+}
+
+function setupA11yGestures() {
+  const Gestures = (typeof window !== 'undefined' && window.A11yGestures) || (typeof A11yGestures !== 'undefined' ? A11yGestures : null);
+  const boardEl = document.getElementById('board');
+  if (!Gestures || typeof Gestures.GestureController !== 'function' || !boardEl) return;
+  const SWIPE_KEYS = { left: 'ArrowLeft', right: 'ArrowRight', up: 'ArrowUp', down: 'ArrowDown' };
+  a11yGestureController = new Gestures.GestureController({
+    enabled: isBlindModeActive(),
+    onSwipe: (direction) => {
+      const key = SWIPE_KEYS[direction];
+      if (!key) return;
+      const current = focusedSquareId || getBoardRenderOrder(boardFlipped)[0];
+      setRovingSquare(keyboardDestination(current, key));
+    },
+    onTap: () => {
+      if (focusedSquareId) setRovingSquare(focusedSquareId);
+    }
+  });
+  boardEl.addEventListener('touchstart', (ev) => a11yGestureController.handleTouchStart(ev), { passive: true });
+  boardEl.addEventListener('touchend', (ev) => a11yGestureController.handleTouchEnd(ev), { passive: true });
+}
+
+function handleVoiceTranscript(transcript) {
+  const AccessModule = (typeof window !== 'undefined' && window.AccessibilityVoice) || (typeof AccessibilityVoice !== 'undefined' ? AccessibilityVoice : null);
+  if (!AccessModule || !board) return;
   const transcriptStatus = document.getElementById('voice-transcript-status');
+
+  // 1. Commands beyond moves (resign / draw / hint / best move / clocks …).
+  const Intents = (typeof window !== 'undefined' && window.VoiceIntents) || (typeof VoiceIntents !== 'undefined' ? VoiceIntents : null);
+  const intent = Intents && typeof Intents.parseIntent === 'function' ? Intents.parseIntent(transcript) : null;
+  if (intent && intent.action) {
+    if (transcriptStatus) {
+      transcriptStatus.textContent = `Command: ${intent.action.replace(/_/g, ' ')}`;
+      transcriptStatus.style.color = '#16a34a';
+    }
+    dispatchA11yAction(intent.action);
+    return;
+  }
+
+  // 2. Spoken move.
+  const match = AccessModule.parseSpokenMove(transcript, buildLegalMoveCandidates());
 
   if (!match) {
     if (transcriptStatus) {
@@ -3144,16 +3317,8 @@ function handleVoiceTranscript(transcript) {
     return;
   }
 
-  if (match.action === 'resign') {
-    if (typeof handleResignClick === 'function') handleResignClick();
-    return;
-  }
-  if (match.action === 'draw' || match.action === 'accept_draw') {
-    if (typeof handleDrawOffer === 'function') handleDrawOffer();
-    return;
-  }
-  if (match.action === 'decline_draw') {
-    if (typeof handleDrawDecline === 'function') handleDrawDecline();
+  if (match.action) {
+    dispatchA11yAction(match.action);
     return;
   }
 
@@ -3211,6 +3376,7 @@ function setupAccessibilityVoiceUI() {
       }
       if (accessibilityController) {
         const enabled = accessibilityController.toggleBlindMode();
+        syncA11yGestures();
         blindToggleBtn.textContent = enabled ? 'Blind Mode: On' : 'Blind Mode: Off';
         blindToggleBtn.classList.toggle('active', enabled);
         if (enabled && focusedSquareId) {
@@ -3341,6 +3507,9 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.getAccessibilityController = () => accessibilityController;
   window.setupAccessibilityVoiceUI = setupAccessibilityVoiceUI;
   window.handleVoiceTranscript = handleVoiceTranscript;
+  window.handleTypedCommand = handleTypedCommand;
+  window.dispatchA11yAction = dispatchA11yAction;
+  window.buildLegalMoveCandidates = buildLegalMoveCandidates;
 }
 
 function initRoomRouting() {
@@ -3418,6 +3587,8 @@ setupMistakePuzzlesUI();
 setupAiCoachUI();
 setupAccessibilityVoiceUI();
 setupAssistDrawer();
+setupA11yCommandEntry();
+setupA11yGestures();
 if (typeof setInterval === 'function') {
   setInterval(syncNtpClock, 10000);
 }
