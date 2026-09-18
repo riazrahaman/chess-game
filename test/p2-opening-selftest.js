@@ -26,7 +26,7 @@ console.log('=== Test Suite 1: ECO Opening Database Lookups ===');
 const startOpening = openings.findOpening([]);
 assert(startOpening.eco === 'A00', `Initial position is A00 (got ${startOpening.eco})`);
 assert(startOpening.name.includes('Starting Position'), `Initial position title correct: ${startOpening.name}`);
-assert(startOpening.popularMoves.length > 0, `Popular moves listed for initial position (${startOpening.popularMoves.length})`);
+assert(startOpening.popularMoves === undefined && startOpening.stats === undefined, 'No fabricated popularMoves/stats on the initial position (E3)');
 
 // 2. 1. e4
 const e4Opening = openings.findOpening(['e2e4']);

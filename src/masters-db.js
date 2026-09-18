@@ -2,183 +2,119 @@
 'use strict';
 
 /**
- * masters-db.js — A2.4 Masters-DB mistake whitelist.
+ * masters-db.js — A2.4 book-theory mistake whitelist.
  *
- * A compact, frequency-sorted opening "book" keyed by space-joined UCI move
- * sequences. Each entry lists the known theory continuations and the number
- * of master games that reached them. A move is "book" (theory-true) when the
- * position it leads to appears in the DB with a master-game count of at least
- * MIN_MASTER_GAMES (default 2).
+ * "Book" here means: the move sequence lies on a NAMED OPENING LINE in
+ * data/openings.tsv (lichess-org/chess-openings, CC0 — see
+ * data/README-openings.md). It is a presence check, nothing more.
  *
- * Purpose: cross-check engine-flagged "mistakes" against theory so a move that
- * is objectively slightly suboptimal but book-true is not condemned in Game
- * Review. Gate 4: pure analysis/display layer — never calls makeMove or
+ * Wave 2 / E3: the previous version of this file shipped 21 positions with
+ * uncited round-number "master game counts" (42000, 38000, …) and called them
+ * a "real-data subset". Those numbers were invented and are gone. This module
+ * exposes NO game counts: every `games` field is `null`, and
+ * `MIN_MASTER_GAMES` no longer exists. If real master-game statistics are ever
+ * wanted they must come from a cited source (e.g. explorer.lichess.ovh/masters,
+ * proxied) — never from a literal in this file.
+ *
+ * Book data source, by runtime:
+ *   Node    — auto-loaded from the TSV through openings-explorer.js
+ *             (`ensureDefaultLoaded`), so the server and the selftests see the
+ *             full ~3,800-line book.
+ *   Browser — the TSV is server-side only. The Analysis view feeds the answers
+ *             of GET /api/openings/lookup into `addBookPosition(moves,
+ *             continuations)`; positions not yet looked up are "unknown", not
+ *             "not book" (`isBookPosition(...).known === false`).
+ *
+ * Gate 4: pure analysis/display layer — never calls makeMove or
  * createInitialBoard, never touches referee state.
  *
  * Public API:
- *   MIN_MASTER_GAMES
- *   isBookPosition(moves)     — { book: bool, count, continuations }
- *   isBookMove(moves, uci)   — is the given next move a book continuation?
- *   whitelistMistakes(review, moves) — downgrade flagged mistakes that are book
- *   getMastersDbSize()
+ *   isBookPosition(moves)     — { book, known, games: null, continuations: [{move, games: null, lines?}] }
+ *   isBookMove(moves, uci)    — { book, known, games: null }
+ *   whitelistMistakes(review, moves) — reclassify flagged moves that are book
+ *   addBookPosition(moves, continuations) — browser: cache a server lookup
+ *   loadBookLines(lines)      — bulk: array of UCI move arrays (or strings)
+ *   getMastersDbSize()        — number of known book positions
+ *   BOOK_SOURCE
  */
 
-const MIN_MASTER_GAMES = 2;
+const BOOK_SOURCE = 'lichess-org/chess-openings (data/openings.tsv, CC0)';
 
-// Key: space-joined UCI moves (the position reached AFTER those plies).
-// Value: array of { move, games } = known continuations + master-game count.
-// A compact, real-data subset (Ruy Lopez, Italian, Sicilian, QGD, KID, etc).
-const MASTERS_DB = {
-  'e2e4': [
-    { move: 'e7e5', games: 42000 },
-    { move: 'c7c5', games: 38000 },
-    { move: 'e7e6', games: 21000 },
-    { move: 'c7c6', games: 16000 },
-    { move: 'd7d5', games: 7000 },
-    { move: 'g8f6', games: 6000 }
-  ],
-  'e2e4 e7e5': [
-    { move: 'g1f3', games: 40000 },
-    { move: 'f1c4', games: 9000 },
-    { move: 'b1c3', games: 6000 },
-    { move: 'd2d4', games: 5000 }
-  ],
-  'e2e4 e7e5 g1f3': [
-    { move: 'b8c6', games: 38000 },
-    { move: 'g8f6', games: 11000 },
-    { move: 'd7d6', games: 8000 }
-  ],
-  'e2e4 e7e5 g1f3 b8c6': [
-    { move: 'f1b5', games: 26000 },
-    { move: 'f1c4', games: 14000 },
-    { move: 'd2d4', games: 8000 },
-    { move: 'b1c3', games: 6000 }
-  ],
-  'e2e4 e7e5 g1f3 b8c6 f1b5': [
-    { move: 'a7a6', games: 24000 },
-    { move: 'g8f6', games: 7000 },
-    { move: 'f8c5', games: 3000 },
-    { move: 'd7d6', games: 2500 }
-  ],
-  'e2e4 e7e5 g1f3 b8c6 f1b5 a7a6': [
-    { move: 'b5a4', games: 21000 },
-    { move: 'b5c6', games: 4000 }
-  ],
-  'e2e4 e7e5 g1f3 b8c6 f1c4': [
-    { move: 'f8c5', games: 9000 },
-    { move: 'g8f6', games: 8000 },
-    { move: 'f8e7', games: 1500 }
-  ],
-  'e2e4 c7c5': [
-    { move: 'g1f3', games: 30000 },
-    { move: 'b1c3', games: 5000 },
-    { move: 'c2c3', games: 4000 }
-  ],
-  'e2e4 c7c5 g1f3': [
-    { move: 'd7d6', games: 18000 },
-    { move: 'b8c6', games: 12000 },
-    { move: 'e7e6', games: 6000 }
-  ],
-  'e2e4 e7e6': [
-    { move: 'd2d4', games: 19000 },
-    { move: 'd2d3', games: 2000 }
-  ],
-  'e2e4 c7c6': [
-    { move: 'd2d4', games: 14000 }
-  ],
-  'e2e4 e7e6 d2d4': [
-    { move: 'd7d5', games: 17000 }
-  ],
-  'e2e4 e7e6 d2d4 d7d5': [
-    { move: 'b1c3', games: 9000 },
-    { move: 'e4d5', games: 6000 },
-    { move: 'e4e5', games: 4000 }
-  ],
-  'd2d4': [
-    { move: 'd7d5', games: 30000 },
-    { move: 'g8f6', games: 28000 },
-    { move: 'e7e6', games: 5000 },
-    { move: 'f7f5', games: 3000 }
-  ],
-  'd2d4 d7d5': [
-    { move: 'c2c4', games: 26000 },
-    { move: 'g1f3', games: 12000 },
-    { move: 'c1f4', games: 4000 }
-  ],
-  'd2d4 d7d5 c2c4': [
-    { move: 'e7e6', games: 14000 },
-    { move: 'c7c6', games: 9000 },
-    { move: 'd5c4', games: 5000 }
-  ],
-  'd2d4 g8f6': [
-    { move: 'c2c4', games: 22000 },
-    { move: 'g1f3', games: 9000 },
-    { move: 'c1g5', games: 4000 }
-  ],
-  'd2d4 g8f6 c2c4': [
-    { move: 'e7e6', games: 12000 },
-    { move: 'g7g6', games: 8000 },
-    { move: 'c7c5', games: 3000 }
-  ],
-  'd2d4 g8f6 c2c4 g7g6': [
-    { move: 'b1c3', games: 6000 },
-    { move: 'g1f3', games: 2500 }
-  ],
-  'c2c4': [
-    { move: 'e7e5', games: 12000 },
-    { move: 'g8f6', games: 8000 },
-    { move: 'c7c5', games: 6000 }
-  ],
-  'g1f3': [
-    { move: 'd7d5', games: 9000 },
-    { move: 'g8f6', games: 7000 },
-    { move: 'c7c5', games: 2000 }
-  ]
-};
+let explorer = null;
+if (typeof require === 'function') {
+  try { explorer = require('./openings-explorer.js'); } catch (_) { explorer = null; }
+}
+
+// Browser-side cache: key (space-joined UCI) → Array<{ move, games: null, lines }>
+// Populated by addBookPosition / loadBookLines. In Node the TSV is authoritative
+// and this cache is only consulted when the TSV is unavailable.
+const BOOK_CACHE = new Map();
 
 function normalizeMoves(moves) {
-  if (Array.isArray(moves)) return moves.filter(m => typeof m === 'string' && m.length > 0);
-  if (typeof moves === 'string') return moves.trim().split(/\s+/).filter(m => m.length > 0);
+  if (Array.isArray(moves)) return moves.filter(m => typeof m === 'string' && m.length > 0).map(m => m.toLowerCase());
+  if (typeof moves === 'string') return moves.trim().split(/\s+/).filter(m => m.length > 0).map(m => m.toLowerCase());
   return [];
 }
 
-function getBookEntry(moves) {
-  const arr = normalizeMoves(moves);
-  const key = arr.join(' ');
-  return MASTERS_DB[key] || null;
+function tsvAvailable() {
+  if (!explorer || typeof explorer.ensureDefaultLoaded !== 'function') return false;
+  try { return explorer.ensureDefaultLoaded(); } catch (_) { return false; }
 }
 
 /**
- * Is the position reached by `moves` a book position (≥ MIN_MASTER_GAMES)?
- * @returns {{book:boolean, count:number, continuations:Array}}
+ * Continuations for the position reached by `moves`, or null when the position
+ * is unknown to every available source.
+ */
+function continuationsFor(arr) {
+  const key = arr.join(' ');
+  if (tsvAvailable()) {
+    if (!explorer.isKnownLine(arr)) return null;
+    return explorer.continuations(arr).map(c => ({ move: c.uci, games: null, lines: c.lines, eco: c.eco, name: c.name }));
+  }
+  if (BOOK_CACHE.has(key)) return BOOK_CACHE.get(key).slice();
+  return null;
+}
+
+/**
+ * Is the position reached by `moves` on a known book line?
+ * `known` is false when no source has information about this position
+ * (browser before a lookup) — callers should show "unknown", not "not book".
+ * @returns {{book:boolean, known:boolean, games:null, continuations:Array}}
  */
 function isBookPosition(moves) {
-  const entry = getBookEntry(moves);
-  if (!entry) return { book: false, count: 0, continuations: [] };
-  const count = entry.reduce((sum, c) => sum + c.games, 0);
-  return { book: count >= MIN_MASTER_GAMES, count, continuations: entry.slice() };
+  const arr = normalizeMoves(moves);
+  if (arr.length === 0) {
+    // The start position is on every line; it is book if any book exists.
+    const any = tsvAvailable() || BOOK_CACHE.size > 0;
+    return { book: any, known: any, games: null, continuations: any ? (continuationsFor(arr) || []) : [] };
+  }
+  const conts = continuationsFor(arr);
+  if (conts === null) return { book: false, known: false, games: null, continuations: [] };
+  return { book: true, known: true, games: null, continuations: conts };
 }
 
 /**
- * Is `uci` (a single next move from the current position) a book continuation?
- * @returns {{book:boolean, games:number}}
+ * Is `uci` (the next move from the position reached by `moves`) a book
+ * continuation?
+ * @returns {{book:boolean, known:boolean, games:null}}
  */
 function isBookMove(moves, uci) {
-  const entry = getBookEntry(moves);
-  if (!entry || typeof uci !== 'string') return { book: false, games: 0 };
-  const hit = entry.find(c => c.move === uci.toLowerCase());
-  if (!hit) return { book: false, games: 0 };
-  return { book: hit.games >= MIN_MASTER_GAMES, games: hit.games };
+  if (typeof uci !== 'string') return { book: false, known: false, games: null };
+  const arr = normalizeMoves(moves);
+  const conts = continuationsFor(arr);
+  if (conts === null) return { book: false, known: false, games: null };
+  const hit = conts.some(c => c.move === uci.toLowerCase());
+  return { book: hit, known: true, games: null };
 }
 
 /**
  * Downgrade engine-flagged mistakes that are actually book-true moves.
  * `review` = output of MoveReview.reviewGame (has .moves[] with key, move, color, ply).
- * `moveHistory` = full UCI move list for the game. Mutates a COPY and returns it.
+ * `moveHistory` = full UCI move list for the game. Returns a COPY.
  *
  * A move classified as mistake/blunder/inaccuracy is reclassified to BEST
- * (with a `bookTheory:true` marker) when the position before it is book AND
- * the move itself is a known book continuation.
+ * (with `bookTheory: true`) when the move is a known book continuation of the
+ * position before it. Unknown positions are left untouched.
  */
 function whitelistMistakes(review, moveHistory) {
   if (!review || !Array.isArray(review.moves)) return review;
@@ -204,21 +140,62 @@ function whitelistMistakes(review, moveHistory) {
       m.key = 'best';
       m.label = 'Best';
       m.bookTheory = true;
+      m.bookSource = BOOK_SOURCE;
       m.accuracy = 100;
     }
   }
   return copy;
 }
 
+/**
+ * Browser: record what GET /api/openings/lookup said about a position.
+ * `continuations` = [{ uci|move, lines? }] (the route's shape is accepted as-is).
+ */
+function addBookPosition(moves, continuations) {
+  const arr = normalizeMoves(moves);
+  const list = Array.isArray(continuations) ? continuations : [];
+  BOOK_CACHE.set(arr.join(' '), list
+    .map(c => ({ move: String(c.uci || c.move || '').toLowerCase(), games: null, lines: typeof c.lines === 'number' ? c.lines : null, eco: c.eco || null, name: c.name || null }))
+    .filter(c => c.move.length >= 4));
+}
+
+/**
+ * Bulk-load book lines (array of UCI move arrays or space-joined strings).
+ * Every prefix of every line becomes a known position.
+ */
+function loadBookLines(lines) {
+  if (!Array.isArray(lines)) return 0;
+  let added = 0;
+  for (const line of lines) {
+    const arr = normalizeMoves(line);
+    for (let k = 0; k < arr.length; k++) {
+      const key = arr.slice(0, k).join(' ');
+      const bucket = BOOK_CACHE.get(key) || [];
+      const existing = bucket.find(c => c.move === arr[k]);
+      if (existing) existing.lines = (existing.lines || 0) + 1;
+      else bucket.push({ move: arr[k], games: null, lines: 1, eco: null, name: null });
+      BOOK_CACHE.set(key, bucket);
+      added++;
+    }
+  }
+  return added;
+}
+
 function getMastersDbSize() {
-  return Object.keys(MASTERS_DB).length;
+  if (tsvAvailable()) {
+    const map = explorer.getTSVMap();
+    return map ? map.size : 0;
+  }
+  return BOOK_CACHE.size;
 }
 
 const MastersDbModule = {
-  MIN_MASTER_GAMES,
+  BOOK_SOURCE,
   isBookPosition,
   isBookMove,
   whitelistMistakes,
+  addBookPosition,
+  loadBookLines,
   getMastersDbSize
 };
 

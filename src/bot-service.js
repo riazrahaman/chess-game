@@ -10,7 +10,11 @@
 
 const stockfishWorker = require('./stockfish-worker.js');
 const rulesEngine = require('./rules-engine.js');
-const openingsDb = require('./openings-db.js');
+// Opening book (L1–L4): named lines from data/openings.tsv (lichess
+// chess-openings, CC0) via openings-explorer.js. Loaded once at require time so
+// the server pays the ~1 s SAN→UCI conversion at boot, not on the first move.
+const openingsExplorer = require('./openings-explorer.js');
+const BOOK_LOADED = openingsExplorer.ensureDefaultLoaded();
 let engineServer = null;
 try {
   engineServer = require('./engine-server.js');
@@ -33,9 +37,11 @@ try {
 //
 // `blunderRate` (a uniformly random legal move, rolled in this file) is kept
 // only for L1–L2 to mimic the "hangs a piece" errors of true beginners.
-// `useBook`: consult the openings-db book (L1–L4 only). Its move frequencies
-// are illustrative, not real statistics (roadmap E3), so real-engine levels
-// just play the engine's move.
+// `useBook`: consult the opening book (L1–L4 only, first 10 plies). The book is
+// the set of named lines in data/openings.tsv; the pick is uniform over the
+// lines that extend the current move sequence — there are no popularity
+// weights because the dataset has none (roadmap E3). Real-engine levels just
+// play the engine's move.
 const BOT_LEVELS = {
   1: { level: 1, name: 'Novice Bot', rating: 800, skill: 0, elo: null, depth: 1, movetime: null, blunderRate: 0.10, useBook: true, greeting: 'Hi! Let’s have a fun match!' },
   2: { level: 2, name: 'Apprentice Bot', rating: 1000, skill: 2, elo: null, depth: 2, movetime: null, blunderRate: 0.04, useBook: true, greeting: 'Watch out for my knights!' },
@@ -133,6 +139,20 @@ class BotService {
   }
 
   /**
+   * Uniform pick among the TSV lines that extend `history`; returns that
+   * line's next move when legal, else null. Pure w.r.t. game state (Gate 4:
+   * reads the book only). `isLegal(uci)` is supplied by the caller.
+   */
+  static pickBookMove(history, isLegal) {
+    const lines = openingsExplorer.linesExtending(history);
+    if (!lines.length) return null;
+    const line = lines[Math.floor(Math.random() * lines.length)];
+    const candidate = line.moves[history.length];
+    if (!candidate || (typeof isLegal === 'function' && !isLegal(candidate))) return null;
+    return candidate;
+  }
+
+  /**
    * Pick the bot's move for `fen` at `level`. Async: the real engine runs in
    * a worker thread. Resolves to a UCI string or null when no legal move.
    * Order: opening book (L1–L4, first 10 plies) → blunder roll (L1–L2) →
@@ -150,23 +170,16 @@ class BotService {
     const fenStr = typeof fen === 'string' ? fen : (rulesEngine ? rulesEngine.boardToFen(fen) : '');
     const isStartPos = fenStr.startsWith('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR');
 
-    // 1. Opening book (L1–L4 only, first 10 plies). Frequencies in
-    //    openings-db.js are illustrative, so the pick is uniform among the
-    //    listed book moves rather than weighted by them.
-    if (profile.useBook && openingsDb && typeof openingsDb.findOpening === 'function') {
+    // 1. Opening book (L1–L4 only, first 10 plies): pick one TSV line
+    //    uniformly among those extending the game so far and play its next
+    //    move. Only positions reached from the standard start have a history
+    //    the TSV can extend; an empty history off the start position is skipped.
+    if (profile.useBook && BOOK_LOADED) {
       const history = Array.isArray(moveHistory) ? moveHistory : [];
       const canConsultBook = history.length > 0 ? (history.length < 10) : isStartPos;
       if (canConsultBook) {
-        const opening = openingsDb.findOpening(history);
-        if (opening && opening.popularMoves && opening.popularMoves.length > 0) {
-          const isExactMatch = opening.isExact || (history.length === 0 && isStartPos);
-          if (isExactMatch) {
-            const bookCandidates = opening.popularMoves.map(m => m.uci).filter(isLegal);
-            if (bookCandidates.length > 0) {
-              return bookCandidates[Math.floor(Math.random() * bookCandidates.length)];
-            }
-          }
-        }
+        const bookMove = BotService.pickBookMove(history, isLegal);
+        if (bookMove) return bookMove;
       }
     }
 

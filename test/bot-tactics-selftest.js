@@ -86,23 +86,35 @@ test('Legality check: King cannot castle through an attacked transit square', ()
   assert(queenSideCastle, 'Can castle queenside since transit squares d1 and c1 are safe');
 });
 
-// 6. Bot Service Opening Book Integration (book is consulted by L1-L4 only)
-test('Bot opening book: Level 4 White plays a principled opening move on ply 0', async () => {
+// 6. Bot Service Opening Book Integration (book is consulted by L1-L4 only).
+//    The book is data/openings.tsv (lichess chess-openings): a book move must be
+//    a continuation the TSV actually names from the current move sequence.
+const openingsExplorer = require('../src/openings-explorer.js');
+assert.strictEqual(openingsExplorer.ensureDefaultLoaded(), true, 'data/openings.tsv must load for the book tests');
+const tsvContinuations = (history) => openingsExplorer.continuations(history).map(c => c.uci);
+
+test('Bot opening book: Level 4 White plays a TSV-named first move on ply 0', async () => {
   const startFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-  const botMove = await botService.computeBotMove(startFen, 4, []);
-  const validBookMoves = ['e2e4', 'd2d4', 'c2c4', 'g1f3'];
-  assert(validBookMoves.includes(botMove), `Expected standard opening move, got: ${botMove}`);
+  const valid = tsvContinuations([]);
+  assert(valid.includes('e2e4') && valid.includes('d2d4'), 'sanity: TSV names 1. e4 and 1. d4');
+  for (let i = 0; i < 8; i++) {
+    const botMove = await botService.computeBotMove(startFen, 4, []);
+    assert(valid.includes(botMove), `Expected a TSV-named first move, got: ${botMove}`);
+  }
 });
 
-test('Bot opening book: Level 4 Black responds with Sicilian, Open Game, French, or Caro-Kann to 1. e4', async () => {
+test('Bot opening book: Level 4 Black answers 1. e4 with a TSV-named reply', async () => {
   const afterE4Fen = 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1';
-  const botMove = await botService.computeBotMove(afterE4Fen, 4, ['e2e4']);
-  const validResponses = ['c7c5', 'e7e5', 'e7e6', 'c7c6'];
-  assert(validResponses.includes(botMove), `Expected book response to 1. e4, got: ${botMove}`);
+  const valid = tsvContinuations(['e2e4']);
+  assert(valid.includes('c7c5') && valid.includes('e7e5'), 'sanity: TSV names 1...c5 and 1...e5');
+  for (let i = 0; i < 8; i++) {
+    const botMove = await botService.computeBotMove(afterE4Fen, 4, ['e2e4']);
+    assert(valid.includes(botMove), `Expected a TSV-named reply to 1. e4, got: ${botMove}`);
+  }
 });
 
-test('Level 8 ignores the illustrative book and plays a legal engine move from the start position', async () => {
-  assert.strictEqual(BOT_LEVELS[8].useBook, false, 'Level 8 must not consult openings-db');
+test('Level 8 ignores the opening book and plays a legal engine move from the start position', async () => {
+  assert.strictEqual(BOT_LEVELS[8].useBook, false, 'Level 8 must not consult the opening book');
   const startFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
   const botMove = await botService.computeBotMove(startFen, 8, []);
   assert(/^[a-h][1-8][a-h][1-8]$/.test(botMove), `Level 8 produces a legal UCI move: ${botMove}`);
