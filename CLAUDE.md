@@ -4,12 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A local-first, vanilla-JS chess app with an authoritative Node.js referee backend, a Lightweight Local Heuristic Engine analysis worker (with Stockfish 17 UCI protocol compatibility), AI bot opponents, AI coach & move explanations, mistake puzzle generator, post-game prose reports, voice move recognition, blind accessibility mode, and multi-room multiplayer over SSE. No build step, no framework, no bundler — plain `<script>` files served directly by `server.js`.
+A local-first, vanilla-JS chess app with an authoritative Node.js referee backend, a real Stockfish 19 (lite, single-threaded WASM, GPL-3.0, vendored under `vendor/stockfish/`) analysis engine running in a browser Web Worker and server-side for the bots (PST heuristic kept only as a fallback), AI bot opponents, AI coach & move explanations, mistake puzzle generator, post-game prose reports, voice move recognition, blind accessibility mode, and multi-room multiplayer over SSE. No build step, no framework, no bundler — plain `<script>` files served directly by `server.js`.
 
 ## Repository layout
 
 - `src/` — all source modules (referee-service, rules-engine, engine, game-archive, bot-service, seat-auth, stockfish-worker, ui.js + its sibling modules, and every feature module). `referee-helper.cjs` also lives here.
 - `test/` — all `*-selftest.js` suites (run with `node test/<name>-selftest.js`).
+- `vendor/stockfish/` — vendored Stockfish 19 lite single-threaded WASM (`stockfish-19-lite-single.js` loader + `.wasm`, ~1.8 MB) with `Copying.txt` (GPL-3.0) and a README (source, version, upgrade steps). Served explicitly via `ALLOWED_FILES` (not an `ALLOWED_DIRS` entry) and precached by the service worker. Keep the licence file with the binary.
 - Repo root — `server.js` (entrypoint), `index.html`, `manifest.webmanifest`, `service-worker.js` (must stay at root for scope `/`), `CBURNETT-LICENSE.txt`, `package.json`, `eslint.config.js`, plus `docs/`, `scripts/`, `assets/`.
 
 Internal `require()` calls are relative (e.g. `require('./rules-engine.js')` inside `src/`), so they remain correct because all modules live together in `src/`. `server.js` requires via `./src/<name>.js`; selftests require via `../src/<name>.js`. Browser-side static serving resolves against `src/` (script `src="src/<name>.js"`), and `server.js`'s `ALLOWED_FILES` lists `src/<name>.js` entries.
@@ -40,7 +41,8 @@ node test/p3-sqlite-selftest.js           # SQLite archive CRUD + PGN import/exp
 node test/p3-seat-selftest.js             # seat tokens, heartbeats & mutation security (41 tests)
 node test/t0-draw-flagfall-selftest.js     # draw claims & flag fall timeouts (51 tests)
 node test/t0-deadcode-selftest.js         # rate limiting, NTP sync, idempotency & Gate-4 module checks (21 tests)
-node test/p2-stockfish-selftest.js        # local heuristic engine, WASM bridge & UCI protocol (58 tests)
+node test/p2-stockfish-selftest.js        # PST fallback engine, WASM bridge & UCI protocol (58 tests)
+node test/wave1-engine-selftest.js        # proof a real engine ships: vendored SF19 wasm, allowlist/precache, CSP, engine runs (14 tests)
 node test/p2-review-selftest.js           # win-probability logistic curve & move classification (51 tests)
 node test/rating-selftest.js              # Glicko-2 rating engine (36 tests)
 node test/t1-mobile-visuals-selftest.js   # pointer events, bevel framing & piece shadows (16 tests)
@@ -115,9 +117,12 @@ server.js            HTTP API, static file serving, SSE stream (event-driven emi
                               stalemate detection, SAN/PGN builders, game-end presentation
   └─ seat-auth.js        cryptographic per-seat (White/Black/Spectator) session tokens;
                           prevents move hijacking and enforces seat ownership on mutations
-  └─ bot-service.js      autonomous Play vs Computer bot levels 1-8, search depths 1-4,
-                          blunder rates, top-N line sampling, human delay simulation, and
-                          chat commentary (ratings are honest ~600-1400 estimates, see E2)
+  └─ bot-service.js      autonomous Play vs Computer bot levels 1-8 driven by the server-side
+                          Stockfish 19 (`engine-server.js`, UCI_LimitStrength/UCI_Elo + depth/time
+                          caps; PST fallback if the WASM fails), human delay simulation, and
+                          chat commentary (level labels/ratings re-calibrated in Wave 1, see E2)
+  └─ engine-server.js    Node-side Stockfish 19 lite WASM (same vendored files as the browser
+                          Worker) exposing UCI go/bestmove for bots, reports and the eval cache
    └─ game-archive.js     node:sqlite-backed game archive (`src/games.db` — DEFAULT_DB_PATH resolves
                            next to the module, not the repo root) with JSON-file fallback
                            (.games-archive.json) when node:sqlite isn't available; Seven Tag
@@ -131,7 +136,7 @@ server.js            HTTP API, static file serving, SSE stream (event-driven emi
 - `ui.js` — the orchestrator: SSE/poll receiver and diff-based board reconciliation, pointer events touch/mouse drag-and-drop, move tree scrubber, multi-premove queueing (up to 5 plies), right-click annotation canvas, audio/haptics, seat management, clock-tick interpolation (render-only — never mutates authoritative time), theme switching (`[data-theme]` / `[data-mode=dark]`). Split into sibling modules loaded before it: `ui-sound.js` (audio/haptics), `ui-theme.js` (theme switching), `ui-annotations.js` (annotation canvas), `ui-archive.js` (archived-game view), `ui-auth.js` (sign-in modal / account bar).
 - `rating.js` — Glicko-2 rating engine (createPlayer / updateRating / rateMatches / expectedScore / confidenceInterval).
 - `pieces.js` — inline SVG chess pieces (Colin M.L. Burnett cburnett artwork, `CBURNETT-LICENSE.txt`).
-- `stockfish-worker.js` — Web Worker running Lightweight Local Heuristic Engine (PST + material evaluation) over UCI (`uci`, `isready`, `position fen`, `go depth`), multi-PV candidate lines, and an optional WASM bridge (`WasmEngine`) that looks for `src/stockfish.wasm` — **no engine binary ships today**, so it always falls back to the PST engine (roadmap E1). No Stockfish alias is emitted over UCI.
+- `stockfish-worker.js` — Web Worker that `importScripts` the vendored Stockfish 19 lite single-threaded WASM (`vendor/stockfish/`, GPL-3.0) and speaks UCI (`uci`, `isready`, `position fen`, `go depth`, MultiPV) to `ui.js`; the in-house PST + material heuristic remains only as the fallback if the WASM fails to load. On `engine-ready` the UI sets `#analysis-engine-label` / `#analysis-engine-caveat` in `index.html` to name the active engine, so the panel never claims strength it doesn't have. CSP allows this via `script-src 'wasm-unsafe-eval'` (no `'unsafe-eval'`) and `worker-src 'self' blob:`.
 - `move-review.js` — CAPS-style win-probability accuracy scoring, move classification (Brilliant/Great/Best/Excellent/Good/Inaccuracy/Mistake/Blunder), and blunder puzzle generation (`generateMistakePuzzles`).
 - `ai-coach.js` — plain-English move explanations (`explainMove`) and real-time coaching suggestions on active turn (`getCoachHint`).
 - `game-report.js` — auto post-game narrative report generation (`generatePostGameReport`), accuracy summary, turning point swing analysis, endgame performance, and annotated PGN with NAG glyphs and eval comments.

@@ -55,6 +55,22 @@ async function run() {
     assert(csp.includes('frame-ancestors'), 'CSP sets frame-ancestors (clickjacking)');
     assert(csp.includes("object-src 'none'"), 'CSP disables object embedding');
 
+    // D4/D5 (Wave 1): WASM engine + tablebase allowlist. Directive-scoped so
+    // the 'unsafe-eval' substring of 'wasm-unsafe-eval' cannot mask a regression.
+    const directive = (name) => {
+      const d = csp.split(';').map(s => s.trim()).find(s => s.startsWith(name + ' '));
+      return d ? d.split(/\s+/).slice(1) : [];
+    };
+    const scriptSrc = directive('script-src');
+    assert(scriptSrc.includes("'wasm-unsafe-eval'"), "CSP script-src allows 'wasm-unsafe-eval' (D4)");
+    assert(!scriptSrc.includes("'unsafe-eval'"), "CSP script-src no longer contains 'unsafe-eval' (D4)");
+    assert(directive('worker-src').includes("'self'") && directive('worker-src').includes('blob:'),
+      "CSP worker-src keeps 'self' blob:");
+    assert(directive('connect-src').includes('https://tablebase.lichess.ovh'),
+      'CSP connect-src allows tablebase.lichess.ovh (D5)');
+    assert(directive('connect-src').includes('https://accounts.google.com/gsi/'),
+      'CSP connect-src keeps Google GSI');
+
     assert(htmlResp.headers['x-frame-options'] === 'DENY', 'X-Frame-Options: DENY present');
     assert(htmlResp.headers['referrer-policy'] === 'no-referrer', 'Referrer-Policy: no-referrer present');
     assert(htmlResp.headers['x-content-type-options'] === 'nosniff', 'X-Content-Type-Options: nosniff present');

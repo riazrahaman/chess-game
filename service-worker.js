@@ -7,6 +7,8 @@ const PRECACHE_ASSETS = [
   '/src/engine.js',
   '/src/pieces.js',
   '/src/stockfish-worker.js',
+  '/vendor/stockfish/stockfish-19-lite-single.js',
+  '/vendor/stockfish/stockfish-19-lite-single.wasm',
   '/src/move-review.js',
   '/src/ai-coach.js',
   '/src/game-report.js',
