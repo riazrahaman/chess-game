@@ -119,6 +119,18 @@ test('Bot difficulty levels 1-8 calibrated with increasing depth and zero blunde
     assert.strictEqual(BOT_LEVELS[lvl].blunderRate, 0, `Level ${lvl} must have zero blunders`);
     assert(BOT_LEVELS[lvl].depth >= 3, `Level ${lvl} must have depth >= 3`);
   }
+  // E2: no two levels may share an identical strength configuration
+  const sig = lvl => `${BOT_LEVELS[lvl].depth}|${BOT_LEVELS[lvl].blunderRate}|${BOT_LEVELS[lvl].topN}`;
+  const seen = new Set();
+  for (const lvl of levels) {
+    assert(!seen.has(sig(lvl)), `Level ${lvl} duplicates another level's configuration`);
+    seen.add(sig(lvl));
+  }
+  // E2: ratings must be monotonic and inside the honest band for a PST engine
+  for (let lvl = 2; lvl <= 8; lvl++) {
+    assert(BOT_LEVELS[lvl].rating > BOT_LEVELS[lvl - 1].rating, `Level ${lvl} rating increases`);
+  }
+  assert(BOT_LEVELS[8].rating <= 1400, 'Top level rating must not overstate the heuristic engine');
 });
 
 console.log(`\n--- Summary: ${passed} passed, ${failed} failed ---`);

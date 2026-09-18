@@ -3,7 +3,8 @@
 *Written 2026-09-17. Produced by four parallel audits: (1) module reachability, (2) data/asset reality,
 (3) online delta research vs. lichess / Chess.com / Chessable / Maia / engine-in-browser state of the art,
 (4) product/UX shell review with live screenshots. `RECOMMENDATIONS.md` remains the historical record;
-this document is the delta measured against it.*
+this document is the delta measured against it. **Re-scanned 2026-09-18** after commit `0b25073`
+(Google Auth, isolated sessions, auto-room routing) — see §1a for what changed.*
 
 **Every recommendation is tagged with the layer it lives in** — `[referee]` (referee-service / rules-engine /
 engine, needs a server route), `[server]` (server.js / archive / bot-service, no game-state change),
@@ -28,12 +29,11 @@ single biggest finding of this audit:
 | "P1 Import lichess 6.1M puzzle CSV into SQLite — Done" | `puzzle-service.js` is **in-memory** (`replaceStore` :120-124), no CSV shipped, **no puzzles table**, **0 puzzles**, no route, not loaded by `index.html`. |
 | "A2.3 Real opening explorer — Done" | `openings-explorer.js` is **never loaded**. The UI still renders the 25-entry `openings-db.js` with **fabricated win-rates** (`ui.js:1946-1990`) — now with an "illustrative" caveat — and the bot uses those fabricated frequencies as its opening book. |
 | "A2.4 Masters-DB whitelist — Done" | 21 positions with uncited round-number "game counts", comment says "real-data subset". Zero production call sites. |
-| Accounts / ratings / lobby / arena / social / correspondence / studies / i18n — all "Done" | **No server route, no DB table, no UI element** for any of them. Library-only modules with injected persistence that nothing injects. |
+| Ratings / lobby / arena / social / correspondence / studies / i18n — all "Done" | **No server route, no DB table, no UI element** for any of them. Library-only modules with injected persistence that nothing injects. (Accounts moved to PARTIAL on 2026-09-18 — routes + SQLite now exist, but the client script is not servable; see B11.) |
 | "M2 i18n — Done" | 14 keys × 3 locales; **0 of 14 used**. ~100% of UI text hardcoded. |
 
-**Net: 29 of 49 `src/` modules are dark.** 18 are shipped to every browser (~100 KB, precached by the
-service worker) and never called; 11 are never loaded by anything; `accounts.js` isn't even in
-`ALLOWED_FILES`. The entire puzzle / lobby / accounts / ratings / studies product family is unreachable.
+**Net: 28 of 50 `src/` modules are dark** (re-scan 2026-09-18). 18 are shipped to every browser (~100 KB, precached by the
+service worker) and never called; 10 are never loaded by anything; the new `ui-auth.js` is loaded but not servable. The entire puzzle / lobby / accounts / ratings / studies product family is unreachable.
 
 The roadmap therefore has three phases, in strict order:
 
@@ -52,7 +52,9 @@ ui-sound, ui-theme, ui-annotations, ui-archive, eval-graph, ui.js.
 
 **SERVER-ONLY (5, working):** referee-service, rules-engine, seat-auth, bot-service, referee-helper.cjs.
 
-**PARTIAL (3):**
+**PARTIAL (5):**
+- `accounts.js` — **now `require()`d by `server.js:10`** with routes `GET /api/auth/config`, `POST /api/auth/google|register|login|logout`, `GET /api/auth/me`, `GET /api/profile`, and a real SQLite `accounts.db` (`accounts` + `sessions` tables, JSON fallback). Server side is live.
+- `ui-auth.js` (new, 274 lines) — loaded at `index.html:1268` but **absent from `ALLOWED_FILES` and `PRECACHE_ASSETS` → HTTP 404** (verified on a fresh server). The Sign In modal, Google button, and New Room button have no working script.
 - `game-archive.js` — server side live (`/api/games*`); the ~1,100-line Node/SQLite module is *also* shipped to the browser as `window.GameArchive` and never called.
 - `time-control.js` — server path live via `POST /api/time-control`; browser copy dead.
 - `stockfish-worker.js` — live Worker, but **not in `PRECACHE_ASSETS`** → eval bar unavailable offline.
@@ -61,8 +63,8 @@ ui-sound, ui-theme, ui-annotations, ui-archive, eval-graph, ui.js.
 voice-intents, chess960, tablebase, arena, social-graph, chat-upgrades, correspondence, personality-bots,
 pov-export, embed-viewer, variants, i18n (+ time-control browser copy).
 
-**DARK, never loaded (11):** rating, ratings-pool, lobby, puzzle-service, puzzle-rating, puzzle-storm,
-daily-puzzle, study-tree, openings-explorer, puzzle-repetition, accounts.
+**DARK, never loaded (10):** rating, ratings-pool, lobby, puzzle-service, puzzle-rating, puzzle-storm,
+daily-puzzle, study-tree, openings-explorer, puzzle-repetition.
 
 **Doc/code contradictions:** `fen-setup.js` is DARK — the referee's `_cmdSetup` uses `rulesEngine.fenToBoard`,
 not this module (CLAUDE.md says otherwise). `game-archive.js:23` defaults the DB to `src/games.db`, so the
@@ -73,22 +75,33 @@ has zero references in the UI** → an incoming draw offer is invisible to the o
 button, and 50-move / threefold claims are unreachable); `GET /api/time-control`; `/api/flag` (redundant);
 rematch `decline` arm. No orphan client fetches.
 
+### 1a. What changed in commit `0b25073` (2026-09-18) and how it affects this roadmap
+
+- **Accounts went from DARK to PARTIAL.** `server.js` now requires `accounts.js`; seven `/api/auth/*` + `/api/profile` routes exist; `accounts.js` grew to a real SQLite store (`accounts.db`, `sessions` table, atomic JSON fallback). `test/auth-routes-selftest.js` (new) is wired into both `test:unit` and `lint`. **R2's accounts item is now mostly done server-side** — what remains is B11 and a profile view in the shell.
+- **New client module `src/ui-auth.js`** — sign-in modal (Google Identity Services + local username/password), guest continue, `#new-room-btn`. It is not servable (B11), so none of this works in the browser today.
+- **CSP loosened for Google** (`server.js:462-467`): `script-src` adds `https://accounts.google.com/gsi/client`, `connect-src` and `frame-src` add `https://accounts.google.com/gsi/`. Still `'unsafe-inline' 'unsafe-eval'`; D4 unchanged. Note `connect-src` now has an allowlist pattern to copy for the tablebase (D5).
+- **`.gitignore` now covers `*.db`, `accounts.db`, `.accounts.json`.** It does **not** cover the Google OAuth `client_secret_*.json` currently sitting untracked in the repo root (B12).
+- **Roadmap line references drifted** in `ui.js` (+~11–13 lines): `showUiError` → 738, `computeHistoryPositions` concat → 786-787, `refereeClockAt` stamp → 1165, `pollReferee` → 1378, `startSSE` → 1439. `index.html` still has 0 `</details>` (B2 stands). Bug table updated below.
+- Nothing in the commit touches the engine, puzzles, openings, bots, caching, or the dark modules — Phases 1–3 are unaffected.
+
 ---
 
 ## 2. Bugs found during the audit (fix before any feature work)
 
-| # | Bug | Where | Layer | Size |
-|---|---|---|---|---|
-| B1 | **White clock counts down before the game starts.** `interpolatedActiveSeconds` subtracts wall-time since `refereeClockAt`, which is stamped on *any* state arrival with no "game started" guard. Screenshot shows 9:57 while `/api/state` says 600/600. The display layer is fabricating authoritative state. Guard on `moveStartTs > 0` / `history.length > 0`. | `ui.js:192-199`, `ui.js:1153` | display | S |
-| B2 | **Room chat is hidden.** `<details id="graph-panel">` is never closed; the parser swallows `#chat-panel` into the collapsed "Evaluation history" disclosure. | `index.html:1089`, `:1095-1104` | display | S |
-| B3 | **Gate-4 guard is string-matched and this call site slips past it.** `computeHistoryPositions` calls `engineLookup['create'+'InitialBoard']` and `['make'+'Move']` (`ui.js:776-777`); the concatenated names don't match the `makeMove(` / `createInitialBoard(` string checks in `t0-deadcode-selftest.js:97-98` and `gate4-selftest.js:184`, so at runtime ui.js does invoke the engine mutators (display-only scrubber replay, but the guard no longer catches the next real violation). Fix structurally: have the referee ship per-ply FENs (`/api/positions` or in `stateView`) and delete the workaround; then make the test un-dodgeable (AST or runtime spy). | `ui.js:773-791` (call at 776-777) | referee + display | S/M |
-| B4 | **Draw negotiation is half-wired** (see dead routes above). Render `state.drawOffer`, add Accept/Decline, add a "Claim draw" button when `claimableDraw` is truthy. | `ui.js:1802`, `server.js:917-929` | display | S |
-| B5 | **`showUiError` permanently clobbers `#status`**; command errors use a second channel (`#command-status`). Unify on one auto-dismissing toast. | `ui.js:734-741` | display | S |
-| B6 | **Polling never stops.** `pollReferee` re-polls `/api/state` every 600 ms forever, even with SSE open; no client backoff, no `Last-Event-ID`; Playwright `networkidle` never settles. Back off to 10–15 s liveness when SSE `onopen`, resume 600 ms on `onerror`. | `ui.js:1365-1398`, `1426-1457` | display | S |
-| B7 | **Selftests leave 571 residue files** (`.referee-journal-*`, `.referee-state*`) in the repo root; CLAUDE.md claims they restore on exit. | test harness | server | S |
-| B8 | **Worker still self-identifies as `id alias Stockfish 17 NNUE WASM`** over UCI (`stockfish-worker.js:600`) and the selftest requires it. Remove the alias when the real engine ships (or now). | worker | display | S |
-| B9 | Tracked non-product files: `game-log.md` (AI-vs-AI agent log) and `brief.html` (orchestration brief). Remove from the repo. | root | — | S |
-| B10 | `ALLOWED_FILES` lists nonexistent `src/stockfish.js` / `src/stockfish.wasm`; dead client fallbacks at `ui.js:1089-1094`. | server.js:311-312 | server | S |
+| # | Bug | Where | Layer | Size | Status (2026-09-18) |
+|---|---|---|---|---|---|
+| B1 | **White clock counts down before the game starts.** `interpolatedActiveSeconds` subtracts wall-time since `refereeClockAt`, which is stamped on *any* state arrival with no "game started" guard. Screenshot shows 9:57 while `/api/state` says 600/600. The display layer is fabricating authoritative state. Guard on `moveStartTs > 0` / `history.length > 0`. | `ui.js:192-199`, `ui.js:1165` | display | S | in progress |
+| B2 | **Room chat is hidden.** `<details id="graph-panel">` is never closed; the parser swallows `#chat-panel` into the collapsed "Evaluation history" disclosure. | `index.html:1089`, `:1095-1104` | display | S | in progress |
+| B3 | **Gate-4 guard is string-matched and this call site slips past it.** `computeHistoryPositions` calls `engineLookup['create'+'InitialBoard']` and `['make'+'Move']` (`ui.js:786-787`); the concatenated names don't match the `makeMove(` / `createInitialBoard(` string checks in `t0-deadcode-selftest.js:97-98` and `gate4-selftest.js:184`, so at runtime ui.js does invoke the engine mutators (display-only scrubber replay, but the guard no longer catches the next real violation). Fix structurally: have the referee ship per-ply FENs (`/api/positions` or in `stateView`) and delete the workaround; then make the test un-dodgeable (AST or runtime spy). | `ui.js:783-801` (call at 786-787) | referee + display | S/M | deferred (own commit) |
+| B4 | **Draw negotiation is half-wired** (see dead routes above). Render `state.drawOffer`, add Accept/Decline, add a "Claim draw" button when `claimableDraw` is truthy. | `ui.js:1802`, `server.js:917-929` | display | S | in progress |
+| B5 | **`showUiError` permanently clobbers `#status`**; command errors use a second channel (`#command-status`). Unify on one auto-dismissing toast. | `ui.js:738-745` | display | S | in progress |
+| B6 | **Polling never stops.** `pollReferee` re-polls `/api/state` every 600 ms forever, even with SSE open; no client backoff, no `Last-Event-ID`; Playwright `networkidle` never settles. Back off to 10–15 s liveness when SSE `onopen`, resume 600 ms on `onerror`. | `ui.js:1378-1411`, `1439-1470` | display | S | in progress |
+| B7 | **Selftests leave 571 residue files** (`.referee-journal-*`, `.referee-state*`) in the repo root; CLAUDE.md claims they restore on exit. | test harness | server | S | in progress |
+| B8 | **Worker still self-identifies as `id alias Stockfish 17 NNUE WASM`** over UCI (`stockfish-worker.js:600`) and the selftest requires it. Remove the alias when the real engine ships (or now). | worker | display | S | **done** 8c42752 |
+| B9 | Tracked non-product files: `game-log.md` (AI-vs-AI agent log) and `brief.html` (orchestration brief). Remove from the repo. | root | — | S | awaiting confirmation |
+| B10 | `ALLOWED_FILES` lists nonexistent `src/stockfish.js` / `src/stockfish.wasm`; dead client fallbacks at `ui.js:1089-1094`. | server.js:311-312 | server | S | in progress |
+| B11 | **New (2026-09-18): `src/ui-auth.js` is loaded by `index.html:1268` but not in `ALLOWED_FILES` or `PRECACHE_ASSETS` → 404.** The entire Sign In / Google / New Room UI shipped in `0b25073` is inert. Add to both lists (CLAUDE.md checklist step 5). Consider a `reachability-selftest.js` assertion that every `<script src>` in `index.html` is in `ALLOWED_FILES`. | `index.html:1268`, `server.js:303` | server | S | in progress |
+| B12 | **New: Google OAuth `client_secret_*.apps.googleusercontent.com.json` is sitting untracked in the repo root** and `.gitignore` does not match it. One `git add .` away from a leaked secret. Add `client_secret*.json` to `.gitignore`, move the secret to an env var (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`), and rotate it if it was ever pushed. | repo root, `.gitignore` | server | S | **done** e3b18dd |
 
 ---
 
@@ -168,7 +181,7 @@ Structural changes that make this cheap:
 - **Stop shipping server-only modules to the browser** (`game-archive.js`, `arena.js`, `social-graph.js`, `correspondence.js`) — these need routes, not script tags.
 
 ### R2 Server routes + tables for the dark server modules `[server]` — M each
-`accounts.js` → `/api/auth/register|login|logout|me` + `users` table; `ratings-pool.js` → rate every
+`accounts.js` → **done server-side in `0b25073`** (`/api/auth/*`, `/api/profile`, SQLite `accounts`/`sessions`); remaining: B11 + profile view; `ratings-pool.js` → rate every
 human-vs-human result on game end (referee `onGameEnd` hook) + `/api/leaderboard/:tc`; `lobby.js` →
 `/api/lobby/seek|challenge|accept` + SSE lobby channel; `arena.js` → `/api/arena/*`; `social-graph.js` →
 `/api/social/*` + table; `correspondence.js` → referee day-clock mode; `study-tree.js` → `/api/studies/*`.
@@ -263,7 +276,7 @@ transparent pricing.
 
 ## 7. Sequencing
 
-**Wave 0 — Bugs & truth (1 week).** B1–B10, E2 (honest labels), E5 (docs), D1–D3.
+**Wave 0 — Bugs & truth (1 week).** B11 and B12 first (both are one-liners and one is a secret-leak risk), then B1–B10, E2 (honest labels), E5 (docs), D1–D3.
 
 **Wave 1 — Real engine (2–3 weeks).** E1a client Stockfish 19 lite → recalibrate CAPS/coach/report
 thresholds → E1b server engine for bots → E2 real bot ladder. Add D4/D5 headers. This is the single change

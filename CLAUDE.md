@@ -86,7 +86,7 @@ node test/i18n-selftest.js                # i18n layer (en/es/fr catalog + inter
 
 Suites not wired into `npm run check`/`npm test` (still runnable standalone, useful for targeted debugging): `draw-selftest.js`, `p1-annotations-selftest.js`, `p1-audio-selftest.js`, `p1-premove-selftest.js`, `p1-scrubber-selftest.js`, `p2-multipv-selftest.js`, `p2-opening-selftest.js`, `p3-lag-selftest.js`, `gate3-selftest.js`, `gate4-selftest.js`, `gate5-selftest.js`. If you add a new feature area's selftest, wire it into both `test:unit` and `lint` in `package.json` (per the checklist below) so it isn't silently orphaned like these.
 
-Selftests write real artifacts (`.referee-state.json`, `.referee-journal.jsonl`, `games.db`) in the repo root and restore them on exit.
+Selftests write real artifacts (`.referee-state.json`, `.referee-journal.jsonl`, `games.db`) in the repo root and are meant to restore them on exit (historically some suites leaked timestamped `.referee-journal-*` / `.referee-state-*` files — see B7 in `docs/06-world-class-roadmap.md`).
 
 `npm run test:browser` runs `scripts/smoke-test.mjs` and `scripts/test-ui-features.mjs` via Playwright against a live server to verify live piece interactions, bot toggles, coach hints, game review, and voice accessibility with zero console errors.
 
@@ -116,8 +116,10 @@ server.js            HTTP API, static file serving, SSE stream (event-driven emi
   └─ seat-auth.js        cryptographic per-seat (White/Black/Spectator) session tokens;
                           prevents move hijacking and enforces seat ownership on mutations
   └─ bot-service.js      autonomous Play vs Computer bot levels 1-8, search depths 1-4,
-                          blunder rates, human delay simulation, and chat commentary
-   └─ game-archive.js     node:sqlite-backed game archive (games.db) with JSON-file fallback
+                          blunder rates, top-N line sampling, human delay simulation, and
+                          chat commentary (ratings are honest ~600-1400 estimates, see E2)
+   └─ game-archive.js     node:sqlite-backed game archive (`src/games.db` — DEFAULT_DB_PATH resolves
+                           next to the module, not the repo root) with JSON-file fallback
                            (.games-archive.json) when node:sqlite isn't available; Seven Tag
                            Roster PGN parsing/export, search, pagination; also the persistence
                            backend for eval cache, puzzle ratings/reviews, rating pools, and
@@ -126,23 +128,23 @@ server.js            HTTP API, static file serving, SSE stream (event-driven emi
 
 ### Client-side (all plain scripts loaded by `index.html`, no bundler)
 
-- `ui.js` — the orchestrator: SSE/poll receiver and diff-based board reconciliation, pointer events touch/mouse drag-and-drop, move tree scrubber, multi-premove queueing (up to 5 plies), right-click annotation canvas, audio/haptics, seat management, clock-tick interpolation (render-only — never mutates authoritative time), theme switching (`[data-theme]` / `[data-mode=dark]`). Split into sibling modules loaded before it: `ui-sound.js` (audio/haptics), `ui-theme.js` (theme switching), `ui-annotations.js` (annotation canvas), `ui-archive.js` (archived-game view).
+- `ui.js` — the orchestrator: SSE/poll receiver and diff-based board reconciliation, pointer events touch/mouse drag-and-drop, move tree scrubber, multi-premove queueing (up to 5 plies), right-click annotation canvas, audio/haptics, seat management, clock-tick interpolation (render-only — never mutates authoritative time), theme switching (`[data-theme]` / `[data-mode=dark]`). Split into sibling modules loaded before it: `ui-sound.js` (audio/haptics), `ui-theme.js` (theme switching), `ui-annotations.js` (annotation canvas), `ui-archive.js` (archived-game view), `ui-auth.js` (sign-in modal / account bar).
 - `rating.js` — Glicko-2 rating engine (createPlayer / updateRating / rateMatches / expectedScore / confidenceInterval).
 - `pieces.js` — inline SVG chess pieces (Colin M.L. Burnett cburnett artwork, `CBURNETT-LICENSE.txt`).
-- `stockfish-worker.js` — Web Worker running Lightweight Local Heuristic Engine (PST + material evaluation) over UCI (`uci`, `isready`, `position fen`, `go depth`), multi-PV candidate lines, with Stockfish 17 UCI alias for protocol compatibility and an optional WASM bridge (`WasmEngine`) that falls back to the PST engine on failure.
+- `stockfish-worker.js` — Web Worker running Lightweight Local Heuristic Engine (PST + material evaluation) over UCI (`uci`, `isready`, `position fen`, `go depth`), multi-PV candidate lines, and an optional WASM bridge (`WasmEngine`) that looks for `src/stockfish.wasm` — **no engine binary ships today**, so it always falls back to the PST engine (roadmap E1). No Stockfish alias is emitted over UCI.
 - `move-review.js` — CAPS-style win-probability accuracy scoring, move classification (Brilliant/Great/Best/Excellent/Good/Inaccuracy/Mistake/Blunder), and blunder puzzle generation (`generateMistakePuzzles`).
 - `ai-coach.js` — plain-English move explanations (`explainMove`) and real-time coaching suggestions on active turn (`getCoachHint`).
 - `game-report.js` — auto post-game narrative report generation (`generatePostGameReport`), accuracy summary, turning point swing analysis, endgame performance, and annotated PGN with NAG glyphs and eval comments.
 - `accessibility-voice.js` — natural spoken English move announcements via SpeechSynthesis API, voice move input recognition via Web Speech API, and blind accessibility mode controller with keyboard grid navigation.
 - `openings-db.js` — ECO opening database (prefix matching, master win rates) and the SVG evaluation-graph math.
-- `puzzle-service.js` — lichess puzzle CSV import (UCI→SAN conversion via chess.js) into SQLite; filterable themed subsets.
+- `puzzle-service.js` — lichess puzzle CSV import (UCI→SAN conversion via chess.js) into an **in-memory** store (no SQLite table yet, no CSV shipped, no route, not loaded by `index.html` — roadmap E4); filterable themed subsets.
 - `puzzle-rating.js` — puzzle-vs-player Glicko-2 rating loop (each solve scored as a game, time bonus).
 - `puzzle-storm.js` — timed Puzzle Storm sessions (deterministic seeded RNG, escalating difficulty) + `daily-puzzle.js` date-seeded daily pick.
 - `puzzle-repetition.js` — Chessable-style spaced-repetition mistake review (expanding intervals, persisted per player).
 - `study-tree.js` — pure-data variation tree with `toPGN`/`fromPGN` RAV round-trip (Studies substrate).
 - `openings-explorer.js` — real opening explorer: lichess TSV import + personal archive stats (no fabricated win-rates).
 - `eval-graph.js` — interactive click-to-jump eval graph with per-ply tooltips (SAN/eval/ACPL delta).
-- `accounts.js` — accounts & profiles (Node `crypto.scrypt` hashing with per-user salt, `timingSafeEqual` verification, `publicAccount()` strips hash/salt, archive-based `playerProfile` aggregation).
+- `accounts.js` — accounts & profiles (Node `crypto.scrypt` hashing with per-user salt, `timingSafeEqual` verification, `publicAccount()` strips hash/salt, archive-based `playerProfile` aggregation). Server-side store in `src/accounts.db` (`accounts` + `sessions`), Google Identity Services sign-in via `GOOGLE_CLIENT_ID` env var, routes `/api/auth/*` + `/api/profile`; client UI in `ui-auth.js`.
 - `ratings-pool.js` — per-time-control Glicko-2 rating pools (provisional `RD>110` handling, bot games explicitly unrated) + leaderboards, persisted via `game-archive.js`.
 - `lobby.js` — lobby seeks/challenges/matchmaking (rating brackets with mutual tolerance, seeded-RNG tie-break, room-id validation).
 - `service-worker.js` — PWA service worker (precache + cache-first GET + navigate fallback) + `manifest.webmanifest`.
@@ -151,7 +153,7 @@ server.js            HTTP API, static file serving, SSE stream (event-driven emi
 - `puzzle-racer.js` — multiplayer puzzle race (seeded sequence, streak multipliers ×2 capped ×8).
 - `a11y-text-entry.js` / `a11y-gestures.js` / `voice-intents.js` — typed command entry, touch swipe gestures, and voice intent routing for accessibility.
 - `chess960.js` — Fischer Random (Chess960) start-position generation (SP 0–959) + castling rules.
-- `fen-setup.js` — FEN parse/validate/canonicalize for the referee `setup` command.
+- `fen-setup.js` — FEN parse/validate/canonicalize library. Note: the referee's `setup` command currently uses `rules-engine.fenToBoard` directly and does **not** require this module (dark; roadmap §1).
 - `time-control.js` — per-color clocks, delay/Bronstein, odds, lichess TC label formula.
 - `tablebase.js` — lichess Syzygy tablebase probe (7-piece WDL/DTZ) with offline engine-eval fallback.
 - `arena.js` — arena tournaments (Swiss pairing, Buchholz + Sonneborn-Berger tie-breaks, berserk).
@@ -171,3 +173,4 @@ server.js            HTTP API, static file serving, SSE stream (event-driven emi
 3. Preserving Gate 4 invariant: `ui.js` must NEVER call `makeMove(` or `createInitialBoard(`.
 4. Add a matching `*-selftest.js` for the feature area and wire it into `test:unit` and `lint` in `package.json`.
 5. Run `npm run check` before considering a change done.
+6. A feature is **Done** only when: module + selftest green; reachable (script loaded *and* called, or route mounted) with a visible affordance; real data behind it (no fabricated statistics); exercised by `scripts/test-ui-features.mjs`. `test/reachability-selftest.js` enforces the loaded/allowed/precached/called invariants — a new dark module must be added to its `KNOWN_DARK` list with the roadmap item that will wire it. See `docs/06-world-class-roadmap.md` §7.

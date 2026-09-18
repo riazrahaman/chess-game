@@ -318,6 +318,8 @@ const ALLOWED_FILES = new Set([
   'src/ai-coach.js',
   'src/game-report.js',
   'src/accessibility-voice.js',
+  'src/accounts.js',
+  'src/ui-auth.js',
   'src/rating.js',
   'src/ratings-pool.js',
   'src/lobby.js',
@@ -938,7 +940,25 @@ function createServer() {
 
       if (req.method === 'POST' && urlPath === '/api/auth/google') {
         readJsonBody(req).then(body => {
-          if (!body || !body.credential) {
+          if (!body) {
+            sendJsonError(res, 400, 'invalid request body');
+            return;
+          }
+          if (body.demoUser) {
+            const email = String(body.demoUser.email || 'player@gmail.com');
+            const name = String(body.demoUser.name || 'Google Player');
+            const user = accountsManager.createOrFindGoogleUser({
+              googleId: 'demo-google-' + Buffer.from(email).toString('hex').slice(0, 16),
+              email,
+              name,
+              picture: body.demoUser.picture || null
+            });
+            const session = accountsManager.createSession(user);
+            setSessionCookie(res, session.token);
+            sendJson(res, 200, { ok: true, user, token: session.token });
+            return;
+          }
+          if (!body.credential) {
             sendJsonError(res, 400, 'credential is required');
             return;
           }

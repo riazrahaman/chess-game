@@ -11,16 +11,25 @@ const stockfishWorker = require('./stockfish-worker.js');
 const rulesEngine = require('./rules-engine.js');
 const openingsDb = require('./openings-db.js');
 
+// Ratings are HONEST ESTIMATES for the built-in PST+material heuristic engine
+// (no quiescence search, depth <= 4). They were relabelled on 2026-09-18 from an
+// earlier 800-2200 ladder that overstated strength by ~800 points (see
+// docs/06-world-class-roadmap.md, E2). Re-calibrate when a real engine ships (E1).
+//
+// `topN`: when > 1 the bot picks uniformly among the top-N engine lines whose
+// score is within `topNMarginCp` of the best, which is what separates levels
+// 5/6 and 7/8 (previously identical configurations with different labels).
 const BOT_LEVELS = {
-  1: { level: 1, name: 'Novice Bot', rating: 800, depth: 1, blunderRate: 0.35, greeting: 'Hi! Let’s have a fun match!' },
-  2: { level: 2, name: 'Apprentice Bot', rating: 1000, depth: 1, blunderRate: 0.20, greeting: 'Watch out for my knights!' },
-  3: { level: 3, name: 'Club Player Bot', rating: 1200, depth: 2, blunderRate: 0.10, greeting: 'Let’s battle for the center.' },
-  4: { level: 4, name: 'Tactician Bot', rating: 1400, depth: 2, blunderRate: 0.02, greeting: 'I’m watching every tactical pin and fork.' },
-  5: { level: 5, name: 'Expert Bot', rating: 1600, depth: 3, blunderRate: 0.00, greeting: 'Solid openings and precise calculation.' },
-  6: { level: 6, name: 'Master Bot', rating: 1800, depth: 3, blunderRate: 0.00, greeting: 'Preparing a deep positional strategy.' },
-  7: { level: 7, name: 'International Master Bot', rating: 2000, depth: 4, blunderRate: 0.00, greeting: 'Calculation initiated. Every tempo counts.' },
-  8: { level: 8, name: 'Grandmaster Bot', rating: 2200, depth: 4, blunderRate: 0.00, greeting: 'Grandmaster mode engaged. Maximum precision.' }
+  1: { level: 1, name: 'Novice Bot', rating: 600, depth: 1, blunderRate: 0.35, topN: 1, greeting: 'Hi! Let’s have a fun match!' },
+  2: { level: 2, name: 'Apprentice Bot', rating: 700, depth: 1, blunderRate: 0.20, topN: 1, greeting: 'Watch out for my knights!' },
+  3: { level: 3, name: 'Casual Bot', rating: 850, depth: 2, blunderRate: 0.10, topN: 1, greeting: 'Let’s battle for the center.' },
+  4: { level: 4, name: 'Club Bot', rating: 1000, depth: 2, blunderRate: 0.02, topN: 1, greeting: 'I’m watching every tactical pin and fork.' },
+  5: { level: 5, name: 'Tactician Bot', rating: 1100, depth: 3, blunderRate: 0.00, topN: 3, greeting: 'Solid openings and steady calculation.' },
+  6: { level: 6, name: 'Strong Club Bot', rating: 1200, depth: 3, blunderRate: 0.00, topN: 1, greeting: 'Preparing a positional plan.' },
+  7: { level: 7, name: 'Advanced Bot', rating: 1300, depth: 4, blunderRate: 0.00, topN: 2, greeting: 'Calculation initiated. Every tempo counts.' },
+  8: { level: 8, name: 'Expert Bot', rating: 1400, depth: 4, blunderRate: 0.00, topN: 1, greeting: 'Maximum precision for this engine.' }
 };
+const TOP_N_MARGIN_CP = 60;
 
 class BotService {
   constructor(seatAuthManager) {
@@ -141,7 +150,17 @@ class BotService {
       return candidateMoves[randomIndex].uci;
     }
 
-    // 3. Engine calculation with profile's configured depth
+    // 3. Engine calculation with profile's configured depth.
+    //    topN > 1: choose among near-equal top lines so adjacent levels differ.
+    if (profile.topN > 1 && typeof stockfishWorker.evaluateMultiPV === 'function') {
+      const lines = stockfishWorker.evaluateMultiPV(parsed, profile.depth, profile.topN) || [];
+      const legal = lines.filter(l => l && candidateMoves.some(m => m.uci === l.bestMove));
+      if (legal.length > 0) {
+        const best = legal[0].scoreRaw;
+        const near = legal.filter(l => Math.abs(l.scoreRaw - best) <= TOP_N_MARGIN_CP);
+        return near[Math.floor(Math.random() * near.length)].bestMove;
+      }
+    }
     const searchResult = stockfishWorker.findBestMove(parsed, { depth: profile.depth });
     if (searchResult && searchResult.bestMove && candidateMoves.some(m => m.uci === searchResult.bestMove)) {
       return searchResult.bestMove;
