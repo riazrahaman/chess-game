@@ -12,6 +12,17 @@ const fs = require('fs');
 
 process.env.CHESS_SSE_HEARTBEAT_MS = '200';
 process.env.CHESS_SSE_WATCH_INTERVAL_MS = '50';
+const os = require('os');
+
+// B7: keep referee snapshot/journal files out of the repo root. referee-service
+// derives every per-room ".referee-{state,journal}-<room>" path from the
+// directory of CHESS_STATE_FILE / CHESS_JOURNAL_FILE at call time, so pointing
+// them at a fresh os.tmpdir() folder (set BEFORE server.js is required) makes
+// the whole run hermetic; the folder is removed on exit (process.exit-safe).
+const B7_TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'chess-sse-hardening-'));
+process.env.CHESS_STATE_FILE = path.join(B7_TMP_DIR, '.referee-state.json');
+process.env.CHESS_JOURNAL_FILE = path.join(B7_TMP_DIR, '.referee-journal.jsonl');
+process.on('exit', () => { try { fs.rmSync(B7_TMP_DIR, { recursive: true, force: true }); } catch (_) {} });
 
 const referee = require('../src/referee-service.js');
 const {
