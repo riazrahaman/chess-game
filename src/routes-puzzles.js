@@ -489,14 +489,15 @@ function handlePuzzleRoute(req, res, urlPath, ctx) {
       if (replay.error) { sendJsonError(res, 400, replay.error); return; }
       if (replay.complete) { sendJson(res, 200, { ok: true, correct: true, complete: true, alreadyComplete: true, fen: replay.chess.fen(), solution: solutionOf(puzzle) }); return; }
       const chess = replay.chess;
+      const fenBefore = chess.fen();
       const candidate = normalizeMoveInput(chess, body.move);
-      if (!candidate) { sendJson(res, 200, { ok: true, legal: false, correct: false, complete: false, fen: chess.fen() }); return; }
+      if (!candidate) { sendJson(res, 200, { ok: true, legal: false, correct: false, complete: false, fen: fenBefore }); return; }
       const applied = applyUci(chess, candidate);
-      if (!applied) { sendJson(res, 200, { ok: true, legal: false, correct: false, complete: false, fen: chess.fen() }); return; }
+      if (!applied) { sendJson(res, 200, { ok: true, legal: false, correct: false, complete: false, fen: fenBefore }); return; }
       const isExpected = candidate === replay.expected;
       const isAlternateMate = !isExpected && chess.isCheckmate();
       if (!isExpected && !isAlternateMate) {
-        sendJson(res, 200, { ok: true, legal: true, correct: false, complete: false, move: { uci: candidate, san: applied.san }, fen: replay.chess.fen(), remaining: puzzle.movesUci.length - replay.index });
+        sendJson(res, 200, { ok: true, legal: true, correct: false, complete: false, move: { uci: candidate, san: applied.san }, fen: fenBefore, fenAfter: chess.fen(), remaining: puzzle.movesUci.length - replay.index });
         return;
       }
       const moves = replay.committed.concat([candidate]);
