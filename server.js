@@ -347,6 +347,7 @@ const ALLOWED_FILES = new Set([
   'src/embed-viewer.js',
   'src/variants.js',
   'src/i18n.js',
+  'src/ui-auth.js',
   'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'

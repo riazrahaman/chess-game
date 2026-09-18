@@ -35,6 +35,7 @@ const PRECACHE_ASSETS = [
   '/src/embed-viewer.js',
   '/src/variants.js',
   '/src/i18n.js',
+  '/src/ui-auth.js',
   '/src/ui.js',
   '/manifest.webmanifest',
   '/assets/icon.svg'
