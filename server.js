@@ -2,6 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const zlib = require('zlib');
 
 const referee = require('./src/referee-service.js');
 const { seatAuthManager } = require('./src/seat-auth.js');
@@ -563,6 +564,41 @@ function isPathAllowed(reqPath) {
 
 function isDotfile(relPath) {
   return relPath.split('/').some(seg => seg.startsWith('.'));
+}
+
+// D1: MIME types worth compressing. Images (png/ico) and wasm are already
+// compact or binary; SSE (/api/events) never reaches the static branch.
+const COMPRESSIBLE_MIME = new Set([
+  'text/html',
+  'application/javascript',
+  'application/json',
+  'text/css',
+  'image/svg+xml',
+  'application/manifest+json',
+  'text/plain'
+]);
+const BROTLI_AVAILABLE = typeof zlib.createBrotliCompress === 'function';
+
+function pickContentEncoding(req, mime) {
+  if (!COMPRESSIBLE_MIME.has(mime)) return null;
+  const accept = String(req.headers['accept-encoding'] || '').toLowerCase();
+  if (!accept) return null;
+  const tokens = accept.split(',').map(t => t.trim().split(';')[0]);
+  if (BROTLI_AVAILABLE && tokens.includes('br')) return 'br';
+  if (tokens.includes('gzip')) return 'gzip';
+  return null;
+}
+
+function appendVary(res, value) {
+  const existing = res.getHeader('Vary');
+  if (!existing) {
+    res.setHeader('Vary', value);
+    return;
+  }
+  const parts = String(existing).split(',').map(v => v.trim().toLowerCase());
+  if (!parts.includes(value.toLowerCase())) {
+    res.setHeader('Vary', existing + ', ' + value);
+  }
 }
 
 // D2: static files under src/ and assets/ are safe to revalidate via ETag /
@@ -1414,6 +1450,10 @@ function createServer() {
       // the licence keep the global no-store/no-cache policy so the SW is
       // always revalidated and new deploys are picked up immediately.
       const rel = path.relative(SERVED_ROOT, filePath).split(path.sep).join('/');
+      // D1: Vary must be declared on 304s too, so set it before the
+      // freshness check; Content-Encoding is only set on a full response.
+      const encoding = pickContentEncoding(req, mime);
+      if (COMPRESSIBLE_MIME.has(mime)) appendVary(res, 'Accept-Encoding');
       if (isRevalidatableStatic(rel)) {
         const etag = weakEtag(stats);
         const lastModified = stats.mtime.toUTCString();
@@ -1427,12 +1467,24 @@ function createServer() {
         }
       }
 
+      // D1: negotiated compression for text-like static responses.
+      if (encoding) res.setHeader('Content-Encoding', encoding);
+
       if (req.method === 'HEAD') {
         res.end();
         return;
       }
 
-      fs.createReadStream(filePath).pipe(res);
+      const stream = fs.createReadStream(filePath);
+      if (encoding) {
+        const compressor = encoding === 'br'
+          ? zlib.createBrotliCompress({ params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5 } })
+          : zlib.createGzip({ level: 6 });
+        stream.on('error', () => { try { res.destroy(); } catch (_) { /* ignore */ } });
+        stream.pipe(compressor).pipe(res);
+        return;
+      }
+      stream.pipe(res);
     });
   });
 }
