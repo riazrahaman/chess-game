@@ -968,14 +968,14 @@
                 <input type="checkbox" id="bot-toggle" /> Play vs Computer
             </label>
             <select id="bot-level-select" style="font-size:0.78rem; padding:2px 6px; border-radius:4px;">
-                <option value="1">Level 1 (Novice 800)</option>
-                <option value="2">Level 2 (Apprentice 1000)</option>
-                <option value="3" selected>Level 3 (Club 1200)</option>
-                <option value="4">Level 4 (Tactician 1400)</option>
-                <option value="5">Level 5 (Expert 1600)</option>
-                <option value="6">Level 6 (Master 1800)</option>
-                <option value="7">Level 7 (IM 2000)</option>
-                <option value="8">Level 8 (GM 2200)</option>
+                <option value="1">Level 1 (Novice ~600)</option>
+                <option value="2">Level 2 (Apprentice ~700)</option>
+                <option value="3" selected>Level 3 (Casual ~850)</option>
+                <option value="4">Level 4 (Club ~1000)</option>
+                <option value="5">Level 5 (Tactician ~1100)</option>
+                <option value="6">Level 6 (Strong Club ~1200)</option>
+                <option value="7">Level 7 (Advanced ~1300)</option>
+                <option value="8">Level 8 (Expert ~1400)</option>
             </select>
             <select id="bot-color-select" style="font-size:0.78rem; padding:2px 6px; border-radius:4px;">
                 <option value="black" selected>Bot plays Black</option>
@@ -1223,7 +1223,7 @@
                     </button>
                 </div>
                 <div id="google-config-hint" style="display: none; padding: 10px 12px; border-radius: 6px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); font-size: 0.8rem; color: var(--text-color); margin-bottom: 12px; line-height: 1.4;">
-                    <strong>ℹ️ Quick Google Session:</strong> Click <em>Continue with Google</em> for an instant Google account session. To link your official Google Cloud OAuth credentials, add <code>GOOGLE_CLIENT_ID</code> to your Render environment variables.
+                    <strong>ℹ️ Google sign-in not configured.</strong> Use a username and password below, or set <code>GOOGLE_CLIENT_ID</code> in the server environment to enable real Google sign-in. (A credential-free demo session is available only when the server runs with <code>ALLOW_DEMO_AUTH=1</code>.)
                 </div>
             </div>
 
@@ -1284,7 +1284,6 @@
        <script src="src/embed-viewer.js"></script>
        <script src="src/variants.js"></script>
        <script src="src/i18n.js"></script>
-       <script src="src/accounts.js"></script>
        <script src="src/ui-auth.js"></script>
        <script src="src/ui.js"></script>
     <script>

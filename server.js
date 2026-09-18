@@ -320,8 +320,6 @@ const ALLOWED_FILES = new Set([
   'src/ai-coach.js',
   'src/game-report.js',
   'src/accessibility-voice.js',
-  'src/accounts.js',
-  'src/ui-auth.js',
   'src/rating.js',
   'src/ratings-pool.js',
   'src/lobby.js',
@@ -1005,7 +1003,8 @@ function createServer() {
       if (req.method === 'GET' && urlPath === '/api/auth/config') {
         sendJson(res, 200, {
           ok: true,
-          googleClientId: process.env.GOOGLE_CLIENT_ID || null
+          googleClientId: process.env.GOOGLE_CLIENT_ID || null,
+          demoAuthEnabled: process.env.ALLOW_DEMO_AUTH === '1'
         });
         return;
       }
@@ -1016,7 +1015,10 @@ function createServer() {
             sendJsonError(res, 400, 'invalid request body');
             return;
           }
-          if (body.demoUser) {
+          // Demo sign-in creates a session for ANY email with no credential
+          // check. It is an auth bypass unless explicitly enabled for a
+          // dev/demo deployment via ALLOW_DEMO_AUTH=1.
+          if (body.demoUser && process.env.ALLOW_DEMO_AUTH === '1') {
             const email = String(body.demoUser.email || 'player@gmail.com');
             const name = String(body.demoUser.name || 'Google Player');
             const user = accountsManager.createOrFindGoogleUser({

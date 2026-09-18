@@ -57,6 +57,7 @@ async function checkAuthStatus() {
 
 let googleGsiLoaded = false;
 let googleClientId = null;
+let demoAuthEnabled = false;
 
 async function initGoogleSignIn() {
   const container = document.getElementById('g-signin-container');
@@ -70,6 +71,7 @@ async function initGoogleSignIn() {
       if (res.ok) {
         const config = await res.json();
         googleClientId = config.googleClientId;
+        demoAuthEnabled = config.demoAuthEnabled === true;
       }
     }
   } catch (_) {}
@@ -77,7 +79,9 @@ async function initGoogleSignIn() {
   if (!googleClientId) {
     if (hint) hint.style.display = 'block';
     if (container) container.style.display = 'none';
-    if (demoBtn) demoBtn.style.display = 'inline-flex';
+    // The demo button only works when the server has ALLOW_DEMO_AUTH=1;
+    // otherwise hide it so users are steered to username/password.
+    if (demoBtn) demoBtn.style.display = demoAuthEnabled ? 'inline-flex' : 'none';
     return;
   }
 
