@@ -62,16 +62,21 @@ function tsvAvailable() {
 }
 
 /**
- * Continuations for the position reached by `moves`, or null when the position
- * is unknown to every available source.
+ * Continuations for the position reached by `moves`:
+ *   Array  — known book position (may be empty at the end of a line)
+ *   false  — known NOT to be on any named line
+ *   null   — unknown to every available source (browser before a lookup)
  */
 function continuationsFor(arr) {
   const key = arr.join(' ');
   if (tsvAvailable()) {
-    if (!explorer.isKnownLine(arr)) return null;
+    if (!explorer.isKnownLine(arr)) return false;
     return explorer.continuations(arr).map(c => ({ move: c.uci, games: null, lines: c.lines, eco: c.eco, name: c.name }));
   }
-  if (BOOK_CACHE.has(key)) return BOOK_CACHE.get(key).slice();
+  if (BOOK_CACHE.has(key)) {
+    const v = BOOK_CACHE.get(key);
+    return v === false ? false : v.slice();
+  }
   return null;
 }
 
@@ -90,6 +95,7 @@ function isBookPosition(moves) {
   }
   const conts = continuationsFor(arr);
   if (conts === null) return { book: false, known: false, games: null, continuations: [] };
+  if (conts === false) return { book: false, known: true, games: null, continuations: [] };
   return { book: true, known: true, games: null, continuations: conts };
 }
 
@@ -103,6 +109,7 @@ function isBookMove(moves, uci) {
   const arr = normalizeMoves(moves);
   const conts = continuationsFor(arr);
   if (conts === null) return { book: false, known: false, games: null };
+  if (conts === false) return { book: false, known: true, games: null };
   const hit = conts.some(c => c.move === uci.toLowerCase());
   return { book: hit, known: true, games: null };
 }
@@ -149,10 +156,15 @@ function whitelistMistakes(review, moveHistory) {
 
 /**
  * Browser: record what GET /api/openings/lookup said about a position.
- * `continuations` = [{ uci|move, lines? }] (the route's shape is accepted as-is).
+ * `continuations` = [{ uci|move, lines? }] (the route's shape is accepted as-is)
+ * for a book position; pass `null`/`false` to record "not on any named line".
  */
 function addBookPosition(moves, continuations) {
   const arr = normalizeMoves(moves);
+  if (continuations === null || continuations === false) {
+    BOOK_CACHE.set(arr.join(' '), false);
+    return;
+  }
   const list = Array.isArray(continuations) ? continuations : [];
   BOOK_CACHE.set(arr.join(' '), list
     .map(c => ({ move: String(c.uci || c.move || '').toLowerCase(), games: null, lines: typeof c.lines === 'number' ? c.lines : null, eco: c.eco || null, name: c.name || null }))
@@ -171,6 +183,7 @@ function loadBookLines(lines) {
     for (let k = 0; k < arr.length; k++) {
       const key = arr.slice(0, k).join(' ');
       const bucket = BOOK_CACHE.get(key) || [];
+      if (!Array.isArray(bucket)) continue;
       const existing = bucket.find(c => c.move === arr[k]);
       if (existing) existing.lines = (existing.lines || 0) + 1;
       else bucket.push({ move: arr[k], games: null, lines: 1, eco: null, name: null });

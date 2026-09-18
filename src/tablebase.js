@@ -59,6 +59,31 @@
     */
    function parseResponse(json) {
       if (!json || typeof json !== 'object') return null;
+      // Real lichess `/standard` shape (https://tablebase.lichess.ovh):
+      //   { category: 'win'|'draw'|'loss'|..., dtz, dtm, checkmate, stalemate,
+      //     moves: [{ uci, san, category (from the opponent's view), dtz, dtm, zeroing }] }
+      // `moves` is sorted best-first by lichess.
+      if (typeof json.category === 'string' && Array.isArray(json.moves)) {
+        var top = json.moves[0] || null;
+        var cat = json.category;
+        var wdlArr = cat === 'win' || cat === 'cursed-win' ? [1, 0, 0]
+                   : cat === 'loss' || cat === 'blessed-loss' ? [0, 0, 1]
+                   : [0, 1, 0];
+        return {
+          move: top && typeof top.uci === 'string' ? top.uci : null,
+          san: top && typeof top.san === 'string' ? top.san : null,
+          category: cat,
+          wdl: wdlArr,
+          dtz: typeof json.dtz === 'number' ? json.dtz : null,
+          dtm: typeof json.dtm === 'number' ? json.dtm : null,
+          bestEval: null,
+          checkmate: !!json.checkmate,
+          stalemate: !!json.stalemate,
+          moves: json.moves.map(function (m) {
+            return { uci: m.uci, san: m.san, category: m.category, dtz: m.dtz, dtm: m.dtm };
+          })
+        };
+      }
       var best = json.best;
       if (!best) return null;
       var move = (typeof best.mv === 'string' && best.mv) ? best.mv : null;
@@ -82,9 +107,12 @@
 
     /**
     * Resolve the transport. Prefers an injected fetch, then the global one.
+    * An explicit `fetchImpl: null` means "no network" (offline / tests) and
+    * short-circuits to the fallback instead of touching the global fetch.
     */
    function resolveFetch(opts) {
       if (opts && typeof opts.fetchImpl === 'function') return opts.fetchImpl;
+      if (opts && opts.fetchImpl === null) return null;
       if (typeof fetch === 'function') return fetch;
       if (typeof globalThis !== 'undefined' && typeof globalThis.fetch === 'function') return globalThis.fetch;
       return null;
