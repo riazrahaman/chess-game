@@ -76,6 +76,15 @@ test('unknown bots never enter human pool membership after an unrated match', ()
   assert.strictEqual(store.pools.get('blitz').has('unknown-bot'), false);
 });
 
+test('peekPlayer is read-only: unknown players return null and never enter the pool', () => {
+  const store = new RatingsPool.RatingsPoolStore({ archive: null });
+  assert.strictEqual(store.peekPlayer('blitz', 'ghost'), null);
+  assert.strictEqual(store.getLeaderboard('blitz', { includeProvisional: true }).length, 0);
+  store.recordMatch({ timeControl: 'blitz', playerA: 'alice', playerB: 'bob', result: 'win' });
+  assert.ok(store.peekPlayer('blitz', 'alice').rating > 1500);
+  assert.strictEqual(store.peekPlayer('rapid', 'alice'), null, 'pools stay separated');
+});
+
 test('rated human games update both Glicko-2 states', () => {
   const store = new RatingsPool.RatingsPoolStore({ archive: null });
   store.setPlayer('rapid', established('winner', 1500));

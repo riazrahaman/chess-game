@@ -12,6 +12,8 @@ const Accounts = require('./src/accounts.js');
 const { Chess } = require('chess.js');
 const accountsManager = Accounts.getDefaultManager();
 const botService = new BotService(seatAuthManager);
+const ratingHook = require('./src/rating-hook.js').installRatingHook({ referee, seatAuth: seatAuthManager, archive: gameArchive, isBotRoom: roomId => botService.getBotConfig(roomId).enabled, onRated: event => SocialRoutes.onRatedGame(event), logger: console }); // Wave 2 R2: rate human-vs-human games on game end
+const SocialRoutes = require('./src/routes-social.js');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : (process.env.CHESS_PORT ? Number(process.env.CHESS_PORT) : 39281);
 const DIR = __dirname;
@@ -355,6 +357,8 @@ const ALLOWED_FILES = new Set([
   'src/shell.js',
   'src/ui-puzzles.js',
   'src/ui-settings.js',
+  'src/ui-compete.js',
+  'src/ui-profile.js',
   'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'
@@ -1261,7 +1265,7 @@ function createServer() {
           try { parsed = body ? JSON.parse(body) : {}; } catch (e) { parsed = {}; }
           const role = parsed.role;
           const targetRoom = parsed.room || roomId;
-          const result = seatAuthManager.claimSeat(targetRoom, role);
+          const result = seatAuthManager.claimSeat(targetRoom, role, { account: getAuthUser(req) }); // Wave 2: seat -> account link for rating-hook.js
           if (result.ok) {
             sendJson(res, 200, result);
           } else {
@@ -1462,6 +1466,7 @@ function createServer() {
       }
 
       if (require('./src/routes-puzzles.js').handlePuzzleRoute(req, res, urlPath, { sendJson, sendJsonError, readJsonBody, getAuthUser, parseCookies, gameArchive })) return; // Wave 2 E4: /api/puzzle/*
+      if (SocialRoutes.handleSocialRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readBody, maxBodyBytes: MAX_BODY_BYTES, referee, seatAuth: seatAuthManager, isValidRoomId, accountsManager, gameArchive, ratingsStore: ratingHook.store, botService })) return; // Wave 2 R2: lobby/leaderboard/arena/social routes
 
       sendJsonError(res, 404, 'not found');
       return;
@@ -1578,7 +1583,9 @@ module.exports = {
     roomSseSeq.delete(roomId);
   },
   accountsManager,
-  Accounts
+  Accounts,
+  ratingHook,
+  SocialRoutes
 };
 
 if (require.main === module) {

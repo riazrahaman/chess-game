@@ -57,9 +57,6 @@ function assert(cond, msg) {
 // ---------------------------------------------------------------------------
 const KNOWN_DARK = {
   // --- DARK, never loaded by index.html nor required from server.js (§1: 11) ---
-  'rating.js':            'roadmap §1 DARK-never-loaded; Phase 2 ratings/leaderboard shell (P2)',
-  'ratings-pool.js':      'roadmap §1 DARK-never-loaded; Phase 2 ratings/leaderboard shell (P2)',
-  'lobby.js':             'roadmap §1 DARK-never-loaded; Phase 2 lobby/seek shell (P2)',
   'study-tree.js':        'roadmap §1 DARK-never-loaded; Phase 2 studies shell (P2)',
   'openings-explorer.js': 'roadmap §1 DARK-never-loaded; Phase 2 opening explorer shell (P2)',
   'fen-setup.js':         'roadmap §1 doc/code contradiction: referee _cmdSetup uses rulesEngine.fenToBoard, not this module (P2 setup UI)',
@@ -71,8 +68,6 @@ const KNOWN_DARK = {
   'puzzle-racer.js':      'roadmap §1 DARK-shipped; Phase 2 puzzles shell (P2)',
   'chess960.js':          'roadmap §1 DARK-shipped; Phase 2 variants/new-game dialog (P2)',
   'tablebase.js':         'roadmap §1 DARK-shipped; Phase 2 analysis panel (P2)',
-  'arena.js':             'roadmap §1 DARK-shipped; Phase 3 tournaments (P3)',
-  'social-graph.js':      'roadmap §1 DARK-shipped; Phase 3 social (P3)',
   'chat-upgrades.js':     'roadmap §1 DARK-shipped; Phase 2 chat affordances (P2)',
   'correspondence.js':    'roadmap §1 DARK-shipped; Phase 3 correspondence (P3)',
   'personality-bots.js':  'roadmap §1 DARK-shipped; Phase 2 bot picker (P2)',
