@@ -1,6 +1,6 @@
 # Chess Game — Grandmaster Edition
 
-A high-performance, accessible, full-featured web chess implementation built with vanilla JavaScript, authoritative Node.js referee architecture, local heuristic engine & UCI worker, and real-time multiplayer capabilities.
+A high-performance, accessible, full-featured web chess implementation built with vanilla JavaScript, authoritative Node.js referee architecture, a real Stockfish 19 engine (lite single-threaded WASM, vendored under `vendor/stockfish/`) in a browser Worker and on the server, and real-time multiplayer capabilities.
 
 ---
 
@@ -26,7 +26,7 @@ A high-performance, accessible, full-featured web chess implementation built wit
 - **Correspondence Mode**: Multi-day clocks with flag detection and if-then conditional premoves (`correspondence.js`).
 
 ### 3. AI-Era Capabilities (C2, C4, C5, C6, C7, C8)
-- **Play vs Computer (C5)**: Autonomous bot opponents with 8 difficulty tiers (Novice 800 to Grandmaster 2200), search depths 1–4, blunder rates, human think delay, and persona flavor commentary (`bot-service.js`).
+- **Play vs Computer (C5)**: Autonomous bot opponents with 8 difficulty tiers driven by the server-side Stockfish 19 (`engine-server.js`: `UCI_LimitStrength` / `UCI_Elo` plus depth/time caps), human think delay, and persona flavor commentary (`bot-service.js`). Level labels are re-calibrated to real engine strength in Wave 1.
 - **Personality Bots**: Five historical personas (Tal, Karpov, Capablanca, Morphy, Nimzowitsch) with distinct play-style profiles and chat commentary (`personality-bots.js`).
 - **Retry Your Mistakes / Blunder Puzzles (C7)**: Automatic mistake puzzle generator turning game review blunders into interactive puzzles to discover optimal moves (`#retry-mistakes-section`, `move-review.js`).
 - **"Why?" Move Explanations & Coach Mode (C2, C4)**: Contextual plain-English move breakdown cards explaining tactical reasons (`#why-move-btn`) and real-time coaching suggestions on your turn (`#coach-hint-btn`, `ai-coach.js`).
@@ -47,7 +47,7 @@ A high-performance, accessible, full-featured web chess implementation built wit
 - **Touch Gestures**: Swipe-based navigation and tap detection for blind-mode board control (`a11y-gestures.js`).
 
 ### 5. Engine Analysis & Game Review
-- **Lightweight Local Heuristic Engine & UCI Worker**: In-browser evaluator (PST + material evaluation, candidate move search) running UCI protocol (`uci`, `isready`, `ucinewgame`, `position fen`, `go depth`) with Stockfish 17 UCI alias and an optional WASM bridge for protocol compatibility (`stockfish-worker.js`).
+- **Stockfish 19 in a Web Worker**: `stockfish-worker.js` loads the vendored Stockfish 19 lite single-threaded WASM (`vendor/stockfish/`, ~1.8 MB, precached by the service worker, no COOP/COEP needed) and speaks UCI (`uci`, `isready`, `ucinewgame`, `position fen`, `go depth`, MultiPV). The in-house PST + material heuristic remains only as a fallback if the WASM fails to load; the analysis panel names the active engine (`#analysis-engine-label`).
 - **Multi-PV Candidate Arrows**: Visualizes top 3 candidate engine evaluation lines with color-coded directional SVG arrows and real-time breakdown panel.
 - **CAPS Win-Probability Move Review**: Computer Aggregated Precision Score (0–100%) using the lichess win-probability logistic curve, and move classifications:
   - **Brilliant (!!)**: Winning piece sacrifices.
@@ -84,7 +84,7 @@ A high-performance, accessible, full-featured web chess implementation built wit
 - **Multi-Tenant Room Router**: Isolated game rooms at `/game/:roomId` with isolated referee queues, state files, and SSE channels.
 - **SQLite Game Archive & PGN Library**: Native Node.js `node:sqlite` resilient database with search, pagination, Seven Tag Roster PGN parsing, PGN export, and persistent eval/rating/review storage.
 - **Security Boundary & Rate Limiting**: Strict CORS origin verification, 8KB request payload cap, persistent (SQLite-backed) IP rate limiting surviving restarts, path traversal protection, dotfile denial, and nosniff/no-store HTTP headers.
-- **Security Headers**: CSP, X-Frame-Options, Referrer-Policy, and HSTS (when behind TLS) helmet-style hardening.
+- **Security Headers**: CSP (`script-src 'wasm-unsafe-eval'` for the engine — no `'unsafe-eval'`; `connect-src` allowlists Google Identity and `tablebase.lichess.ovh`), X-Frame-Options, Referrer-Policy, and HSTS (when behind TLS) helmet-style hardening.
 - **PWA**: Installable manifest (`manifest.webmanifest`) with a precache + cache-first service worker for offline play (`service-worker.js`).
 - **Annotated-POV Exports**: Per-perspective annotated PGN export with a summary-card SVG (`pov-export.js`).
 - **Embeddable Viewer**: FEN→SVG board renderer with a copy-paste iframe snippet (`embed-viewer.js`).
@@ -115,6 +115,7 @@ Open `http://127.0.0.1:39281` in your browser to play.
 ## Repository Layout
 
 - `src/` — all source modules (referee, rules engine, game archive, bot, engine worker, UI, and every feature module).
+- `vendor/stockfish/` — vendored Stockfish 19 lite single-threaded WASM + loader, `Copying.txt` (GPL-3.0) and a README with source/version/upgrade notes.
 - `test/` — all `*-selftest.js` suites (run with `node test/<name>-selftest.js`).
 - Repo root — `server.js` (entrypoint), `index.html`, `manifest.webmanifest`, `service-worker.js` (kept at root for scope `/`), plus `docs/`, `scripts/`, `assets/`.
 
@@ -143,6 +144,7 @@ node test/t0-deadcode-selftest.js
 
 # Engine & Mobile Visuals
 node test/p2-stockfish-selftest.js
+node test/wave1-engine-selftest.js   # proof the vendored Stockfish 19 actually runs
 node test/t1-mobile-visuals-selftest.js
 
 # Social & Time Controls
@@ -204,6 +206,11 @@ node test/i18n-selftest.js
 ```
 
 ---
+
+## Licence
+
+- **Engine**: [Stockfish 19](https://stockfishchess.org/) via [stockfish.js](https://github.com/nmrugg/stockfish.js) (lite single-threaded WASM build) is vendored under `vendor/stockfish/` and is licensed under the **GNU GPL-3.0** (`vendor/stockfish/Copying.txt`). Distributing this app distributes GPL code — keep that directory and licence intact, and treat the combined distribution accordingly.
+- **Piece artwork**: Colin M.L. Burnett's cburnett set (`CBURNETT-LICENSE.txt`).
 
 ## Documentation
 - [Recommendations & Parity Benchmark](RECOMMENDATIONS.md)

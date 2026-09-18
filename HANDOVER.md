@@ -170,3 +170,32 @@ worktree workers with strict file ownership (A: `src/ui.js` + `index.html`; B: `
 | B3 Gate-4 string-concat workaround → referee-served per-ply FEN/SAN (+ `claimableDraw` in `stateView`) | DONE | 10b3855 | `state.positions` + `state.claimableDraw` from the referee; `ui.js` parses FEN for display only, no move replay, `historyToSan` gone from ui*.js; Gate-4 tests are now token-scan + concatenation-proof; archived games get `positions` from `/api/games/:id`. New `b3-positions-selftest.js` (10). Note: referee still auto-draws at threefold/50-move (existing policy) — claimable-only is a separate rules decision. |
 | G4b draw policy → FIDE claimable (threefold/50-move) vs automatic (fivefold/75/insufficient) | DONE | (fix/g4b-claimable-draws) | `rules-engine.automaticDraw` used by the referee; `t0-draw-flagfall` 60/60 incl. new fivefold auto-draw + threefold claim cases. |
 | B9 remove tracked `game-log.md` / `brief.html` | DONE | (this commit) | Agent-orchestration residue removed and gitignored; `security-selftest` still asserts `/game-log.md` is not served. |
+
+## 6. WAVE 1 — Real engine (branch `feat/wave1-real-engine`, started 2026-09-18)
+
+Scope: `docs/06-world-class-roadmap.md` §3 (E1a/E1b/E2) and §5 (D4/D5). Base commit 96e5d51 vendors
+Stockfish 19 lite single-threaded WASM (GPL-3.0) under `vendor/stockfish/`; `scripts/engine-probe.js`
+proves it runs under Node (~150 ms for `go depth 12`). Same three-worker pattern as Wave 0 with strict
+file ownership (A: `src/stockfish-worker.js` + `src/ui.js` + `ALLOWED_FILES`/`PRECACHE_ASSETS`;
+B: `src/engine-server.js` + `src/bot-service.js` + `package.json`; C: CSP/MIME hunks of `server.js`,
+`index.html`, docs, proof selftest). Lead merges serially and finalises this table; `npm run check`
+runs once after the merge.
+
+| Item | Owner | Status | Commit | Notes |
+|---|---|---|---|---|
+| E1 base — vendor SF19 lite-single WASM + licence + probe | lead | DONE | 96e5d51 | `vendor/stockfish/{stockfish-19-lite-single.js,.wasm,Copying.txt,README.md}` |
+| E1a — browser Worker loads the vendored engine (`stockfish-worker.js`, `ui.js` engine-ready → `#analysis-engine-label` / `#analysis-engine-caveat`), `ALLOWED_FILES` + `PRECACHE_ASSETS` entries | Worker A | IN PROGRESS | — | PST stays as fallback only. `test/wave1-engine-selftest.js` wiring assertions go green when this lands. |
+| E1b — `src/engine-server.js` (Node-side SF19 over UCI) | Worker B | IN PROGRESS | — | Option A (same WASM under Node). |
+| E2 — real bot ladder in `bot-service.js` (`UCI_LimitStrength`/`UCI_Elo` + depth/time caps) | Worker B | IN PROGRESS | — | Reports final 8 `#bot-level-select` labels; lead applies them to `index.html` at merge. Wires `wave1-engine-selftest` into `package.json`. |
+| D4 — CSP `'wasm-unsafe-eval'` replaces `'unsafe-eval'` | Worker C | DONE (pending merge) | 46813ca | `'unsafe-inline'` kept in `script-src` for the single inline SW-registration block (redundant `onsubmit` attr removed in 6d278b4); `style-src 'unsafe-inline'` kept. Follow-up: hash the inline block from `index.html` at startup. |
+| D5 — `connect-src https://tablebase.lichess.ovh` | Worker C | DONE (pending merge) | 46813ca | Asserted in `security-headers-selftest` (22/22). |
+| index.html honesty — `#analysis-engine-label`, `#analysis-engine-caveat`, footer engine credit | Worker C | DONE (pending merge) | 6d278b4 | "Beginner Engine" gone; Worker A overwrites label/caveat text on engine-ready. |
+| Proof test `test/wave1-engine-selftest.js` (14) | Worker C | DONE (pending merge) | 11aca52 | Vendor files, size band, `\0asm`, GPL text, allowlist/precache, CSP, engine runs (uci → "Stockfish 19", rejects Qxd5??, finds a1a8#), index.html. |
+| Docs — CLAUDE.md / README.md (+ Licence) / roadmap status / this section | Worker C | DONE (pending merge) | (docs commit) | |
+
+**Known follow-ups surfaced in Wave 1 (not blocking):**
+- `server.js` `isRevalidatableStatic()` only matches `src/` and `assets/`, so `vendor/*` is served with
+  the global `no-store` (no ETag/304) outside the service-worker cache. One-line fix
+  (`|| rel.startsWith('vendor/')`) in the D2 hunk — apply at merge.
+- `bot-tactics-selftest.js:133` asserts `BOT_LEVELS[8].rating <= 1400` ("must not overstate the
+  heuristic engine") — Worker B's re-calibrated ladder will need that assertion revised.

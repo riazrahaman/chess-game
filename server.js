@@ -295,9 +295,8 @@ const MIME = {
   '.webmanifest': 'application/manifest+json',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
-  // B10: kept for the future real engine build. 'src/stockfish.js' and
-  // 'src/stockfish.wasm' do not exist in the repo yet, so they are NOT in
-  // ALLOWED_FILES; re-add them there when the WASM engine actually ships.
+  // E1 (Wave 1): vendor/stockfish/stockfish-19-lite-single.wasm must be served
+  // as application/wasm so WebAssembly.instantiateStreaming accepts it.
   '.wasm': 'application/wasm'
 };
 
@@ -460,14 +459,25 @@ function isBehindTls(req) {
 function buildCsp() {
   if (process.env.CHESS_CSP) return process.env.CHESS_CSP;
   // The app is a no-build-step vanilla JS SPA with one inline <script> (SW reg)
-  // and an inline <style> block, optional WebAssembly, and Google Identity Services.
+  // and an inline <style> block, WebAssembly (vendored Stockfish 19 lite, see
+  // vendor/stockfish/), and Google Identity Services.
+  //
+  // D4 (Wave 1): 'wasm-unsafe-eval' replaces 'unsafe-eval'. The engine loader
+  // (vendor/stockfish/stockfish-19-lite-single.js) uses WebAssembly.instantiate
+  // only — no eval()/new Function — so plain JS eval stays blocked. Dedicated
+  // Workers take their CSP from their own script response, and this header is
+  // sent on every response, so the Worker gets the same policy.
+  // Still 'unsafe-inline' in script-src: index.html keeps one inline SW-
+  // registration <script>. Remaining D4 step: hash it ('sha256-…' computed
+  // from index.html at startup) or externalise it — not done this wave.
+  // D5: tablebase.js probes https://tablebase.lichess.ovh (7-piece Syzygy).
   return [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com/gsi/client",
+    "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://accounts.google.com/gsi/client",
     "style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style",
     "img-src 'self' data: https://*.googleusercontent.com",
     "font-src 'self' data:",
-    "connect-src 'self' https://accounts.google.com/gsi/",
+    "connect-src 'self' https://accounts.google.com/gsi/ https://tablebase.lichess.ovh",
     "frame-src 'self' https://accounts.google.com/gsi/",
     "worker-src 'self' blob:",
     "media-src 'self' blob: data:",

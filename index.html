@@ -925,7 +925,7 @@
         <div id="material-advantage">Material even</div>
         <div id="multipv-container">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                <span style="font-weight: 600; font-size: 0.85rem;">Position analysis (Beginner Engine)</span>
+                <span id="analysis-engine-label" style="font-weight: 600; font-size: 0.85rem;">Position analysis · loading engine…</span>
                 <select id="multipv-select" aria-label="Engine lines count" style="font-size: 0.8rem; padding: 2px 4px; border-radius: 4px;">
                     <option value="1">1 Line</option>
                     <option value="2">2 Lines</option>
@@ -933,7 +933,7 @@
                 </select>
             </div>
             <div id="multipv-lines" style="font-size: 0.82rem;"></div>
-            <p class="supporting-copy">Lightweight local heuristic engine (PST + material evaluation). Suggestions are approximate.</p>
+            <p id="analysis-engine-caveat" class="supporting-copy">Loading the analysis engine… evaluations appear once it is ready.</p>
         </div>
     </div>
     <section id="status-panel" aria-label="Game controls">
@@ -1123,14 +1123,14 @@
                 <span id="chat-count" style="font-size: 0.75rem; color: var(--muted);">0 messages</span>
             </div>
             <div id="chat-messages" style="height: 120px; overflow-y: auto; background: rgba(0,0,0,0.03); border: 1px solid var(--panel-border); border-radius: 4px; padding: 6px; font-size: 0.8rem; margin-bottom: 6px; display: flex; flex-direction: column; gap: 4px;"></div>
-            <form id="chat-form" style="display: flex; gap: 6px;" onsubmit="return false;">
+            <form id="chat-form" style="display: flex; gap: 6px;">
                 <input id="chat-input" type="text" placeholder="Send chat message..." maxlength="200" style="flex: 1; padding: 6px 8px; font-size: 0.8rem; border-radius: 4px;" />
                 <button id="chat-send-btn" type="button" style="padding: 4px 10px; font-size: 0.8rem; background: var(--accent); color: #fff; font-weight: 600;">Send</button>
             </form>
         </div>
     </div>
     </main>
-    <footer class="app-footer"><span>Local chess. Your games stay on this server.</span><span>Arrow keys to navigate · Enter to select · Right-click to annotate</span></footer>
+    <footer class="app-footer"><span>Local chess. Your games stay on this server.</span><span>Engine: Stockfish 19 (GPL-3.0) — see vendor/stockfish/ · Pieces: cburnett (see CBURNETT-LICENSE.txt)</span><span>Arrow keys to navigate · Enter to select · Right-click to annotate</span></footer>
     <div id="promo-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="promo-title" aria-describedby="promo-description">
         <div id="promo-box">
             <div id="promo-title">Promote pawn</div>
