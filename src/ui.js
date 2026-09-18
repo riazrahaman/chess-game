@@ -20,6 +20,15 @@ let lastKnownStateJson = "";
 let pollStarted = false;
 let sseStarted = false;
 let sseEventSource = null;
+// B6: poll cadence. While SSE is open the poll is only a slow liveness check;
+// when SSE is down it resumes the fast cadence. Consecutive /api/state failures
+// back off exponentially (capped) so a down server doesn't spam the console.
+const POLL_FAST_MS = 600;
+const POLL_SSE_LIVENESS_MS = 15000;
+const POLL_FAIL_CAP_MS = 10000;
+let pollTimer = null;
+let pollFailures = 0;
+let sseConnected = false;
 let refereeStatus = 'ongoing';
 let gameOver = false;
 let result = null;
@@ -1429,11 +1438,34 @@ async function pollReferee() {
       lastKnownStateJson = stateJson;
     }
     setConnectionState('connected', 'Connected to referee.');
+    pollFailures = 0;
   } catch (e) {
-    console.error('pollReferee error:', e);
+    if (pollFailures === 0) console.error('pollReferee error:', e);
+    pollFailures += 1;
     setConnectionState('disconnected', 'Connection lost. Reconnecting…');
   }
-  setTimeout(pollReferee, 600);
+  schedulePoll(nextPollDelayMs());
+}
+
+// B6: pick the next poll delay from transport health. Failures dominate
+// (exponential backoff, capped); otherwise SSE-open means a slow liveness
+// check and SSE-down means the fast fallback cadence.
+function nextPollDelayMs() {
+  if (pollFailures > 0) {
+    return Math.min(POLL_FAIL_CAP_MS, POLL_FAST_MS * Math.pow(2, pollFailures - 1));
+  }
+  return sseConnected ? POLL_SSE_LIVENESS_MS : POLL_FAST_MS;
+}
+
+// B6: single-owner timer so SSE open/error handlers can re-arm the loop
+// without ever creating a second concurrent poll chain.
+function schedulePoll(delayMs) {
+  if (!pollStarted) return;
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(() => {
+    pollTimer = null;
+    pollReferee();
+  }, delayMs);
 }
 
 // D1: SSE push handler. When an EventSource event arrives, apply the same
@@ -1466,7 +1498,12 @@ function startSSE() {
   sseStarted = true;
   try {
     sseEventSource = new EventSource(withRoomParam('/api/events'));
-    sseEventSource.onopen = () => setConnectionState('connected', 'Connected to referee.');
+    sseEventSource.onopen = () => {
+      setConnectionState('connected', 'Connected to referee.');
+      // B6: SSE is now the primary transport; drop polling to a liveness check.
+      sseConnected = true;
+      schedulePoll(nextPollDelayMs());
+    };
     sseEventSource.addEventListener('state', (event) => {
       try {
         const state = JSON.parse(event.data);
@@ -1484,8 +1521,11 @@ function startSSE() {
       }
     });
     sseEventSource.onerror = (e) => {
-      console.warn('SSE connection error; pollReferee fallback remains active');
+      if (sseConnected) console.warn('SSE connection error; pollReferee fallback remains active');
       setConnectionState('reconnecting', 'Live updates interrupted. Reconnecting; polling remains active…');
+      // B6: SSE is down; resume the fast poll cadence immediately.
+      sseConnected = false;
+      schedulePoll(nextPollDelayMs());
     };
   } catch (e) {
     console.warn('EventSource unavailable; falling back to polling only');
