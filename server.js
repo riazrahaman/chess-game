@@ -12,6 +12,8 @@ const Accounts = require('./src/accounts.js');
 const { Chess } = require('chess.js');
 const accountsManager = Accounts.getDefaultManager();
 const botService = new BotService(seatAuthManager);
+const ratingHook = require('./src/rating-hook.js').installRatingHook({ referee, seatAuth: seatAuthManager, archive: gameArchive, isBotRoom: roomId => botService.getBotConfig(roomId).enabled, onRated: event => SocialRoutes.onRatedGame(event), logger: console }); // Wave 2 R2: rate human-vs-human games on game end
+const SocialRoutes = require('./src/routes-social.js');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : (process.env.CHESS_PORT ? Number(process.env.CHESS_PORT) : 39281);
 const DIR = __dirname;
@@ -1459,6 +1461,8 @@ function createServer() {
         return;
       }
 
+      if (SocialRoutes.handleSocialRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readBody, maxBodyBytes: MAX_BODY_BYTES, referee, seatAuth: seatAuthManager, isValidRoomId, accountsManager, gameArchive, ratingsStore: ratingHook.store, botService })) return; // Wave 2 R2: lobby/leaderboard/arena/social routes
+
       sendJsonError(res, 404, 'not found');
       return;
     }
@@ -1574,7 +1578,9 @@ module.exports = {
     roomSseSeq.delete(roomId);
   },
   accountsManager,
-  Accounts
+  Accounts,
+  ratingHook,
+  SocialRoutes
 };
 
 if (require.main === module) {
