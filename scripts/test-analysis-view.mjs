@@ -91,6 +91,19 @@ const tb = await page.$eval('[data-an="tablebase"]', e => e.textContent);
 console.log('tablebase panel:', tb.slice(0, 160));
 ok(/win|draw|loss|offline|Probing/i.test(tb), 'tablebase panel rendered (online result or offline fallback)');
 
+// Archive deep link: seed a game through /api/games, open #/analysis?game=<id>
+const archId = 'w2d-arch-' + Date.now().toString(36);
+const saved = await api('/api/games', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: archId, white: 'Anna', black: 'Boris', result: '1-0', moves: 'e2e4 e7e5 g1f3 b8c6 f1b5 a7a6' }) });
+ok(saved.status === 201, `archive seeded (${saved.status})`);
+await page.goto(`${BASE}/#/analysis?game=${encodeURIComponent(archId)}`, { waitUntil: 'domcontentloaded' });
+await page.waitForFunction(id => /^Archive /.test((document.querySelector('[data-an="status"]') || {}).textContent || '') && (document.querySelector('[data-an="status"]') || {}).textContent.includes(id), archId, { timeout: 15000 });
+const archSans = await page.$$eval('[data-view="analysis"] [data-an="moves"] button[data-an-ply]', els => els.map(e => e.textContent));
+ok(archSans.join(' ') === 'start e4 e5 Nf3 Nc6 Bb5 a6', `archive deep link SAN list: ${archSans.join(' ')}`);
+const archStatus = await page.$eval('[data-an="status"]', e => e.textContent);
+ok(/Anna vs Boris 1-0/.test(archStatus), `archive status line: ${archStatus}`);
+await page.waitForFunction(() => /Morphy/.test((document.querySelector('[data-an="opening-name"]') || {}).textContent || ''), null, { timeout: 15000 });
+ok(true, 'archive game opening resolves to Ruy Lopez: Morphy Defense');
+
 // Bad FEN rejected
 await page.fill('[data-an="fen"]', 'not a fen');
 await page.click('[data-an="load-fen"]');
