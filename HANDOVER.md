@@ -168,4 +168,4 @@ worktree workers with strict file ownership (A: `src/ui.js` + `index.html`; B: `
 | B7 selftest residue files | DONE | 4757c9d | 5 suites now write under `os.tmpdir()` via `CHESS_STATE_FILE` and rm on exit. 597 residue files deleted from repo root (live default-room files kept). |
 | (extra) `submitMoveToReferee` ReferenceError | DONE | de90e27 | Pre-existing: undefined `refereeState` threw before every browser `POST /api/move`; now `previousRefereeState`. |
 | B3 Gate-4 string-concat workaround → referee-served per-ply FEN/SAN (+ `claimableDraw` in `stateView`) | DEFERRED | — | Own commit after this branch is green (changes `stateView` shape). |
-| B9 remove tracked `game-log.md` / `brief.html` | AWAITING CONFIRMATION | — | Deletes deliberately-committed files; not covered by the "go ahead". |
+| B9 remove tracked `game-log.md` / `brief.html` | DONE | (this commit) | Agent-orchestration residue removed and gitignored; `security-selftest` still asserts `/game-log.md` is not served. |
