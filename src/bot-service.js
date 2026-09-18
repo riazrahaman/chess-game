@@ -66,7 +66,7 @@ class BotService {
       enabled: true,
       level: config.level,
       color: config.color,
-      name: `${info.name} (${info.rating})`,
+      name: `${info.name} (~${info.rating})`,
       rating: info.rating
     };
   }

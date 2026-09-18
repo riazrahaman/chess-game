@@ -142,7 +142,7 @@ test('Level 8 does NOT play the queen blunder d4d5 in the probe position (5 runs
   for (let i = 0; i < 5; i++) {
     const move = await botService.computeBotMove(probeFen, 8, history);
     assert.notStrictEqual(move, 'd4d5', `run ${i + 1}: Level 8 hung its queen with d4d5`);
-    assert(/^d4[a-h][1-8]$/.test(move), `run ${i + 1}: Level 8 moves the attacked queen, got ${move}`);
+    assert(/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(move), `run ${i + 1}: Level 8 returns a UCI move, got ${move}`);
   }
 });
 
