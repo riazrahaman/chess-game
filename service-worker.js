@@ -40,6 +40,8 @@ const PRECACHE_ASSETS = [
   '/src/i18n.js',
   '/src/ui-auth.js',
   '/src/shell.js',
+  '/src/ui-compete.js',
+  '/src/ui-profile.js',
   '/src/ui.js',
   '/manifest.webmanifest',
   '/assets/icon.svg'
