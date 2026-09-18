@@ -881,6 +881,15 @@
         <button id="blind-mode-toggle" title="Toggle Blind Accessibility Mode (Shortcut: B)">Blind Mode: Off</button>
         <span id="voice-transcript-status" style="display:none; font-size:0.75rem; padding:2px 6px; border-radius:4px; background:rgba(37,99,235,0.1); color:var(--text-color);"></span>
     </div>
+    <div id="account-bar" style="display:flex; align-items:center; gap:6px; margin-left:auto;">
+        <div id="account-user-badge" style="display:none; align-items:center; gap:6px; font-size:0.8rem; font-weight:600; padding:2px 8px; border-radius:12px; background:var(--panel-bg); border:1px solid var(--panel-border);">
+            <img id="account-user-avatar-img" src="" alt="Avatar" style="display:none; width:20px; height:20px; border-radius:50%; object-fit:cover;">
+            <span id="account-user-avatar-text" style="display:inline-block; width:20px; height:20px; border-radius:50%; background:#2563eb; color:#fff; text-align:center; line-height:20px; font-size:11px;">?</span>
+            <span id="account-username">Guest</span>
+        </div>
+        <button id="auth-sign-in-btn" type="button" style="font-size:0.8rem; padding:4px 10px;">Sign In</button>
+        <button id="auth-sign-out-btn" type="button" class="hidden" style="font-size:0.8rem; padding:4px 10px;">Sign Out</button>
+    </div>
     <div id="accessibility-announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true" style="position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;"></div>
     </header>
     <main id="workspace" class="workspace" tabindex="-1">
@@ -937,6 +946,7 @@
             <option value="classical_15_10">Classical 15+10</option>
         </select>
         <button id="copy-room-link" type="button" style="font-size: 0.8rem; padding: 2px 6px;">Copy Room Link</button>
+        <button id="new-room-btn" type="button" style="font-size: 0.8rem; padding: 2px 6px;">New Room</button>
         </div>
         <div id="seat-bar" style="display:inline-flex; align-items:center; gap:6px; margin-left:12px;">
             <span id="seat-badge" style="font-size:0.75rem; padding:2px 6px; border-radius:4px; background:#e2e8f0; font-weight:600;">Unseated</span>
@@ -1172,6 +1182,57 @@
             <div id="import-pgn-status" style="margin-top: 8px; font-size: 0.8rem;"></div>
         </div>
     </div>
+    <div id="auth-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
+        <div id="auth-box" class="modal-dialog" style="width: min(460px, calc(100vw - 32px)); padding: 20px; background: var(--panel-bg); color: var(--text-color);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h2 id="auth-modal-title" style="margin: 0; font-size: 1.2rem;">Account &amp; Sign In</h2>
+                <button id="close-auth-modal-btn" type="button" aria-label="Close sign in dialog" style="cursor: pointer; padding: 4px 10px; font-weight: bold; border-radius: 4px; border: 1px solid var(--panel-border); background: var(--panel-bg); color: var(--text-color);">✕</button>
+            </div>
+            
+            <div id="auth-tabs" style="display: flex; gap: 8px; border-bottom: 1px solid var(--panel-border); margin-bottom: 16px;">
+                <button id="tab-google-btn" type="button" style="padding: 6px 12px; font-size: 0.85rem; border-radius: 4px 4px 0 0; background: var(--panel-bg); border: 1px solid var(--panel-border); border-bottom: none; font-weight: 600; cursor: pointer; color: var(--text-color);">Google Account</button>
+                <button id="tab-local-btn" type="button" style="padding: 6px 12px; font-size: 0.85rem; border-radius: 4px 4px 0 0; background: transparent; border: 1px solid transparent; cursor: pointer; color: var(--text-color);">Username &amp; Password</button>
+            </div>
+
+            <!-- Google Sign In Pane -->
+            <div id="auth-google-pane">
+                <p style="margin: 0 0 14px; font-size: 0.85rem; color: var(--muted); line-height: 1.4;">
+                    Sign in with your Google account to keep your rating, game history, and analysis saved across devices.
+                </p>
+                <div id="google-btn-wrapper" style="display: flex; justify-content: center; min-height: 44px; margin-bottom: 14px;">
+                    <div id="g-signin-container"></div>
+                </div>
+                <div id="google-config-hint" style="display: none; padding: 10px; border-radius: 6px; background: rgba(234, 179, 8, 0.15); border: 1px solid rgba(234, 179, 8, 0.4); font-size: 0.8rem; color: var(--text-color); margin-bottom: 12px;">
+                    Google Client ID not configured on server yet. You can sign in using username/password or add <code>GOOGLE_CLIENT_ID</code> to your deployment environment.
+                </div>
+            </div>
+
+            <!-- Local Username / Password Pane -->
+            <div id="auth-local-pane" style="display: none;">
+                <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px;">
+                    <div>
+                        <label for="auth-username-input" style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 4px;">Username</label>
+                        <input id="auth-username-input" type="text" placeholder="Enter username" style="width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 4px; border: 1px solid var(--panel-border); background: var(--panel-bg); color: var(--text-color);">
+                    </div>
+                    <div>
+                        <label for="auth-password-input" style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 4px;">Password</label>
+                        <input id="auth-password-input" type="password" placeholder="Enter password" style="width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 4px; border: 1px solid var(--panel-border); background: var(--panel-bg); color: var(--text-color);">
+                    </div>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <button id="auth-login-submit-btn" type="button" style="flex: 1; padding: 8px; background: #2563eb; color: #fff; border: none; border-radius: 4px; font-weight: 600; cursor: pointer;">Sign In</button>
+                    <button id="auth-register-submit-btn" type="button" style="flex: 1; padding: 8px; background: var(--panel-bg); color: var(--text-color); border: 1px solid var(--panel-border); border-radius: 4px; font-weight: 600; cursor: pointer;">Register</button>
+                </div>
+            </div>
+
+            <div id="auth-modal-error" style="color: #dc2626; font-size: 0.82rem; margin-top: 10px; display: none;"></div>
+
+            <div style="margin-top: 18px; border-top: 1px solid var(--panel-border); padding-top: 12px; display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 0.8rem; color: var(--muted);">No account needed to play</span>
+                <button id="auth-continue-guest-btn" type="button" style="padding: 6px 12px; font-size: 0.8rem; border-radius: 4px; border: 1px solid var(--panel-border); background: var(--panel-bg); color: var(--text-color); cursor: pointer;">Continue as Guest</button>
+            </div>
+        </div>
+    </div>
     <script src="src/engine.js"></script>
     <script src="src/pieces.js"></script>
     <script src="src/move-review.js"></script>
@@ -1203,6 +1264,8 @@
        <script src="src/embed-viewer.js"></script>
        <script src="src/variants.js"></script>
        <script src="src/i18n.js"></script>
+       <script src="src/accounts.js"></script>
+       <script src="src/ui-auth.js"></script>
        <script src="src/ui.js"></script>
     <script>
         if ('serviceWorker' in navigator) {

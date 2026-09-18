@@ -130,4 +130,50 @@ test('playerProfile degrades to an empty profile for null or failing archives', 
   assert.strictEqual(failing.totalGames, 0);
 });
 
+test('session creation, retrieval, and revocation lifecycle', () => {
+  const manager = memoryManager();
+  const account = manager.createAccount({ username: 'SessionUser', password: 'secret-password' });
+  const session = manager.createSession(account, 60000);
+  assert(session.token);
+  assert.strictEqual(session.userId, account.id);
+  assert.strictEqual(session.username, 'SessionUser');
+
+  const retrieved = manager.getSession(session.token);
+  assert.deepStrictEqual(retrieved, session);
+
+  manager.revokeSession(session.token);
+  assert.strictEqual(manager.getSession(session.token), null);
+});
+
+test('expired session returns null', () => {
+  const manager = memoryManager();
+  const account = manager.createAccount({ username: 'ExpiredUser', password: 'secret-password' });
+  const session = manager.createSession(account, -1000); // already expired
+  assert.strictEqual(manager.getSession(session.token), null);
+});
+
+test('createOrFindGoogleUser links existing email and generates clean accounts', () => {
+  const manager = memoryManager();
+  const googleUser = manager.createOrFindGoogleUser({
+    googleId: 'g-123456789',
+    email: 'alice@example.com',
+    name: 'Alice Springs',
+    picture: 'https://example.com/alice.jpg'
+  });
+  assert(googleUser.id);
+  assert.strictEqual(googleUser.username, 'Alice Springs');
+  assert.strictEqual(googleUser.email, 'alice@example.com');
+  assert.strictEqual(googleUser.authProvider, 'google');
+
+  // Idempotent retrieval
+  const sameUser = manager.createOrFindGoogleUser({
+    googleId: 'g-123456789',
+    email: 'alice@example.com',
+    name: 'Alice Updated',
+    picture: 'https://example.com/alice2.jpg'
+  });
+  assert.strictEqual(sameUser.id, googleUser.id);
+  assert.strictEqual(sameUser.picture, 'https://example.com/alice2.jpg');
+});
+
 console.log(`\nAll ${passed} tests passed successfully!`);

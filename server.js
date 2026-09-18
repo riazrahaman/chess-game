@@ -7,6 +7,8 @@ const referee = require('./src/referee-service.js');
 const { seatAuthManager } = require('./src/seat-auth.js');
 const gameArchive = require('./src/game-archive.js');
 const { BotService, BOT_LEVELS } = require('./src/bot-service.js');
+const Accounts = require('./src/accounts.js');
+const accountsManager = Accounts.getDefaultManager();
 const botService = new BotService(seatAuthManager);
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : (process.env.CHESS_PORT ? Number(process.env.CHESS_PORT) : 39281);
@@ -454,14 +456,15 @@ function isBehindTls(req) {
 function buildCsp() {
   if (process.env.CHESS_CSP) return process.env.CHESS_CSP;
   // The app is a no-build-step vanilla JS SPA with one inline <script> (SW reg)
-  // and an inline <style> block, and an optional WebAssembly engine path.
+  // and an inline <style> block, optional WebAssembly, and Google Identity Services.
   return [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com/gsi/client",
+    "style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style",
+    "img-src 'self' data: https://*.googleusercontent.com",
     "font-src 'self' data:",
-    "connect-src 'self'",
+    "connect-src 'self' https://accounts.google.com/gsi/",
+    "frame-src 'self' https://accounts.google.com/gsi/",
     "worker-src 'self' blob:",
     "media-src 'self' blob: data:",
     "object-src 'none'",
@@ -469,6 +472,61 @@ function buildCsp() {
     "frame-ancestors 'none'",
     "form-action 'self'"
   ].join('; ');
+}
+
+function parseCookies(req) {
+  const list = {};
+  const rc = req && req.headers && req.headers.cookie;
+  if (!rc) return list;
+  rc.split(';').forEach(cookie => {
+    const parts = cookie.split('=');
+    if (parts.length >= 2) {
+      list[parts[0].trim()] = decodeURIComponent(parts.slice(1).join('=').trim());
+    }
+  });
+  return list;
+}
+
+function extractSessionToken(req) {
+  const cookies = parseCookies(req);
+  if (cookies.chess_session) return cookies.chess_session;
+  const authHeader = req && req.headers && req.headers['authorization'];
+  if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+    return authHeader.slice(7).trim();
+  }
+  const xSession = req && req.headers && req.headers['x-session-token'];
+  if (typeof xSession === 'string' && xSession.trim()) {
+    return xSession.trim();
+  }
+  return null;
+}
+
+function getAuthUser(req) {
+  const token = extractSessionToken(req);
+  if (!token) return null;
+  return accountsManager.getSession(token);
+}
+
+function setSessionCookie(res, token, maxAgeSeconds = 7 * 24 * 3600) {
+  const isProd = process.env.NODE_ENV === 'production' || !!process.env.PORT;
+  const secureFlag = isProd ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `chess_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secureFlag}`);
+}
+
+function clearSessionCookie(res) {
+  res.setHeader('Set-Cookie', 'chess_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT');
+}
+
+function decodeJwtPayload(jwtString) {
+  if (typeof jwtString !== 'string') return null;
+  const parts = jwtString.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const payloadJson = Buffer.from(parts[1], 'base64url').toString('utf8');
+    return JSON.parse(payloadJson);
+  } catch (_) {
+    return null;
+  }
 }
 
 function applySecurityHeaders(req, res) {
@@ -870,6 +928,132 @@ function createServer() {
         return;
       }
 
+      if (req.method === 'GET' && urlPath === '/api/auth/config') {
+        sendJson(res, 200, {
+          ok: true,
+          googleClientId: process.env.GOOGLE_CLIENT_ID || null
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && urlPath === '/api/auth/google') {
+        readJsonBody(req).then(body => {
+          if (!body || !body.credential) {
+            sendJsonError(res, 400, 'credential is required');
+            return;
+          }
+          const payload = decodeJwtPayload(body.credential);
+          if (!payload || !payload.sub) {
+            sendJsonError(res, 400, 'invalid google credential token');
+            return;
+          }
+          if (payload.exp && payload.exp * 1000 < Date.now() - 60000) {
+            sendJsonError(res, 401, 'google credential token expired');
+            return;
+          }
+          if (process.env.GOOGLE_CLIENT_ID && payload.aud !== process.env.GOOGLE_CLIENT_ID) {
+            sendJsonError(res, 401, 'invalid token audience');
+            return;
+          }
+          const user = accountsManager.createOrFindGoogleUser({
+            googleId: payload.sub,
+            email: payload.email,
+            name: payload.name,
+            picture: payload.picture
+          });
+          const session = accountsManager.createSession(user);
+          setSessionCookie(res, session.token);
+          sendJson(res, 200, { ok: true, user, token: session.token });
+        }).catch(err => sendJsonError(res, 400, err.message));
+        return;
+      }
+
+      if (req.method === 'POST' && urlPath === '/api/auth/register') {
+        readJsonBody(req).then(body => {
+          if (!body || !body.username || !body.password) {
+            sendJsonError(res, 400, 'username and password are required');
+            return;
+          }
+          try {
+            const user = accountsManager.createAccount({
+              username: String(body.username),
+              password: String(body.password)
+            });
+            const session = accountsManager.createSession(user);
+            setSessionCookie(res, session.token);
+            sendJson(res, 200, { ok: true, user, token: session.token });
+          } catch (err) {
+            const status = err && err.code === 'ACCOUNT_EXISTS' ? 409 : 400;
+            sendJsonError(res, status, err.message);
+          }
+        }).catch(err => sendJsonError(res, 400, err.message));
+        return;
+      }
+
+      if (req.method === 'POST' && urlPath === '/api/auth/login') {
+        readJsonBody(req).then(body => {
+          if (!body || !body.username || !body.password) {
+            sendJsonError(res, 400, 'username and password are required');
+            return;
+          }
+          const user = accountsManager.verifyAccount({
+            username: String(body.username),
+            password: String(body.password)
+          });
+          if (!user) {
+            sendJsonError(res, 401, 'invalid username or password');
+            return;
+          }
+          const session = accountsManager.createSession(user);
+          setSessionCookie(res, session.token);
+          sendJson(res, 200, { ok: true, user, token: session.token });
+        }).catch(err => sendJsonError(res, 400, err.message));
+        return;
+      }
+
+      if (req.method === 'GET' && urlPath === '/api/auth/me') {
+        const session = getAuthUser(req);
+        if (session) {
+          sendJson(res, 200, {
+            ok: true,
+            authenticated: true,
+            user: {
+              id: session.userId,
+              username: session.username,
+              email: session.email,
+              picture: session.picture,
+              authProvider: session.authProvider
+            }
+          });
+        } else {
+          sendJson(res, 200, { ok: true, authenticated: false, user: null });
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && urlPath === '/api/auth/logout') {
+        const token = extractSessionToken(req);
+        if (token) {
+          accountsManager.revokeSession(token);
+        }
+        clearSessionCookie(res);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      if (req.method === 'GET' && urlPath === '/api/profile') {
+        const session = getAuthUser(req);
+        const query = new URLSearchParams(req.url.split('?')[1] || '');
+        const targetUsername = query.get('username') || (session && session.username);
+        if (!targetUsername) {
+          sendJsonError(res, 400, 'username parameter or authenticated session required');
+          return;
+        }
+        const profile = Accounts.playerProfile(gameArchive, targetUsername);
+        sendJson(res, 200, { ok: true, profile });
+        return;
+      }
+
       const roomId = extractRoomId(req);
       if (!isValidRoomId(roomId)) {
         sendJsonError(res, 400, 'invalid room id');
@@ -1216,7 +1400,9 @@ module.exports = {
   clearRoomSseState: (roomId) => {
     roomSseLog.delete(roomId);
     roomSseSeq.delete(roomId);
-  }
+  },
+  accountsManager,
+  Accounts
 };
 
 if (require.main === module) {

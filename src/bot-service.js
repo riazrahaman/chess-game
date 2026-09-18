@@ -52,6 +52,16 @@ class BotService {
     if (existing && existing.token && this.seatAuth && (!enabled || existing.color !== color)) {
       try { this.seatAuth.releaseSeat(roomId, existing.token); } catch (_) {}
     }
+    if (this.seatAuth) {
+      const room = this.seatAuth._getRoom(roomId);
+      if (!enabled) {
+        if (room.white && room.white.isBot) room.white = null;
+        if (room.black && room.black.isBot) room.black = null;
+      } else {
+        const otherColor = color === 'white' ? 'black' : 'white';
+        if (room[otherColor] && room[otherColor].isBot) room[otherColor] = null;
+      }
+    }
 
     if (!enabled) {
       this.rooms.delete(roomId);

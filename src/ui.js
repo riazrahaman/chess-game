@@ -723,7 +723,11 @@ if (promoModal) promoModal.onkeydown = event => {
 // .referee-state.json. The poll picks it up and re-renders from that truth.
 function getAuthHeaders(extraHeaders = {}) {
   const headers = { 'Content-Type': 'application/json', ...extraHeaders };
-  const seatToken = (typeof window !== 'undefined' && window.sessionStorage && window.sessionStorage.getItem('chess_seat_token')) || currentSeatToken;
+  const room = getCurrentRoomId();
+  const seatToken = (typeof window !== 'undefined' && (
+    (window.sessionStorage && window.sessionStorage.getItem('chess_seat_token')) ||
+    (window.localStorage && window.localStorage.getItem('chess_seat_token_' + room))
+  )) || currentSeatToken;
   if (seatToken) {
     headers['X-Seat-Token'] = seatToken;
     headers['Authorization'] = `Bearer ${seatToken}`;
@@ -742,6 +746,12 @@ function showUiError(message) {
 
 async function submitMoveToReferee(moveStr) {
   const roomParam = getCurrentRoomId() !== 'default' ? `?room=${encodeURIComponent(getCurrentRoomId())}` : '';
+  const currentTurn = (refereeState && refereeState.board && refereeState.board.turn) || 'white';
+  if (!currentSeatRole) {
+    try {
+      await claimSeat(currentTurn);
+    } catch (_) {}
+  }
   const headers = getAuthHeaders();
   const clientSentAt = Date.now();
   const cmdId = 'move:' + moveStr + ':' + clientSentAt + ':' + Math.random().toString(36).slice(2);
@@ -1244,6 +1254,9 @@ function applyRefereeState(state) {
   }
   if (lastMove && typeof clearUserAnnotations === 'function') {
     clearUserAnnotations();
+  }
+  if (typeof clearAnalysisArrow === 'function') {
+    clearAnalysisArrow();
   }
   renderBoard(lastMove, boardBeforeRender);
   previousBoard = cloneBoardSnapshot(board);
@@ -2114,13 +2127,16 @@ function stopSeatHeartbeat() {
 }
 
 async function sendSeatHeartbeat() {
-  const token = (typeof window !== 'undefined' && window.sessionStorage && window.sessionStorage.getItem('chess_seat_token')) || currentSeatToken;
+  const room = getCurrentRoomId();
+  const token = (typeof window !== 'undefined' && (
+    (window.sessionStorage && window.sessionStorage.getItem('chess_seat_token')) ||
+    (window.localStorage && window.localStorage.getItem('chess_seat_token_' + room))
+  )) || currentSeatToken;
   if (!token) {
     stopSeatHeartbeat();
     return;
   }
   try {
-    const room = getCurrentRoomId();
     const res = await fetch('/api/seat/heartbeat', {
       method: 'POST',
       headers: {
@@ -2130,8 +2146,14 @@ async function sendSeatHeartbeat() {
       body: JSON.stringify({ room, token })
     });
     if (res.status === 404) {
-      // Seat expired on referee or was revoked
-      await leaveSeat();
+      if (currentSeatRole) {
+        const reacquired = await claimSeat(currentSeatRole);
+        if (!reacquired) {
+          await leaveSeat();
+        }
+      } else {
+        await leaveSeat();
+      }
     }
   } catch (e) {
     // transient network error, retry next cycle
@@ -2150,9 +2172,15 @@ async function claimSeat(role) {
     if (res.ok && data.token) {
       currentSeatRole = role;
       currentSeatToken = data.token;
-      if (typeof window !== 'undefined' && window.sessionStorage) {
-        window.sessionStorage.setItem('chess_seat_token', data.token);
-        window.sessionStorage.setItem('chess_seat_role', role);
+      if (typeof window !== 'undefined') {
+        if (window.sessionStorage) {
+          window.sessionStorage.setItem('chess_seat_token', data.token);
+          window.sessionStorage.setItem('chess_seat_role', role);
+        }
+        if (window.localStorage) {
+          window.localStorage.setItem('chess_seat_token_' + room, data.token);
+          window.localStorage.setItem('chess_seat_role_' + room, role);
+        }
       }
       updateSeatUI();
       startSeatHeartbeat();
@@ -2169,8 +2197,8 @@ async function claimSeat(role) {
 async function leaveSeat() {
   stopSeatHeartbeat();
   if (!currentSeatToken) return;
+  const room = getCurrentRoomId();
   try {
-    const room = getCurrentRoomId();
     await fetch('/api/seat/release', {
       method: 'POST',
       headers: {
@@ -2182,25 +2210,40 @@ async function leaveSeat() {
   } catch (e) {}
   currentSeatRole = null;
   currentSeatToken = null;
-  if (typeof window !== 'undefined' && window.sessionStorage) {
-    window.sessionStorage.removeItem('chess_seat_token');
-    window.sessionStorage.removeItem('chess_seat_role');
+  if (typeof window !== 'undefined') {
+    if (window.sessionStorage) {
+      window.sessionStorage.removeItem('chess_seat_token');
+      window.sessionStorage.removeItem('chess_seat_role');
+    }
+    if (window.localStorage) {
+      window.localStorage.removeItem('chess_seat_token_' + room);
+      window.localStorage.removeItem('chess_seat_role_' + room);
+    }
   }
   updateSeatUI();
 }
 
 function initSeatAuth() {
-  if (typeof window !== 'undefined' && window.sessionStorage) {
-    const savedToken = window.sessionStorage.getItem('chess_seat_token');
-    const savedRole = window.sessionStorage.getItem('chess_seat_role');
-    if (savedToken && savedRole) {
-      currentSeatToken = savedToken;
-      currentSeatRole = savedRole;
-      updateSeatUI();
-      startSeatHeartbeat();
-      sendSeatHeartbeat();
-      return;
+  const room = getCurrentRoomId();
+  let savedToken = null;
+  let savedRole = null;
+  if (typeof window !== 'undefined') {
+    if (window.sessionStorage) {
+      savedToken = window.sessionStorage.getItem('chess_seat_token');
+      savedRole = window.sessionStorage.getItem('chess_seat_role');
     }
+    if (!savedToken && window.localStorage) {
+      savedToken = window.localStorage.getItem('chess_seat_token_' + room);
+      savedRole = window.localStorage.getItem('chess_seat_role_' + room);
+    }
+  }
+  if (savedToken && savedRole) {
+    currentSeatToken = savedToken;
+    currentSeatRole = savedRole;
+    updateSeatUI();
+    startSeatHeartbeat();
+    sendSeatHeartbeat();
+    return;
   }
   updateSeatUI();
 }
@@ -2489,10 +2532,6 @@ async function sendBotConfigUpdate() {
             await leaveSeat();
           }
           await claimSeat(humanColor);
-        }
-      } else {
-        if (currentSeatRole) {
-          await leaveSeat();
         }
       }
     }
@@ -3021,6 +3060,48 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.handleVoiceTranscript = handleVoiceTranscript;
 }
 
+function initRoomRouting() {
+  if (typeof window === 'undefined' || !window.location) return;
+  const pathname = window.location.pathname || '';
+  const search = window.location.search || '';
+  const hasGamePath = /^\/game\/([^/]+)/.test(pathname);
+  let hasRoomParam = false;
+  try {
+    const searchParams = new URLSearchParams(search);
+    hasRoomParam = searchParams.has('room') && /^[a-zA-Z0-9_-]+$/.test(searchParams.get('room'));
+  } catch (_) {}
+
+  if (!hasGamePath && !hasRoomParam && (pathname === '/' || pathname === '/index.html' || pathname === '')) {
+    let personalRoom = null;
+    try {
+      personalRoom = window.localStorage ? window.localStorage.getItem('chess_personal_room') : null;
+    } catch (_) {}
+    if (!personalRoom || !/^[a-zA-Z0-9_-]+$/.test(personalRoom)) {
+      personalRoom = 'game-' + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+      try {
+        if (window.localStorage) window.localStorage.setItem('chess_personal_room', personalRoom);
+      } catch (_) {}
+    }
+    try {
+      if (window.history && typeof window.history.replaceState === 'function') {
+        window.history.replaceState(null, '', '/game/' + encodeURIComponent(personalRoom));
+      }
+    } catch (_) {}
+  }
+}
+
+function createNewRoom() {
+  const newRoomId = 'game-' + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem('chess_personal_room', newRoomId);
+    }
+  } catch (_) {}
+  if (typeof window !== 'undefined' && window.location) {
+    window.location.href = '/game/' + encodeURIComponent(newRoomId);
+  }
+}
+
 const copyRoomButton = document.getElementById('copy-room-link');
 if (copyRoomButton) {
   copyRoomButton.onclick = () => {
@@ -3035,6 +3116,13 @@ if (copyRoomButton) {
     }
   };
 }
+
+const newRoomButton = document.getElementById('new-room-btn');
+if (newRoomButton) {
+  newRoomButton.onclick = createNewRoom;
+}
+
+initRoomRouting();
 updateRoomBadge();
 
 initGame();

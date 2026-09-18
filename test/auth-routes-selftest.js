@@ -1,0 +1,199 @@
+#!/usr/bin/env node
+'use strict';
+
+const assert = require('assert');
+const http = require('http');
+const serverModule = require('../server.js');
+
+let passed = 0;
+function test(name, fn) {
+  return fn().then(() => {
+    passed++;
+    console.log(`PASS: ${name}`);
+  });
+}
+
+function request(server, options, bodyData) {
+  return new Promise((resolve, reject) => {
+    const port = server.address().port;
+    const req = http.request({
+      host: '127.0.0.1',
+      port,
+      path: options.path,
+      method: options.method || 'GET',
+      headers: options.headers || {}
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        let json = null;
+        try { json = JSON.parse(data); } catch (_) {}
+        resolve({ status: res.statusCode, headers: res.headers, body: json, raw: data });
+      });
+    });
+    req.on('error', reject);
+    if (bodyData) {
+      req.write(typeof bodyData === 'string' ? bodyData : JSON.stringify(bodyData));
+    }
+    req.end();
+  });
+}
+
+async function run() {
+  console.log('=== Auth Routes & Sessions Self-Test ===\n');
+  const server = serverModule.createServer();
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+
+  try {
+    await test('GET /api/auth/config returns config status', async () => {
+      const res = await request(server, { path: '/api/auth/config' });
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.body.ok, true);
+      assert('googleClientId' in res.body);
+    });
+
+    await test('POST /api/auth/register creates user and returns session cookie', async () => {
+      const username = 'testuser_' + Date.now();
+      const res = await request(server, {
+        path: '/api/auth/register',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }, { username, password: 'password123' });
+
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.body.ok, true);
+      assert.strictEqual(res.body.user.username, username);
+      assert(res.body.token);
+
+      const setCookie = res.headers['set-cookie'];
+      assert(setCookie && setCookie.some(c => c.includes('chess_session=')));
+    });
+
+    await test('POST /api/auth/login verifies credentials and returns session', async () => {
+      const username = 'loginuser_' + Date.now();
+      await request(server, {
+        path: '/api/auth/register',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }, { username, password: 'password123' });
+
+      const wrong = await request(server, {
+        path: '/api/auth/login',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }, { username, password: 'wrongpassword' });
+      assert.strictEqual(wrong.status, 401);
+
+      const right = await request(server, {
+        path: '/api/auth/login',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }, { username, password: 'password123' });
+      assert.strictEqual(right.status, 200);
+      assert.strictEqual(right.body.ok, true);
+      assert.strictEqual(right.body.user.username, username);
+      assert(right.body.token);
+    });
+
+    await test('GET /api/auth/me identifies session from header and cookie', async () => {
+      const username = 'meuser_' + Date.now();
+      const reg = await request(server, {
+        path: '/api/auth/register',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }, { username, password: 'password123' });
+      const token = reg.body.token;
+
+      // With Bearer token
+      const meBearer = await request(server, {
+        path: '/api/auth/me',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      assert.strictEqual(meBearer.status, 200);
+      assert.strictEqual(meBearer.body.authenticated, true);
+      assert.strictEqual(meBearer.body.user.username, username);
+
+      // With cookie
+      const meCookie = await request(server, {
+        path: '/api/auth/me',
+        headers: { Cookie: `chess_session=${token}` }
+      });
+      assert.strictEqual(meCookie.status, 200);
+      assert.strictEqual(meCookie.body.authenticated, true);
+      assert.strictEqual(meCookie.body.user.username, username);
+
+      // Unauthenticated
+      const meGuest = await request(server, { path: '/api/auth/me' });
+      assert.strictEqual(meGuest.status, 200);
+      assert.strictEqual(meGuest.body.authenticated, false);
+      assert.strictEqual(meGuest.body.user, null);
+    });
+
+    await test('POST /api/auth/logout invalidates session', async () => {
+      const username = 'logoutuser_' + Date.now();
+      const reg = await request(server, {
+        path: '/api/auth/register',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }, { username, password: 'password123' });
+      const token = reg.body.token;
+
+      const logout = await request(server, {
+        path: '/api/auth/logout',
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      assert.strictEqual(logout.status, 200);
+      assert.strictEqual(logout.body.ok, true);
+
+      const meAfter = await request(server, {
+        path: '/api/auth/me',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      assert.strictEqual(meAfter.body.authenticated, false);
+    });
+
+    await test('POST /api/auth/google parses valid JWT credential and establishes session', async () => {
+      // Construct sample valid Google JWT
+      const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+      const payload = Buffer.from(JSON.stringify({
+        sub: 'google-uid-998877',
+        email: 'grandmaster@example.com',
+        name: 'Magnus Player',
+        picture: 'https://lh3.googleusercontent.com/a/magnus.jpg',
+        exp: Math.floor(Date.now() / 1000) + 3600
+      })).toString('base64url');
+      const signature = Buffer.from('mock-sig').toString('base64url');
+      const credential = `${header}.${payload}.${signature}`;
+
+      const res = await request(server, {
+        path: '/api/auth/google',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }, { credential });
+
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.body.ok, true);
+      assert.strictEqual(res.body.user.email, 'grandmaster@example.com');
+      assert.strictEqual(res.body.user.authProvider, 'google');
+      assert(res.body.token);
+    });
+
+    await test('GET /api/profile returns profile stats', async () => {
+      const res = await request(server, { path: '/api/profile?username=Magnus%20Player' });
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.body.ok, true);
+      assert.strictEqual(res.body.profile.username, 'Magnus Player');
+      assert(Array.isArray(res.body.profile.games));
+    });
+
+    console.log(`\nAll ${passed} tests passed successfully!`);
+  } finally {
+    await new Promise(r => server.close(r));
+  }
+}
+
+run().catch(err => {
+  console.error(err);
+  process.exit(1);
+});

@@ -6,7 +6,7 @@
 
 const crypto = require('crypto');
 
-const SEAT_TIMEOUT_MS = 60000; // 60s idle timeout for claimed seats
+const SEAT_TIMEOUT_MS = Number(process.env.CHESS_SEAT_TIMEOUT_MS) || 300000; // 5 min idle timeout for claimed seats
 
 class SeatAuthManager {
   constructor() {

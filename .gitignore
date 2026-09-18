@@ -5,8 +5,10 @@ opencode.json
 .referee-journal*
 games.db
 .games-archive.json
+accounts.db
+.accounts.json
+*.db
 *.log
-
 
 # server runtime log
 server.log
