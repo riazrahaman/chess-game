@@ -252,4 +252,4 @@ personality-bots, i18n, puzzle-racer, study-tree, fen-setup, game-archive/time-c
 render at 390px with 0 console errors; `smoke-test` + `test-ui-features` PASS. Follow-ups: Library view is still a
 placeholder (archive modal remains the entry point); `personal` openings stats can't bind games to a player until
 accounts bind archived games; `scripts/test-analysis-view.mjs` needs port parameterisation before joining
-`test:browser`; `'unsafe-inline'` still in `script-src`.
+`test:browser`; `'unsafe-inline'` still in `script-src`; every auto-room visitor leaves `.referee-state-<room>.json` + journal in the repo root forever (add room-file retention/GC).
