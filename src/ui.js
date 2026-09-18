@@ -154,7 +154,9 @@ function setCommandState(state, message, retry) {
     retryCommandButton.classList.toggle('hidden', !retryCommand);
     retryCommandButton.disabled = commandPending;
   }
-  commandButtons.forEach(button => { button.disabled = commandPending; });
+  // B4: a button marked data-locked (e.g. "Draw offered…") stays disabled
+  // between commands until the referee reports the offer resolved.
+  commandButtons.forEach(button => { button.disabled = commandPending || button.dataset.locked === 'true'; });
   if (boardElement && boardElement.setAttribute) {
     boardElement.setAttribute('aria-busy', commandPending || !board ? 'true' : 'false');
   }
@@ -1307,6 +1309,7 @@ function applyRefereeState(state) {
   updateStatus();
   updateHistoryUI();
   if (typeof updateMatchgradeSocialUI === 'function') updateMatchgradeSocialUI(state);
+  if (typeof updateDrawNegotiationUI === 'function') updateDrawNegotiationUI(state);
   return true;
 }
 
@@ -1878,11 +1881,81 @@ if (resignButton) resignButton.onclick = async () => {
   await runRefereeCommand('Submitting resignation', () =>
     fetch(withRoomParam(`/api/resign?color=${encodeURIComponent(resignRole)}`), { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ id: cmdId }) }));
 };
+// B4: draw negotiation. Every action is a referee command; the UI only reflects
+// state.drawOffer (color that offered, or null) and the claimable-draw signal
+// from the next referee update. Explicit /api/draw/offer is used (not the
+// legacy /api/draw, whose unseated fallback ends the game outright).
 const drawButton = document.getElementById('offer-draw');
-if (drawButton) drawButton.onclick = async () => {
-  const cmdId = 'draw:' + Date.now() + ':' + Math.random().toString(36).slice(2);
-  await runRefereeCommand('Offering draw', () => fetch(withRoomParam('/api/draw'), { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ id: cmdId }) }));
-};
+const claimDrawButton = document.getElementById('claim-draw');
+const drawOfferBanner = document.getElementById('draw-offer-banner');
+const drawOfferText = document.getElementById('draw-offer-text');
+const drawOfferActions = document.getElementById('draw-offer-actions');
+const acceptDrawButton = document.getElementById('accept-draw');
+const declineDrawButton = document.getElementById('decline-draw');
+let drawCmdSeq = 0;
+
+function drawCmdId(action) {
+  drawCmdSeq += 1;
+  return `draw-${action}:${currentSeatRole || 'unseated'}:${Date.now()}:${drawCmdSeq}`;
+}
+
+function postDrawCommand(label, action) {
+  const cmdId = drawCmdId(action);
+  return runRefereeCommand(label, () => fetch(withRoomParam(`/api/draw/${action}`), {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ id: cmdId })
+  }));
+}
+
+// B4: display-only derivation of "a draw may be claimed". Prefers an explicit
+// referee field if present; otherwise falls back to the referee-reported
+// halfmove clock (50-move rule = 100 plies). The referee re-validates on claim.
+function isDrawClaimable(state) {
+  if (!state || state.gameOver) return false;
+  const explicit = state.claimableDraw;
+  if (explicit !== undefined && explicit !== null) {
+    return typeof explicit === 'object' ? explicit.claimable === true : explicit === true;
+  }
+  const halfmoveClock = state.board && typeof state.board.halfmoveClock === 'number' ? state.board.halfmoveClock : 0;
+  return halfmoveClock >= 100;
+}
+
+function updateDrawNegotiationUI(state) {
+  const offer = state && !state.gameOver && (state.drawOffer === 'white' || state.drawOffer === 'black') ? state.drawOffer : null;
+  const seated = currentSeatRole === 'white' || currentSeatRole === 'black';
+  const capitalize = (c) => c.charAt(0).toUpperCase() + c.slice(1);
+  if (drawButton) {
+    const mine = offer !== null && offer === currentSeatRole;
+    drawButton.textContent = mine ? 'Draw offered…' : 'Draw';
+    drawButton.dataset.locked = mine ? 'true' : 'false';
+    drawButton.disabled = mine || commandPending;
+  }
+  if (drawOfferBanner) {
+    if (!offer) {
+      drawOfferBanner.classList.add('hidden');
+    } else {
+      drawOfferBanner.classList.remove('hidden');
+      const incoming = seated && offer !== currentSeatRole;
+      if (drawOfferText) {
+        drawOfferText.textContent = incoming
+          ? `${capitalize(offer)} offers a draw.`
+          : offer === currentSeatRole
+            ? 'Draw offered. Waiting for your opponent…'
+            : `${capitalize(offer)} has offered a draw.`;
+      }
+      if (drawOfferActions) drawOfferActions.classList.toggle('hidden', !incoming);
+    }
+  }
+  if (claimDrawButton) {
+    claimDrawButton.classList.toggle('hidden', !(seated && isDrawClaimable(state)));
+  }
+}
+
+if (drawButton) drawButton.onclick = () => postDrawCommand('Offering draw', 'offer');
+if (acceptDrawButton) acceptDrawButton.onclick = () => postDrawCommand('Accepting draw', 'accept');
+if (declineDrawButton) declineDrawButton.onclick = () => postDrawCommand('Declining draw', 'decline');
+if (claimDrawButton) claimDrawButton.onclick = () => postDrawCommand('Claiming draw', 'claim');
 if (undoButton) undoButton.onclick = async () => {
   const cmdId = 'undo:' + Date.now() + ':' + Math.random().toString(36).slice(2);
   await runRefereeCommand('Requesting undo', () => fetch(withRoomParam('/api/undo'), { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ id: cmdId }) }));
@@ -2176,6 +2249,11 @@ function updateSeatUI() {
   if (leaveBtn) leaveBtn.classList.toggle('hidden', !currentSeatRole);
   if (claimWhite) claimWhite.disabled = currentSeatRole === 'white';
   if (claimBlack) claimBlack.disabled = currentSeatRole === 'black';
+  // B4: the draw banner is seat-relative, so re-derive it from the last
+  // referee state whenever the seat changes.
+  if (previousRefereeState && typeof updateDrawNegotiationUI === 'function') {
+    updateDrawNegotiationUI(previousRefereeState);
+  }
 }
 
 let seatHeartbeatTimer = null;
