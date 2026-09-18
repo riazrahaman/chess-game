@@ -12,3 +12,6 @@ accounts.db
 
 # server runtime log
 server.log
+
+# Google OAuth credentials (use GOOGLE_CLIENT_ID env var instead)
+client_secret*.json
