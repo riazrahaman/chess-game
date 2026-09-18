@@ -156,15 +156,16 @@ worktree workers with strict file ownership (A: `src/ui.js` + `index.html`; B: `
 | E2 Honest bot ladder + dedupe 5/6, 7/8 | DONE | 8c42752 | Ratings 800–2200 → 600–1400; `topN` near-equal sampler differentiates levels; tests assert monotonic/no-dup/≤1400. `index.html` option labels pending (Worker A owns the file) — see below. |
 | B8 Fake `id alias Stockfish 17 NNUE WASM` | DONE | 8c42752 | Alias removed; `p2-stockfish-selftest` now asserts absence. |
 | E5 CLAUDE.md truth pass | DONE | 8c42752 | DB path, puzzle-service in-memory, fen-setup unused, ui-auth/accounts, revised DoD (step 6). |
-| B1 clock counts down pre-game | IN PROGRESS | — | Worker A |
-| B2 unclosed `<details>` hides chat | IN PROGRESS | — | Worker A |
-| B4 draw offer/accept/decline/claim UI | IN PROGRESS | — | Worker A |
-| B5 `showUiError` clobbers `#status` | IN PROGRESS | — | Worker A |
-| B6 600 ms poll forever | IN PROGRESS | — | Worker A |
-| B10 phantom `stockfish.*` allowlist + dead ui fallbacks | IN PROGRESS | — | A (ui half) + B (server half) |
-| B11 `ui-auth.js` 404 (not in ALLOWED_FILES/precache) | IN PROGRESS | — | Worker B |
-| D1 gzip/brotli · D2 cache headers + ETag/304 · D3 precache worker | IN PROGRESS | — | Worker B |
-| `reachability-selftest.js` (§7 DoD guard) + wiring | IN PROGRESS | — | Worker C |
-| B7 selftest residue files | IN PROGRESS | — | Worker C |
-| B3 Gate-4 string-concat workaround → referee-served per-ply FEN/SAN | DEFERRED | — | Own commit after the rest is green (changes `stateView` shape). |
+| B1 clock counts down pre-game | DONE | 3245d37 | `refereeClockRunning` flag; interpolate only when `history.length>0` and not game over. Live-verified 10:00 holds 4 s pre-move, ticks after e2e4. |
+| B2 unclosed `<details>` hides chat | DONE | 152aadd | `</details>` added after `#eval-graph-container`; `#chat-panel.closest('details')` = null. |
+| B4 draw offer/accept/decline/claim UI | DONE | e2855fa | `#draw-offer-banner` + `#claim-draw`; `postDrawCommand` → `/api/draw/{offer,accept,decline,claim}`. Two-context Playwright: offer → banner → accept → ½-½. Threefold claim needs referee `claimableDraw` in `stateView` (folds into B3). |
+| B5 `showUiError` clobbers `#status` | DONE | 4f1892a | Auto-dismissing pill in `#command-status`; `#status` untouched. |
+| B6 600 ms poll forever | DONE | 5b38dfc | 15 s liveness while SSE open, 600 ms when down, exp. backoff cap 10 s on failure. 1 poll / 20 s measured with SSE. |
+| B10 phantom `stockfish.*` allowlist + dead ui fallbacks | DONE | dcf8033, e78d409, 6f4f7a2 | Allowlist entries removed; `p2-stockfish-selftest` now asserts absence; dead `boardToFen`/`RulesEngine` branches removed. |
+| B11 `ui-auth.js` 404 (not in ALLOWED_FILES/precache) | DONE | 2c30698, 5533297 | Allowlisted + precached. Follow-up: `accounts.js` (Node-only) removed from `index.html`/allowlist/precache; `demoUser` login gated behind `ALLOW_DEMO_AUTH=1` (was a credential-free session for any email on the public Render deploy). |
+| D1 gzip/brotli · D2 cache headers + ETag/304 · D3 precache worker | DONE | 498e2d1, 539c7cc, 45b6383 | `ui.js` 118 KB → 30 KB gzip / 26 KB br; static `public, max-age=0, must-revalidate` + weak ETag + 304; `/api/*`, `index.html`, SW stay `no-store`; `stockfish-worker.js` precached. |
+| `reachability-selftest.js` (§7 DoD guard) + wiring | DONE | 8400e06, a5b27f7, 9bc2006 | 25 assertions: every `<script src>`/Worker exists + allowlisted + precached; every `src/*.js` loaded, required, or in `KNOWN_DARK` (30, may only shrink); call-site check for loaded modules. Wired into `test:unit` and `lint`. |
+| B7 selftest residue files | DONE | 4757c9d | 5 suites now write under `os.tmpdir()` via `CHESS_STATE_FILE` and rm on exit. 597 residue files deleted from repo root (live default-room files kept). |
+| (extra) `submitMoveToReferee` ReferenceError | DONE | de90e27 | Pre-existing: undefined `refereeState` threw before every browser `POST /api/move`; now `previousRefereeState`. |
+| B3 Gate-4 string-concat workaround → referee-served per-ply FEN/SAN (+ `claimableDraw` in `stateView`) | DEFERRED | — | Own commit after this branch is green (changes `stateView` shape). |
 | B9 remove tracked `game-log.md` / `brief.html` | AWAITING CONFIRMATION | — | Deletes deliberately-committed files; not covered by the "go ahead". |

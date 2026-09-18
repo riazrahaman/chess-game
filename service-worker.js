@@ -6,6 +6,7 @@ const PRECACHE_ASSETS = [
   '/index.html',
   '/src/engine.js',
   '/src/pieces.js',
+  '/src/stockfish-worker.js',
   '/src/move-review.js',
   '/src/ai-coach.js',
   '/src/game-report.js',
@@ -34,9 +35,8 @@ const PRECACHE_ASSETS = [
   '/src/pov-export.js',
   '/src/embed-viewer.js',
   '/src/variants.js',
-  '/src/accounts.js',
-  '/src/ui-auth.js',
   '/src/i18n.js',
+  '/src/ui-auth.js',
   '/src/ui.js',
   '/manifest.webmanifest',
   '/assets/icon.svg'
