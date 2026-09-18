@@ -278,7 +278,7 @@ function rebuildState(history, moveTimestamps) {
   if (status === 'checkmate') s.result = s.board.turn === 'white' ? '0-1' : '1-0';
   if (status === 'stalemate') s.result = '½-½';
   if (!s.gameOver) {
-    const draw = rulesEngine.evaluateDraw(s.board, s.history);
+    const draw = rulesEngine.automaticDraw(s.board, s.history);
     if (draw.draw) {
       s.gameOver = true;
       s.status = 'draw';
@@ -386,7 +386,7 @@ function applyMove(s, moveStr, moveTs, lagCompMs = 0) {
   if (status === 'checkmate') s.result = nextTurn === 'white' ? '0-1' : '1-0';
   if (status === 'stalemate') s.result = '½-½';
   if (!s.gameOver) {
-    const draw = rulesEngine.evaluateDraw(s.board, s.history);
+    const draw = rulesEngine.automaticDraw(s.board, s.history);
     if (draw.draw) {
       s.gameOver = true;
       s.status = 'draw';

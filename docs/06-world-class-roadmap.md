@@ -149,7 +149,7 @@ Only after E1a is stable.
 - Actually import the lichess puzzle CSV (CC0, 6.1M rows; ship a themed 50–100k subset in-repo, full import as an admin script) into a real SQLite `puzzles` table in `game-archive.js`; add routes `/api/puzzle/daily|next|batch/:theme|dashboard/:days|activity` (lichess-shaped).
 - Use lila's `puzzleTheme.xml` as the canonical theme taxonomy.
 
-### G4b Draw-claim policy `[referee]` — S (decision needed)
+### G4b Draw-claim policy `[referee]` — S — **done (fix/g4b-claimable-draws)**: referee now uses `rulesEngine.automaticDraw` (fivefold / 75-move / insufficient); threefold + 50-move are claimable via `state.claimableDraw` + Claim button.
 The referee auto-draws at threefold repetition and the 50-move rule (`referee-service.js` via `evaluateDraw`, asserted in `t0-draw-flagfall-selftest.js`). FIDE, lichess and Chess.com make those *claimable* and auto-draw only at fivefold / 75-move; `rules-engine.js` already distinguishes the two (`claimableDraw` vs `evaluateDraw`) and B3 now ships `state.claimableDraw` + a Claim button. Switching the referee to claimable-only is a one-line policy change plus a test update — but it changes game outcomes, so it is a product decision, not a bug fix.
 
 ### E5 Documentation truth pass `[docs]` — S — **CLAUDE.md done 8c42752**; RECOMMENDATIONS.md strike-through and B9 file removal still open

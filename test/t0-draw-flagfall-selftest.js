@@ -49,7 +49,8 @@ async function run() {
     return new RefereeService({ roomId, stateFile: sFile, journalFile: jFile });
   }
 
-  // 1. Automatic threefold repetition on moves
+  // 1. Threefold repetition is CLAIMABLE, not automatic (G4b: FIDE 9.2 / lichess).
+  //    Fivefold (FIDE 9.6) ends the game without a claim.
   const ref1 = createTestReferee('threefold-room');
   // Knight shuffle 2 cycles (8 plies) brings the starting position 3 times:
   // 1. initial position
@@ -64,15 +65,28 @@ async function run() {
     const res = await ref1.enqueue({ id: `move-${i}`, type: 'move', args: { move: shuffleMoves[i] } });
     if (i < shuffleMoves.length - 1) {
       assert(res.ok === true && !res.gameOver, `Move ${i + 1} (${shuffleMoves[i]}) applied normally`);
+      assert(!res.claimableDraw || res.claimableDraw.claimable === false, `Move ${i + 1}: no claim available yet`);
     } else {
-      // 8th move completes threefold repetition
+      // 8th move completes threefold repetition: game continues, claim available
       assert(res.ok === true, '8th move applied');
-      assert(res.gameOver === true, 'Automatic draw triggered on threefold repetition');
-      assert(res.status === 'draw', 'Game status is draw');
-      assert(res.drawReason === 'threefold', 'Draw reason is threefold');
-      assert(res.result === '½-½', 'Result is ½-½');
+      assert(res.gameOver === false, 'Threefold repetition does NOT end the game automatically');
+      assert(res.claimableDraw && res.claimableDraw.claimable === true && res.claimableDraw.reason === 'threefold', 'Threefold repetition is exposed as claimable');
     }
   }
+  const threefoldClaim = await ref1.enqueue({ id: 'claim-3fold', type: 'draw', args: { action: 'claim' } });
+  assert(threefoldClaim.ok === true && threefoldClaim.draw === true, 'Threefold claim accepted');
+  assert(threefoldClaim.drawReason === 'threefold', 'Claimed reason is threefold');
+  assert(threefoldClaim.result === '½-½', 'Result is ½-½');
+
+  // 1b. Fivefold repetition ends the game automatically (no claim needed)
+  const ref5 = createTestReferee('fivefold-room');
+  const fiveCycles = [].concat(shuffleMoves, shuffleMoves);
+  let lastFive = null;
+  for (let i = 0; i < fiveCycles.length; i++) {
+    lastFive = await ref5.enqueue({ id: `five-${i}`, type: 'move', args: { move: fiveCycles[i] } });
+    if (lastFive.gameOver) break;
+  }
+  assert(lastFive.gameOver === true && lastFive.drawReason === 'fivefold', 'Fivefold repetition is an automatic draw');
 
   // 2. Claimable draw endpoint / action
   const ref2 = createTestReferee('claim-room');
