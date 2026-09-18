@@ -1,11 +1,13 @@
 'use strict';
 
-// Lightweight Local Heuristic Engine & UCI Web Worker
-// Fast in-browser fallback engine (PST + material evaluation, alpha-beta search).
-// Supports Universal Chess Interface (UCI) protocol, depth calculation,
-// Multi-PV candidate analysis, and centipawn scoring.
-// Speaks plain UCI. No Stockfish alias is emitted: the engine identifies
-// itself honestly (B8, docs/06-world-class-roadmap.md).
+// Analysis Web Worker: real Stockfish 19 (lite WASM) with a PST fallback.
+// The primary engine is the vendored Stockfish 19 lite single-threaded build
+// (vendor/stockfish/, GPL-3.0), bridged over UCI by WasmEngine below. When it
+// cannot load (old browser, CSP, offline first visit) the Lightweight Local
+// Heuristic Engine (PST + material, alpha-beta) in this file answers instead.
+// Every evaluation message says which engine produced it (`engine`, `depth`)
+// and the `uci` handshake reports the honest engine identity — no aliasing
+// (B8, docs/06-world-class-roadmap.md; E1 real engine).
 
 const PIECE_VALUES = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 20000 };
 
@@ -673,20 +675,68 @@ class StockfishEngine {
   }
 }
 
-// --- Stockfish WASM Engine Bridge ---
-// Attempts to load a real Stockfish WASM build (not shipped yet — see roadmap E1) and bridge UCI commands.
-// On any failure, the caller falls back to the PST+Material engine.
+// --- Stockfish 19 (lite) WASM Engine Bridge ---
+// Drives the vendored Stockfish 19 lite single-threaded build
+// (vendor/stockfish/, GPL-3.0 — see vendor/stockfish/README.md) from inside
+// this Web Worker. The emscripten loader is designed to run as its own
+// worker (it reads the .wasm URL from its location hash, speaks raw UCI
+// strings over postMessage, and serialises `go`/`setoption` while a search
+// is running), so we spawn it as a nested Worker and bridge UCI over it.
+// On any failure (no nested-Worker support, 404, CSP, timeout) the caller
+// keeps the PST+Material engine active — nothing here throws outward.
+//
+// Under Node this class is inert: load() reports failure immediately so the
+// PST exports (parseFen, findBestMove, ...) stay usable by bot-service.js and
+// the selftests. The Node engine lives in src/engine-server.js.
+
+const SF_LOADER_URL = '/vendor/stockfish/stockfish-19-lite-single.js';
+const SF_WASM_URL = '/vendor/stockfish/stockfish-19-lite-single.wasm';
+const SF_ENGINE_ID = 'stockfish19-lite';
+const SF_ENGINE_NAME = 'Stockfish 19 Lite WASM (via chess-game worker)';
+const PST_ENGINE_ID = 'pst';
+const PST_ENGINE_NAME = 'Lightweight Local Engine (PST+Material)';
+const SF_DEFAULT_DEPTH = 16;       // live-play search depth
+const SF_DEFAULT_MOVETIME_MS = 1500; // wall-clock cap so slow devices stay responsive
+const PST_DEFAULT_DEPTH = 3;
+const SF_LOAD_TIMEOUT_MS = 30000;  // 1.8 MB download + compile on first visit
+const SF_PARTIAL_MIN_DEPTH = 6;    // stream intermediate evals from this depth on
+// Mate scores map onto the same magnitude the PST search() uses for
+// checkmate (±100000), so evalHistory / review / ACPL see one scale.
+const MATE_SCORE_RAW = 100000;
+
+function fenTurn(fen) {
+  const parts = typeof fen === 'string' ? fen.trim().split(/\s+/) : [];
+  return parts[1] === 'b' ? 'black' : 'white';
+}
+
 class WasmEngine {
   constructor(postFn) {
     this.postFn = postFn || (() => {});
+    // onEval receives structured evaluation messages (see _emitEval).
+    this.onEval = null;
     this.wasmReady = false;
     this.wasmFailed = false;
+    this.failReason = null;
+    this.engineId = SF_ENGINE_ID;
+    this.engineName = SF_ENGINE_NAME;
+    this.loadMs = null;
     this.pendingCommands = [];
     this._lineBuffer = '';
     this.currentFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
     this.lastBestMove = null;
     this.lastMultiPvResults = [];
     this._collectingEval = false;
+    // Search state machine (Stockfish is single-threaded: one search at a time;
+    // a new request while searching sends `stop` and waits for `bestmove`).
+    this.isSearching = false;
+    this.searchingFen = null;
+    this.searchDepth = 0;
+    this.searchAbandoned = false;
+    this.pendingSearch = null; // latest-wins slot: { fen, goCommand, depth }
+    this._lastPartialDepth = 0;
+    this._watchdog = null;
+    this.childWorker = null;
+    this._handshake = null;
   }
 
   send(line) {
@@ -694,156 +744,242 @@ class WasmEngine {
     this._processEngineLine(line);
   }
 
+  // Parses one UCI output line from the engine.
   _processEngineLine(line) {
-    if (!line) return;
+    if (!line || typeof line !== 'string') return;
 
-    // Collect info lines and bestmove to build eval message
-    if (line.startsWith('info') && line.includes(' pv ')) {
-      // Parse multipv, score cp, pv from info line
-      const pvMatch = line.match(/\bpv\s+(\S+)/);
-      const scoreMatch = line.match(/score cp\s+(-?\d+)/);
+    if (line.startsWith('info') && /\bscore (cp|mate)\b/.test(line)) {
+      if (/\b(lowerbound|upperbound)\b/.test(line)) return; // aspiration-window noise
+      const pvMatch = line.match(/\bpv\s+(.+)$/);
+      const cpMatch = line.match(/score cp\s+(-?\d+)/);
+      const mateMatch = line.match(/score mate\s+(-?\d+)/);
       const multipvMatch = line.match(/multipv\s+(\d+)/);
-      const depthMatch = line.match(/depth\s+(\d+)/);
+      const depthMatch = line.match(/\bdepth\s+(\d+)/);
 
-      if (pvMatch) {
+      {
         const pvIndex = multipvMatch ? parseInt(multipvMatch[1], 10) : 1;
-        const scoreCp = scoreMatch ? parseInt(scoreMatch[1], 10) / 100 : 0;
         const depth = depthMatch ? parseInt(depthMatch[1], 10) : 0;
-        const bestMove = pvMatch[1];
+        // A terminal position (mate 0 / stalemate) has a score but no pv.
+        const pv = pvMatch ? pvMatch[1].trim().split(/\s+/) : [];
+        const bestMove = pv[0] || null;
+        // Stockfish scores are from the side to move; the UI (eval bar, evalHistory,
+        // review, coach) works in White's perspective like the PST engine.
+        const sign = fenTurn(this.searchingFen || this.currentFen) === 'black' ? -1 : 1;
+        let scoreRaw = 0;
+        let mate = null;
+        if (mateMatch) {
+          const plies = parseInt(mateMatch[1], 10);
+          mate = plies * sign;
+          const mag = MATE_SCORE_RAW - Math.min(Math.abs(plies), 999);
+          scoreRaw = plies === 0 ? -sign * MATE_SCORE_RAW : (plies > 0 ? sign * mag : -sign * mag);
+        } else if (cpMatch) {
+          scoreRaw = parseInt(cpMatch[1], 10) * sign;
+        }
 
-        // Ensure array is large enough
         while (this.lastMultiPvResults.length < pvIndex) {
           this.lastMultiPvResults.push(null);
         }
         this.lastMultiPvResults[pvIndex - 1] = {
           pvIndex,
           bestMove,
-          scoreCp,
-          scoreRaw: scoreCp * 100,
+          scoreCp: scoreRaw / 100,
+          scoreRaw,
           depth,
-          pv: [bestMove]
+          mate,
+          pv
         };
         this._collectingEval = true;
+
+        if (pvIndex === 1 && this.isSearching && !this.searchAbandoned &&
+            depth >= SF_PARTIAL_MIN_DEPTH && depth > this._lastPartialDepth) {
+          this._lastPartialDepth = depth;
+          this._emitEval(true);
+        }
       }
+      return;
     }
 
     if (line.startsWith('bestmove')) {
-      this.lastBestMove = line.replace('bestmove ', '').trim().split(/\s+/)[0] || null;
+      const mv = line.replace('bestmove ', '').trim().split(/\s+/)[0] || null;
+      this.lastBestMove = mv && mv !== '(none)' ? mv : null;
       this._flushEval();
       return;
     }
   }
 
-  _flushEval() {
-    if (!this.lastBestMove) return;
-    const primary = this.lastMultiPvResults[0] || {
+  _buildEvalMessage(partial) {
+    const lines = this.lastMultiPvResults.filter(Boolean);
+    const primary = lines[0] || {
       pvIndex: 1,
       bestMove: this.lastBestMove,
       scoreCp: 0,
       scoreRaw: 0,
       depth: 0,
-      pv: [this.lastBestMove]
+      mate: null,
+      pv: this.lastBestMove ? [this.lastBestMove] : []
     };
+    const bestMove = partial ? primary.bestMove : (this.lastBestMove || primary.bestMove);
+    return {
+      type: 'eval',
+      fen: this.searchingFen || this.currentFen,
+      eval: primary.scoreRaw,
+      evalCp: primary.scoreCp,
+      mate: primary.mate === undefined ? null : primary.mate,
+      bestMove: bestMove || null,
+      pv: primary.pv && primary.pv.length ? primary.pv : (bestMove ? [bestMove] : []),
+      multipv: lines.length > 0 ? lines : [primary],
+      engine: this.engineId,
+      depth: primary.depth || this.searchDepth || 0,
+      partial: !!partial
+    };
+  }
 
-    if (typeof self !== 'undefined' && self.postMessage) {
-      self.postMessage({
-        type: 'eval',
-        fen: this.currentFen,
-        eval: primary.scoreRaw,
-        evalCp: primary.scoreCp,
-        bestMove: this.lastBestMove,
-        pv: primary.pv || [this.lastBestMove],
-        multipv: this.lastMultiPvResults.length > 0 ? this.lastMultiPvResults : [primary]
-      });
+  _emitEval(partial) {
+    if (typeof this.onEval === 'function') {
+      try { this.onEval(this._buildEvalMessage(partial)); } catch (_) { /* display layer only */ }
     }
+  }
 
+  _flushEval() {
+    if (this.lastBestMove || this.isSearching) {
+      if (!this.searchAbandoned) this._emitEval(false);
+    }
     this.lastMultiPvResults = [];
     this._collectingEval = false;
+    this._clearWatchdog();
+    this.isSearching = false;
+    this.searchAbandoned = false;
+    this.searchingFen = null;
+    this._lastPartialDepth = 0;
+    this._startPendingSearch();
   }
 
-  // Attempt to load stockfish.wasm. Returns a promise that resolves to true/false.
-  async load(wasmUrl) {
-    if (this.wasmFailed) return false;
-    try {
-      const response = await fetch(wasmUrl || 'stockfish.wasm');
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  _startPendingSearch() {
+    const next = this.pendingSearch;
+    if (!next || this.isSearching || !this.wasmReady) return;
+    this.pendingSearch = null;
+    this.currentFen = next.fen;
+    this.searchingFen = next.fen;
+    this.searchDepth = next.depth;
+    this.isSearching = true;
+    this.searchAbandoned = false;
+    this._lastPartialDepth = 0;
+    this.lastMultiPvResults = [];
+    this.lastBestMove = null;
+    this._sendRaw(`position fen ${next.fen}`);
+    this._sendRaw(next.goCommand);
+    this._armWatchdog(next.movetime);
+  }
 
-      const contentType = response.headers.get('content-type') || '';
-      let instance;
+  _armWatchdog(movetime) {
+    this._clearWatchdog();
+    if (typeof setTimeout !== 'function') return;
+    const budget = (movetime || SF_DEFAULT_MOVETIME_MS) + 4000;
+    this._watchdog = setTimeout(() => {
+      this._watchdog = null;
+      if (this.isSearching) this._sendRaw('stop');
+    }, budget);
+  }
 
-      if (contentType.includes('application/wasm')) {
-        instance = await WebAssembly.instantiateStreaming(response, this._wasmImports());
-      } else {
-        const buffer = await response.arrayBuffer();
-        instance = await WebAssembly.instantiate(buffer, this._wasmImports());
-      }
+  _clearWatchdog() {
+    if (this._watchdog && typeof clearTimeout === 'function') clearTimeout(this._watchdog);
+    this._watchdog = null;
+  }
 
-      this.wasmInstance = instance.instance || instance;
-      this.wasmModule = this.wasmInstance.exports || {};
+  _sendRaw(cmd) {
+    if (!this.childWorker) return;
+    try { this.childWorker.postMessage(cmd); } catch (_) { /* engine gone; watchdog/fallback handles it */ }
+  }
 
-      // Stockfish WASM typically exposes a main() or _main entry and a stdout
-      // callback. The standard stockfish.wasm (nnue) uses a JS glue layer.
-      // We support both the raw-WASM-with-print-import pattern and the
-      // emscripten-glue pattern. For raw WASM, we call the exported main()
-      // to start the UCI loop, then pipe commands via a shared stdin mechanism.
-      if (this.wasmModule.main) {
-        try { this.wasmModule.main(); } catch (e) { /* may throw on synchronous exit */ }
-      }
-
-      this.wasmReady = true;
-      return true;
-    } catch (err) {
-      this.wasmFailed = true;
-      this.wasmReady = false;
-      return false;
+  _fail(reason) {
+    this.wasmFailed = true;
+    this.wasmReady = false;
+    this.failReason = reason || 'unknown';
+    this._clearWatchdog();
+    if (this.childWorker) {
+      try { this.childWorker.terminate(); } catch (_) { /* ignore */ }
+      this.childWorker = null;
     }
+    return false;
   }
 
-  _wasmImports() {
-    const self = this;
-    return {
-      env: {
-        print: function (ptr, len) {
-          // Emscripten-style: ptr/len refer to WASM memory
-          if (!self.wasmModule || !self.wasmModule.memory) return;
-          const view = new Uint8Array(self.wasmModule.memory.buffer, ptr, len);
-          const text = new TextDecoder().decode(view);
-          self.send(text);
-        },
-        println: function (ptr, len) {
-          if (!self.wasmModule || !self.wasmModule.memory) return;
-          const view = new Uint8Array(self.wasmModule.memory.buffer, ptr, len);
-          const text = new TextDecoder().decode(view);
-          self.send(text);
-        },
-        print_err: function (ptr, len) {},
-        // Stockfish JS glue typically requires these stubs
-        emscripten_resize_heap: function (size) { return false; },
-        emscripten_memcpy_js: function (dest, src, num) {
-          if (!self.wasmModule || !self.wasmModule.memory) return 0;
-          const view = new Uint8Array(self.wasmModule.memory.buffer);
-          view.copyWithin(dest, src, src + num);
-          return dest;
-        },
-        exit: function (code) {},
-        abort: function () {}
-      }
+  // Spawns the vendored Stockfish loader as a nested Worker and completes the
+  // `uci` / `isready` handshake. Resolves true when the engine answers,
+  // false otherwise (never rejects).
+  async load(loaderUrl, wasmUrl) {
+    if (this.wasmFailed) return false;
+    if (this.wasmReady) return true;
+    const isBrowserWorker = typeof importScripts === 'function' && typeof Worker === 'function';
+    if (!isBrowserWorker) return this._fail('not-a-browser-worker');
+
+    const loader = loaderUrl || SF_LOADER_URL;
+    const wasm = wasmUrl || SF_WASM_URL;
+    const startedAt = Date.now();
+
+    // Fail fast on a definite HTTP error (404, 403): errors thrown inside the
+    // nested worker do not reliably reach child.onerror, so without this a
+    // missing binary would only surface as the 30 s handshake timeout. A
+    // network exception is NOT fatal here — offline, the service worker may
+    // still serve the cached GET to the child.
+    if (typeof fetch === 'function') {
+      try {
+        const head = await fetch(wasm, { method: 'HEAD' });
+        if (head && head.ok === false) return this._fail(`wasm HTTP ${head.status}`);
+      } catch (_) { /* proceed; the handshake timeout is the backstop */ }
+    }
+
+    let child;
+    try {
+      // The loader reads its .wasm URL from the first comma-separated hash segment.
+      child = new Worker(`${loader}#${encodeURIComponent(wasm)}`);
+    } catch (err) {
+      return this._fail('nested-worker: ' + (err && err.message ? err.message : String(err)));
+    }
+    this.childWorker = child;
+
+    const handshake = new Promise((resolve) => {
+      let sawUciok = false;
+      const timer = setTimeout(() => resolve({ ok: false, reason: 'handshake-timeout' }), SF_LOAD_TIMEOUT_MS);
+      child.onerror = (ev) => {
+        clearTimeout(timer);
+        resolve({ ok: false, reason: 'worker-error: ' + ((ev && ev.message) || 'unknown') });
+      };
+      child.onmessage = (ev) => {
+        const line = typeof ev.data === 'string' ? ev.data : '';
+        if (line === 'uciok') { sawUciok = true; this._sendRaw('isready'); return; }
+        if (line === 'readyok' && sawUciok) { clearTimeout(timer); resolve({ ok: true }); }
+      };
+    });
+    this._sendRaw('uci');
+    const result = await handshake;
+    if (!result.ok) return this._fail(result.reason);
+
+    this.loadMs = Date.now() - startedAt;
+    this.wasmReady = true;
+    this.wasmFailed = false;
+    child.onerror = () => { /* post-handshake errors surface via the watchdog */ };
+    child.onmessage = (ev) => {
+      if (typeof ev.data !== 'string') return;
+      let line = ev.data;
+      if (line.startsWith('id name ')) line = `id name ${SF_ENGINE_NAME}`;
+      this.send(line);
     };
+    return true;
   }
 
-  // Send a UCI command to the WASM engine.
-  // Returns true if the command was handled by WASM, false if not.
+  // Sends a UCI command to Stockfish. Returns true if handled, false when the
+  // engine is not ready (caller falls back to the PST engine).
   processCommand(rawCmd) {
-    if (!this.wasmReady || !this.wasmInstance) return false;
+    if (!this.wasmReady || !this.childWorker) return false;
     if (!rawCmd || typeof rawCmd !== 'string') return true;
-
     const cmd = rawCmd.trim();
     if (!cmd) return true;
     const tokens = cmd.split(/\s+/);
     const op = tokens[0].toLowerCase();
 
-    // Track current FEN for eval messages
     if (op === 'position') {
+      // Held back and sent together with the next `go` so a search in flight
+      // is never re-rooted underneath Stockfish.
       if (tokens[1] === 'fen') {
         const movesIdx = tokens.findIndex((t, i) => i > 1 && t === 'moves');
         const fenParts = movesIdx >= 0 ? tokens.slice(2, movesIdx) : tokens.slice(2);
@@ -851,72 +987,42 @@ class WasmEngine {
       } else if (tokens[1] === 'startpos') {
         this.currentFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
       }
+      return true;
     }
 
-    // Pipe command to WASM
-    this._writeToWasm(cmd + '\n');
+    if (op === 'go') {
+      const depthIdx = tokens.findIndex(t => t.toLowerCase() === 'depth');
+      const mtIdx = tokens.findIndex(t => t.toLowerCase() === 'movetime');
+      const depth = depthIdx >= 0 ? (parseInt(tokens[depthIdx + 1], 10) || SF_DEFAULT_DEPTH) : SF_DEFAULT_DEPTH;
+      const movetime = mtIdx >= 0 ? (parseInt(tokens[mtIdx + 1], 10) || SF_DEFAULT_MOVETIME_MS) : null;
+      this.pendingSearch = { fen: this.currentFen, goCommand: cmd, depth, movetime };
+      if (this.isSearching) {
+        this.searchAbandoned = true; // its bestmove belongs to a superseded position
+        this._sendRaw('stop');
+      } else {
+        this._startPendingSearch();
+      }
+      return true;
+    }
+
+    if (op === 'stop') {
+      this.pendingSearch = null;
+      if (this.isSearching) this._sendRaw('stop');
+      return true;
+    }
+
+    this._sendRaw(cmd);
     return true;
-  }
-
-  _writeToWasm(text) {
-    // Write text to the WASM stdin buffer.
-    // Stockfish WASM typically exposes a function to receive stdin input.
-    // Common export names: _stdin_write, _fputs, or via a shared buffer.
-    const mod = this.wasmModule;
-    if (!mod) return;
-
-    // Try common stdin input functions
-    if (mod.stdin_write) {
-      const encoder = new TextEncoder();
-      const bytes = encoder.encode(text);
-      if (mod.memory) {
-        const view = new Uint8Array(mod.memory.buffer);
-        // Write to a known stdin buffer offset if available
-        if (mod.stdin_buffer) {
-          view.set(bytes, mod.stdin_buffer);
-          mod.stdin_write(bytes.length);
-        }
-      }
-      return;
-    }
-
-    if (mod._stdin_write) {
-      const encoder = new TextEncoder();
-      const bytes = encoder.encode(text);
-      if (mod.memory) {
-        const view = new Uint8Array(mod.memory.buffer);
-        if (mod._stdin_buffer) {
-          view.set(bytes, mod._stdin_buffer);
-          mod._stdin_write(bytes.length);
-        }
-      }
-      return;
-    }
-
-    // Fallback: some Stockfish WASM builds expose a direct command function
-    if (mod.uci_command || mod._uci_command) {
-      const fn = mod.uci_command || mod._uci_command;
-      // Allocate string in WASM memory
-      const encoder = new TextEncoder();
-      const bytes = encoder.encode(text + '\0');
-      if (mod.memory && mod.malloc) {
-        const ptr = mod.malloc(bytes.length);
-        const view = new Uint8Array(mod.memory.buffer);
-        view.set(bytes, ptr);
-        fn(ptr);
-        mod.free(ptr);
-      }
-    }
   }
 }
 
-// Unified Engine: routes UCI commands to WASM when available, falls back to PST.
+// Unified Engine: routes UCI commands to Stockfish when available, falls back to PST.
 class UnifiedEngine {
   constructor(postFn) {
     this._postFn = postFn || (() => {});
     this.pstEngine = new StockfishEngine((line) => this._postFn(line));
     this.wasmEngine = new WasmEngine((line) => this._postFn(line));
-    this.activeEngine = this.pstEngine; // start with PST until WASM is ready
+    this.activeEngine = this.pstEngine; // start with PST until Stockfish is ready
     this.wasmLoadAttempted = false;
     this.wasmLoadPromise = null;
   }
@@ -929,21 +1035,33 @@ class UnifiedEngine {
     this._postFn = fn || (() => {});
   }
 
-  async tryLoadWasm(wasmUrl) {
+  async tryLoadWasm(loaderUrl, wasmUrl) {
     if (this.wasmLoadAttempted) return this.wasmEngine.wasmReady;
     this.wasmLoadAttempted = true;
-    this.wasmLoadPromise = this.wasmEngine.load(wasmUrl);
+    this.wasmLoadPromise = this.wasmEngine.load(loaderUrl, wasmUrl);
     const ok = await this.wasmLoadPromise;
     if (ok) {
       this.activeEngine = this.wasmEngine;
-      // Re-send initial UCI handshake to WASM
-      this.wasmEngine.processCommand('uci');
+      this.wasmEngine.processCommand('ucinewgame');
+      this.wasmEngine.processCommand(`setoption name MultiPV value ${this.pstEngine.multiPv}`);
     }
     return ok;
   }
 
   get wasmReady() {
     return this.wasmEngine.wasmReady;
+  }
+
+  get engineId() {
+    return this.wasmReady ? this.wasmEngine.engineId : PST_ENGINE_ID;
+  }
+
+  get engineName() {
+    return this.wasmReady ? this.wasmEngine.engineName : PST_ENGINE_NAME;
+  }
+
+  get defaultDepth() {
+    return this.wasmReady ? SF_DEFAULT_DEPTH : PST_DEFAULT_DEPTH;
   }
 
   get multiPv() {
@@ -955,27 +1073,125 @@ class UnifiedEngine {
   }
 
   // Synchronous command processing (used by tests and PST fallback path).
-  // When WASM is active, commands are piped asynchronously and results
-  // come back via the print callback — so we return [] for the sync path.
+  // When Stockfish is active, commands are piped asynchronously and results
+  // come back via the child worker — so we return [] for that path.
   processCommand(rawCmd) {
     if (this.activeEngine === this.wasmEngine && this.wasmEngine.wasmReady) {
-      // Pipe to WASM; results come back asynchronously
+      const op = typeof rawCmd === 'string' ? rawCmd.trim().split(/\s+/)[0].toLowerCase() : '';
+      // Keep the PST engine's option state in sync so a later fallback (and
+      // the multiPv getter) reflect what the UI asked for.
+      if (op === 'setoption') this.pstEngine.processCommand(rawCmd);
       const handled = this.wasmEngine.processCommand(rawCmd);
       if (handled) return [];
     }
-    // Fallback to PST engine (synchronous)
     return this.pstEngine.processCommand(rawCmd);
   }
 }
 
 // Worker message handling
-if (typeof self !== 'undefined') {
+if (typeof self !== 'undefined' && typeof importScripts === 'function') {
   const unified = new UnifiedEngine((line) => {
     self.postMessage({ type: 'uci', line });
   });
+  let latestRequest = null; // { fen, depth, movetime } — re-run once Stockfish is up
 
-  // Attempt WASM load on worker startup; on failure, PST engine remains active.
-  unified.tryLoadWasm('stockfish.wasm').catch(() => {});
+  function postEval(msg) {
+    self.postMessage(msg);
+  }
+
+  unified.wasmEngine.onEval = (msg) => {
+    if (!msg.partial) {
+      try {
+        saveEvalToCache(msg.fen, {
+          cp: msg.eval,
+          depth: msg.depth,
+          mate: msg.mate,
+          bestmove: msg.bestMove,
+          engine: msg.engine,
+          multipv: msg.multipv
+        });
+      } catch (_) { /* graceful degradation */ }
+    }
+    postEval(msg);
+  };
+
+  function requestAnalysis(fen, depth, movetime) {
+    const engineId = unified.engineId;
+    const targetDepth = depth || unified.defaultDepth;
+
+    const cached = getEvalFromCache(fen);
+    if (cached && cached.engine === engineId && (cached.depth || 0) >= targetDepth) {
+      postEval({
+        type: 'eval',
+        fen,
+        eval: cached.cp || 0,
+        evalCp: (cached.cp || 0) / 100,
+        mate: cached.mate === undefined ? null : cached.mate,
+        bestMove: cached.bestmove || null,
+        pv: cached.bestmove ? [cached.bestmove] : [],
+        multipv: Array.isArray(cached.multipv) ? cached.multipv : [],
+        engine: engineId,
+        depth: cached.depth || 0,
+        partial: false,
+        cached: true
+      });
+      return;
+    }
+
+    if (unified.wasmReady) {
+      // Stockfish path: results arrive asynchronously via wasmEngine.onEval.
+      unified.processCommand(`position fen ${fen}`);
+      unified.processCommand(`go depth ${targetDepth} movetime ${movetime || SF_DEFAULT_MOVETIME_MS}`);
+      return;
+    }
+
+    // PST path: synchronous.
+    unified.processCommand(`position fen ${fen}`);
+    const results = unified.processCommand(`go depth ${targetDepth}`);
+    const primary = results && results[0];
+    if (primary) {
+      try {
+        saveEvalToCache(fen, {
+          cp: primary.scoreRaw,
+          depth: targetDepth,
+          mate: null,
+          bestmove: primary.bestMove,
+          engine: PST_ENGINE_ID,
+          multipv: results
+        });
+      } catch (_) { /* graceful degradation */ }
+    }
+    postEval({
+      type: 'eval',
+      fen,
+      eval: primary ? primary.scoreRaw : 0,
+      evalCp: primary ? primary.scoreCp : 0,
+      mate: null,
+      bestMove: primary ? primary.bestMove : null,
+      pv: primary ? [primary.bestMove] : [],
+      multipv: results || [],
+      engine: PST_ENGINE_ID,
+      depth: targetDepth,
+      partial: false
+    });
+  }
+
+  // Load Stockfish on worker startup; on failure the PST engine stays active.
+  const loadStartedAt = Date.now();
+  unified.tryLoadWasm(SF_LOADER_URL, SF_WASM_URL).catch(() => false).then((ok) => {
+    self.postMessage({
+      type: 'engine-ready',
+      engine: unified.engineId,
+      name: unified.engineName,
+      depth: unified.defaultDepth,
+      loadMs: Date.now() - loadStartedAt,
+      fallbackReason: ok ? null : (unified.wasmEngine.failReason || 'unknown')
+    });
+    // Upgrade whatever the PST engine answered while Stockfish was loading.
+    if (ok && latestRequest) {
+      requestAnalysis(latestRequest.fen, latestRequest.depth, latestRequest.movetime);
+    }
+  });
 
   self.onmessage = function (event) {
     const data = event.data;
@@ -986,57 +1202,9 @@ if (typeof self !== 'undefined') {
     } else if (data.type === 'uci' && typeof data.command === 'string') {
       unified.processCommand(data.command);
     } else if (data.fen || data.type === 'position') {
-      const fen = data.fen;
-      const depth = data.depth || 3;
-
-      // Check eval cache before computing
-      const cached = getEvalFromCache(fen);
-      if (cached) {
-        self.postMessage({
-          type: 'eval',
-          fen,
-          eval: cached.cp || 0,
-          evalCp: cached.cp || 0,
-          bestMove: cached.bestmove || 'e2e4',
-          pv: cached.bestmove ? [cached.bestmove] : ['e2e4'],
-          multipv: [],
-          cached: true
-        });
-        return;
-      }
-
-      if (unified.wasmReady) {
-        // WASM path: pipe commands, results arrive asynchronously via print callback
-        unified.processCommand(`position fen ${fen}`);
-        unified.processCommand(`go depth ${depth}`);
-      } else {
-        // PST path: synchronous, return results immediately
-        unified.processCommand(`position fen ${fen}`);
-        const results = unified.processCommand(`go depth ${depth}`);
-        const primary = results && results[0];
-
-        // Persist eval to cache
-        if (primary) {
-          try {
-            saveEvalToCache(fen, {
-              cp: primary.scoreRaw,
-              depth: depth,
-              mate: null,
-              bestmove: primary.bestMove
-            });
-          } catch (_) { /* graceful degradation */ }
-        }
-
-        self.postMessage({
-          type: 'eval',
-          fen,
-          eval: primary ? primary.scoreRaw : 0,
-          evalCp: primary ? primary.scoreCp : 0,
-          bestMove: primary ? primary.bestMove : 'e2e4',
-          pv: primary ? [primary.bestMove] : ['e2e4'],
-          multipv: results || []
-        });
-      }
+      if (typeof data.fen !== 'string' || !data.fen) return;
+      latestRequest = { fen: data.fen, depth: data.depth || null, movetime: data.movetime || null };
+      requestAnalysis(latestRequest.fen, latestRequest.depth, latestRequest.movetime);
     }
   };
 }
@@ -1055,6 +1223,14 @@ if (typeof module !== 'undefined') {
     isKingInCheck,
     fenCacheKey,
     getEvalFromCache,
-    saveEvalToCache
+    saveEvalToCache,
+    SF_LOADER_URL,
+    SF_WASM_URL,
+    SF_ENGINE_ID,
+    SF_ENGINE_NAME,
+    PST_ENGINE_ID,
+    PST_ENGINE_NAME,
+    SF_DEFAULT_DEPTH,
+    SF_DEFAULT_MOVETIME_MS
   };
 }
