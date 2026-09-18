@@ -333,6 +333,34 @@ class SqliteStorageAdapter {
         window_start INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS puzzles (
+        puzzle_id TEXT PRIMARY KEY,
+        fen TEXT NOT NULL,
+        moves TEXT NOT NULL,
+        moves_san TEXT NOT NULL,
+        rating INTEGER NOT NULL,
+        rating_deviation INTEGER NOT NULL DEFAULT 100,
+        popularity INTEGER NOT NULL DEFAULT 0,
+        nb_plays INTEGER NOT NULL DEFAULT 0,
+        themes TEXT NOT NULL DEFAULT '',
+        game_url TEXT NOT NULL DEFAULT '',
+        opening_tags TEXT NOT NULL DEFAULT ''
+      );
+      CREATE INDEX IF NOT EXISTS idx_puzzles_rating ON puzzles(rating);
+      CREATE INDEX IF NOT EXISTS idx_puzzles_themes ON puzzles(themes);
+      CREATE TABLE IF NOT EXISTS puzzle_attempts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        player_id TEXT NOT NULL,
+        puzzle_id TEXT NOT NULL,
+        win INTEGER NOT NULL,
+        time_ms INTEGER NOT NULL DEFAULT 0,
+        themes TEXT NOT NULL DEFAULT '',
+        puzzle_rating INTEGER,
+        rating_after REAL,
+        mode TEXT NOT NULL DEFAULT 'rated',
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_puzzle_attempts_player ON puzzle_attempts(player_id, created_at DESC);
     `);
   }
 
@@ -567,6 +595,158 @@ class SqliteStorageAdapter {
     return entry;
   }
 
+  // ---- puzzles (lichess layout; Wave 2 E4) ----
+  savePuzzles(records) {
+    if (!Array.isArray(records) || records.length === 0) return 0;
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO puzzles
+        (puzzle_id, fen, moves, moves_san, rating, rating_deviation, popularity, nb_plays, themes, game_url, opening_tags)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    let count = 0;
+    this.db.exec('BEGIN');
+    try {
+      for (const p of records) {
+        if (!p || !p.id || !p.fen || !p.moves) continue;
+        stmt.run(
+          String(p.id), String(p.fen), String(p.moves), String(p.movesSan || ''),
+          Math.round(Number(p.rating) || 1500), Math.round(Number(p.ratingDeviation) || 100),
+          Math.round(Number(p.popularity) || 0), Math.round(Number(p.nbPlays) || 0),
+          String(p.themes || ''), String(p.gameUrl || ''), String(p.openingTags || '')
+        );
+        count++;
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      try { this.db.exec('ROLLBACK'); } catch (_) { /* ignore */ }
+      throw err;
+    }
+    return count;
+  }
+
+  _puzzleFromRow(row) {
+    if (!row) return null;
+    return {
+      id: row.puzzle_id,
+      fen: row.fen,
+      moves: row.moves,
+      movesSan: row.moves_san,
+      rating: row.rating,
+      ratingDeviation: row.rating_deviation,
+      popularity: row.popularity,
+      nbPlays: row.nb_plays,
+      themes: row.themes,
+      gameUrl: row.game_url,
+      openingTags: row.opening_tags
+    };
+  }
+
+  getPuzzle(id) {
+    if (!id) return null;
+    const row = this.db.prepare('SELECT * FROM puzzles WHERE puzzle_id = ?').get(String(id));
+    return this._puzzleFromRow(row);
+  }
+
+  countPuzzles() {
+    const row = this.db.prepare('SELECT COUNT(*) AS n FROM puzzles').get();
+    return row ? Number(row.n) : 0;
+  }
+
+  /**
+   * Lists puzzles by optional theme (whitespace-delimited match) and rating band.
+   * options: { theme, minRating, maxRating, limit, offset, random, excludeIds }
+   */
+  listPuzzles(options = {}) {
+    const where = [];
+    const params = [];
+    if (options.theme) {
+      where.push("(' ' || themes || ' ') LIKE ?");
+      params.push(`% ${String(options.theme)} %`);
+    }
+    if (Number.isFinite(options.minRating)) { where.push('rating >= ?'); params.push(options.minRating); }
+    if (Number.isFinite(options.maxRating)) { where.push('rating <= ?'); params.push(options.maxRating); }
+    if (Array.isArray(options.excludeIds) && options.excludeIds.length > 0 && options.excludeIds.length <= 500) {
+      where.push(`puzzle_id NOT IN (${options.excludeIds.map(() => '?').join(',')})`);
+      params.push(...options.excludeIds.map(String));
+    }
+    const limit = Number.isFinite(options.limit) && options.limit > 0 ? Math.min(options.limit, 1000) : 50;
+    const offset = Number.isFinite(options.offset) && options.offset >= 0 ? options.offset : 0;
+    const order = options.random ? 'RANDOM()' : 'rating ASC, puzzle_id ASC';
+    const sql = `SELECT * FROM puzzles${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY ${order} LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+    return this.db.prepare(sql).all(...params).map(row => this._puzzleFromRow(row));
+  }
+
+  listPuzzleIds() {
+    return this.db.prepare('SELECT puzzle_id FROM puzzles ORDER BY puzzle_id ASC').all().map(r => r.puzzle_id);
+  }
+
+  listPuzzleThemes() {
+    const rows = this.db.prepare('SELECT themes FROM puzzles').all();
+    const counts = new Map();
+    for (const row of rows) {
+      for (const t of String(row.themes || '').split(/\s+/)) {
+        if (t) counts.set(t, (counts.get(t) || 0) + 1);
+      }
+    }
+    return Array.from(counts.entries()).map(([theme, count]) => ({ theme, count })).sort((a, b) => b.count - a.count || a.theme.localeCompare(b.theme));
+  }
+
+  savePuzzleAttempt(attempt) {
+    if (!attempt || !attempt.playerId || !attempt.puzzleId) return null;
+    const entry = {
+      playerId: String(attempt.playerId),
+      puzzleId: String(attempt.puzzleId),
+      win: attempt.win ? 1 : 0,
+      timeMs: Math.max(0, Math.round(Number(attempt.timeMs) || 0)),
+      themes: String(attempt.themes || ''),
+      puzzleRating: Number.isFinite(attempt.puzzleRating) ? Math.round(attempt.puzzleRating) : null,
+      ratingAfter: Number.isFinite(attempt.ratingAfter) ? attempt.ratingAfter : null,
+      mode: String(attempt.mode || 'rated'),
+      createdAt: Number.isFinite(attempt.createdAt) ? attempt.createdAt : Date.now()
+    };
+    this.db.prepare(`
+      INSERT INTO puzzle_attempts (player_id, puzzle_id, win, time_ms, themes, puzzle_rating, rating_after, mode, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(entry.playerId, entry.puzzleId, entry.win, entry.timeMs, entry.themes, entry.puzzleRating, entry.ratingAfter, entry.mode, entry.createdAt);
+    return entry;
+  }
+
+  listPuzzleAttempts(playerId, options = {}) {
+    if (!playerId) return [];
+    const since = Number.isFinite(options.since) ? options.since : 0;
+    const limit = Number.isFinite(options.limit) && options.limit > 0 ? Math.min(options.limit, 5000) : 1000;
+    return this.db.prepare(`
+      SELECT * FROM puzzle_attempts WHERE player_id = ? AND created_at >= ?
+      ORDER BY created_at DESC LIMIT ?
+    `).all(String(playerId), since, limit).map(row => ({
+      playerId: row.player_id,
+      puzzleId: row.puzzle_id,
+      win: row.win === 1,
+      timeMs: row.time_ms,
+      themes: row.themes,
+      puzzleRating: row.puzzle_rating,
+      ratingAfter: row.rating_after,
+      mode: row.mode,
+      createdAt: row.created_at
+    }));
+  }
+
+  listPuzzleReviews(prefix) {
+    const rows = prefix
+      ? this.db.prepare("SELECT * FROM puzzle_reviews WHERE puzzle_id LIKE ? ESCAPE '\\' ORDER BY next_due_at ASC").all(String(prefix).replace(/[%_\\]/g, '\\$&') + '%')
+      : this.db.prepare('SELECT * FROM puzzle_reviews ORDER BY next_due_at ASC').all();
+    return rows.map(row => ({
+      puzzleId: row.puzzle_id,
+      nextDueAt: row.next_due_at,
+      intervalDays: row.interval_days,
+      step: row.step,
+      reviewCount: row.review_count,
+      lastReviewedAt: row.last_reviewed_at,
+      correctStreak: row.correct_streak
+    }));
+  }
+
   close() {
     if (this.db) {
       try { this.db.close(); } catch (_) { /* ignore */ }
@@ -586,6 +766,8 @@ class JsonFileStorageAdapter {
     this.ratingsPool = new Map();
     this.puzzleReviews = new Map();
     this.rateLimits = new Map();
+    this.puzzles = new Map();
+    this.puzzleAttempts = [];
     this._load();
   }
 
@@ -597,6 +779,8 @@ class JsonFileStorageAdapter {
       this.ratingsPool = new Map();
       this.puzzleReviews = new Map();
       this.rateLimits = new Map();
+      this.puzzles = new Map();
+      this.puzzleAttempts = [];
       return;
     }
     try {
@@ -638,6 +822,14 @@ class JsonFileStorageAdapter {
               this.rateLimits.set(k, v);
             }
           }
+          if (Array.isArray(parsed.puzzles)) {
+            for (const item of parsed.puzzles) {
+              if (item && item.id) this.puzzles.set(String(item.id), item);
+            }
+          }
+          if (Array.isArray(parsed.puzzleAttempts)) {
+            this.puzzleAttempts = parsed.puzzleAttempts.filter(a => a && a.playerId && a.puzzleId);
+          }
         }
       }
     } catch (_) {
@@ -647,6 +839,8 @@ class JsonFileStorageAdapter {
       this.ratingsPool = new Map();
       this.puzzleReviews = new Map();
       this.rateLimits = new Map();
+      this.puzzles = new Map();
+      this.puzzleAttempts = [];
     }
   }
 
@@ -674,7 +868,8 @@ class JsonFileStorageAdapter {
       for (const [k, v] of this.rateLimits) {
         rateLimitsObj[k] = v;
       }
-      const payload = JSON.stringify({ games, evalCache: evalCacheObj, puzzleRatings: puzzleRatingsObj, ratingsPool: ratingsPoolObj, puzzleReviews: puzzleReviewsObj, rateLimits: rateLimitsObj }, null, 2);
+      const puzzles = Array.from(this.puzzles.values());
+      const payload = JSON.stringify({ games, evalCache: evalCacheObj, puzzleRatings: puzzleRatingsObj, ratingsPool: ratingsPoolObj, puzzleReviews: puzzleReviewsObj, rateLimits: rateLimitsObj, puzzles, puzzleAttempts: this.puzzleAttempts }, null, 2);
       const tempPath = `${this.filePath}.tmp.${Date.now()}`;
       fs.writeFileSync(tempPath, payload, 'utf8');
       fs.renameSync(tempPath, this.filePath);
@@ -837,6 +1032,107 @@ class JsonFileStorageAdapter {
     this.rateLimits.set(entry.key, entry);
     this._saveToDisk();
     return Object.assign({}, entry);
+  }
+
+  // ---- puzzles (lichess layout; Wave 2 E4) ----
+  savePuzzles(records) {
+    if (!Array.isArray(records) || records.length === 0) return 0;
+    let count = 0;
+    for (const p of records) {
+      if (!p || !p.id || !p.fen || !p.moves) continue;
+      this.puzzles.set(String(p.id), {
+        id: String(p.id), fen: String(p.fen), moves: String(p.moves), movesSan: String(p.movesSan || ''),
+        rating: Math.round(Number(p.rating) || 1500), ratingDeviation: Math.round(Number(p.ratingDeviation) || 100),
+        popularity: Math.round(Number(p.popularity) || 0), nbPlays: Math.round(Number(p.nbPlays) || 0),
+        themes: String(p.themes || ''), gameUrl: String(p.gameUrl || ''), openingTags: String(p.openingTags || '')
+      });
+      count++;
+    }
+    this._saveToDisk();
+    return count;
+  }
+
+  getPuzzle(id) {
+    if (!id) return null;
+    const item = this.puzzles.get(String(id));
+    return item ? Object.assign({}, item) : null;
+  }
+
+  countPuzzles() {
+    return this.puzzles.size;
+  }
+
+  listPuzzles(options = {}) {
+    const exclude = new Set((Array.isArray(options.excludeIds) ? options.excludeIds : []).map(String));
+    let items = Array.from(this.puzzles.values()).filter(p => {
+      if (options.theme && !(' ' + p.themes + ' ').includes(' ' + String(options.theme) + ' ')) return false;
+      if (Number.isFinite(options.minRating) && p.rating < options.minRating) return false;
+      if (Number.isFinite(options.maxRating) && p.rating > options.maxRating) return false;
+      if (exclude.has(p.id)) return false;
+      return true;
+    });
+    if (options.random) {
+      for (let i = items.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [items[i], items[j]] = [items[j], items[i]];
+      }
+    } else {
+      items.sort((a, b) => a.rating - b.rating || a.id.localeCompare(b.id));
+    }
+    const limit = Number.isFinite(options.limit) && options.limit > 0 ? Math.min(options.limit, 1000) : 50;
+    const offset = Number.isFinite(options.offset) && options.offset >= 0 ? options.offset : 0;
+    return items.slice(offset, offset + limit).map(p => Object.assign({}, p));
+  }
+
+  listPuzzleIds() {
+    return Array.from(this.puzzles.keys()).sort();
+  }
+
+  listPuzzleThemes() {
+    const counts = new Map();
+    for (const p of this.puzzles.values()) {
+      for (const t of String(p.themes || '').split(/\s+/)) {
+        if (t) counts.set(t, (counts.get(t) || 0) + 1);
+      }
+    }
+    return Array.from(counts.entries()).map(([theme, count]) => ({ theme, count })).sort((a, b) => b.count - a.count || a.theme.localeCompare(b.theme));
+  }
+
+  savePuzzleAttempt(attempt) {
+    if (!attempt || !attempt.playerId || !attempt.puzzleId) return null;
+    const entry = {
+      playerId: String(attempt.playerId),
+      puzzleId: String(attempt.puzzleId),
+      win: !!attempt.win,
+      timeMs: Math.max(0, Math.round(Number(attempt.timeMs) || 0)),
+      themes: String(attempt.themes || ''),
+      puzzleRating: Number.isFinite(attempt.puzzleRating) ? Math.round(attempt.puzzleRating) : null,
+      ratingAfter: Number.isFinite(attempt.ratingAfter) ? attempt.ratingAfter : null,
+      mode: String(attempt.mode || 'rated'),
+      createdAt: Number.isFinite(attempt.createdAt) ? attempt.createdAt : Date.now()
+    };
+    this.puzzleAttempts.push(entry);
+    if (this.puzzleAttempts.length > 50000) this.puzzleAttempts.splice(0, this.puzzleAttempts.length - 50000);
+    this._saveToDisk();
+    return Object.assign({}, entry);
+  }
+
+  listPuzzleAttempts(playerId, options = {}) {
+    if (!playerId) return [];
+    const since = Number.isFinite(options.since) ? options.since : 0;
+    const limit = Number.isFinite(options.limit) && options.limit > 0 ? Math.min(options.limit, 5000) : 1000;
+    return this.puzzleAttempts
+      .filter(a => a.playerId === String(playerId) && a.createdAt >= since)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, limit)
+      .map(a => Object.assign({}, a));
+  }
+
+  listPuzzleReviews(prefix) {
+    return Array.from(this.puzzleReviews.values())
+      .filter(r => !prefix || String(r.puzzleId).startsWith(String(prefix)))
+      .sort((a, b) => a.nextDueAt - b.nextDueAt)
+      .map(r => Object.assign({}, r));
   }
 
   close() {
@@ -1047,6 +1343,25 @@ class GameArchive {
     }
   }
 
+  _storageCall(method, fallback, ...args) {
+    if (!this.storage || typeof this.storage[method] !== 'function') return fallback;
+    try {
+      return this.storage[method](...args);
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  savePuzzles(records) { return this._storageCall('savePuzzles', 0, records); }
+  getPuzzle(id) { return this._storageCall('getPuzzle', null, id); }
+  countPuzzles() { return this._storageCall('countPuzzles', 0); }
+  listPuzzles(options) { return this._storageCall('listPuzzles', [], options); }
+  listPuzzleIds() { return this._storageCall('listPuzzleIds', []); }
+  listPuzzleThemes() { return this._storageCall('listPuzzleThemes', []); }
+  savePuzzleAttempt(attempt) { return this._storageCall('savePuzzleAttempt', null, attempt); }
+  listPuzzleAttempts(playerId, options) { return this._storageCall('listPuzzleAttempts', [], playerId, options); }
+  listPuzzleReviews(prefix) { return this._storageCall('listPuzzleReviews', [], prefix); }
+
   exportPgn(game) {
     return exportPgn(game);
   }
@@ -1104,6 +1419,15 @@ if (typeof module !== 'undefined' && module.exports) {
     getPuzzleReview: (puzzleId) => getArchive().getPuzzleReview(puzzleId),
     saveRateLimit: (key, record) => getArchive().saveRateLimit(key, record),
     getRateLimit: (key) => getArchive().getRateLimit(key),
+    savePuzzles: (records) => getArchive().savePuzzles(records),
+    getPuzzle: (id) => getArchive().getPuzzle(id),
+    countPuzzles: () => getArchive().countPuzzles(),
+    listPuzzles: (options) => getArchive().listPuzzles(options),
+    listPuzzleIds: () => getArchive().listPuzzleIds(),
+    listPuzzleThemes: () => getArchive().listPuzzleThemes(),
+    savePuzzleAttempt: (attempt) => getArchive().savePuzzleAttempt(attempt),
+    listPuzzleAttempts: (playerId, options) => getArchive().listPuzzleAttempts(playerId, options),
+    listPuzzleReviews: (prefix) => getArchive().listPuzzleReviews(prefix),
     fenCacheKey,
     exportPgn,
     parsePgn,

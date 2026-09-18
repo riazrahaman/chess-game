@@ -57,35 +57,16 @@ function assert(cond, msg) {
 // ---------------------------------------------------------------------------
 const KNOWN_DARK = {
   // --- DARK, never loaded by index.html nor required from server.js (§1: 11) ---
-  'rating.js':            'roadmap §1 DARK-never-loaded; Phase 2 ratings/leaderboard shell (P2)',
-  'ratings-pool.js':      'roadmap §1 DARK-never-loaded; Phase 2 ratings/leaderboard shell (P2)',
-  'lobby.js':             'roadmap §1 DARK-never-loaded; Phase 2 lobby/seek shell (P2)',
-  'puzzle-service.js':    'roadmap §1 DARK-never-loaded; Phase 2 puzzles shell (P2)',
-  'puzzle-rating.js':     'roadmap §1 DARK-never-loaded; Phase 2 puzzles shell (P2)',
-  'puzzle-storm.js':      'roadmap §1 DARK-never-loaded; Phase 2 puzzles shell (P2)',
-  'daily-puzzle.js':      'roadmap §1 DARK-never-loaded; Phase 2 puzzles shell (P2)',
   'study-tree.js':        'roadmap §1 DARK-never-loaded; Phase 2 studies shell (P2)',
-  'openings-explorer.js': 'roadmap §1 DARK-never-loaded; Phase 2 opening explorer shell (P2)',
-  'puzzle-repetition.js': 'roadmap §1 DARK-never-loaded; Phase 2 puzzles shell (P2)',
   'fen-setup.js':         'roadmap §1 doc/code contradiction: referee _cmdSetup uses rulesEngine.fenToBoard, not this module (P2 setup UI)',
 
   // --- DARK, shipped to browser with zero call sites (§1 lists 18: these 17 +
   //     time-control.js, which is filed under PARTIAL below) ---
-  'masters-db.js':        'roadmap §1 DARK-shipped; Phase 1 game-review reclassification wiring (P1)',
-  'acpl.js':              'roadmap §1 DARK-shipped; Phase 1 accuracy/ACPL panel wiring (P1)',
   'puzzle-racer.js':      'roadmap §1 DARK-shipped; Phase 2 puzzles shell (P2)',
-  'a11y-text-entry.js':   'roadmap §1 DARK-shipped; Phase 2 accessibility affordances (P2)',
-  'a11y-gestures.js':     'roadmap §1 DARK-shipped; Phase 2 accessibility affordances (P2)',
-  'voice-intents.js':     'roadmap §1 DARK-shipped; Phase 2 accessibility affordances (P2)',
   'chess960.js':          'roadmap §1 DARK-shipped; Phase 2 variants/new-game dialog (P2)',
-  'tablebase.js':         'roadmap §1 DARK-shipped; Phase 2 analysis panel (P2)',
-  'arena.js':             'roadmap §1 DARK-shipped; Phase 3 tournaments (P3)',
-  'social-graph.js':      'roadmap §1 DARK-shipped; Phase 3 social (P3)',
   'chat-upgrades.js':     'roadmap §1 DARK-shipped; Phase 2 chat affordances (P2)',
   'correspondence.js':    'roadmap §1 DARK-shipped; Phase 3 correspondence (P3)',
   'personality-bots.js':  'roadmap §1 DARK-shipped; Phase 2 bot picker (P2)',
-  'pov-export.js':        'roadmap §1 DARK-shipped; Phase 2 export menu (P2)',
-  'embed-viewer.js':      'roadmap §1 DARK-shipped; Phase 2 export menu (P2)',
   'variants.js':          'roadmap §1 DARK-shipped; Phase 2 variants/new-game dialog (P2)',
   'i18n.js':              'roadmap §1 DARK-shipped; Phase 2 site shell i18n (P2)',
 

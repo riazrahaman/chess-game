@@ -39,6 +39,12 @@ const PRECACHE_ASSETS = [
   '/src/variants.js',
   '/src/i18n.js',
   '/src/ui-auth.js',
+  '/src/shell.js',
+  '/src/ui-puzzles.js',
+  '/src/ui-settings.js',
+  '/src/ui-compete.js',
+  '/src/ui-profile.js',
+  '/src/ui-analysis.js',
   '/src/ui.js',
   '/manifest.webmanifest',
   '/assets/icon.svg'
@@ -69,6 +75,10 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  // Live data (referee state, SSE, auth, puzzles, lobby) must never be served
+  // from cache: it is referee-authoritative and changes every move. Only the
+  // static shell is cache-first.
+  if (url.pathname.startsWith('/api/') || url.pathname.includes('/api/')) return;
 
   event.respondWith(
     caches.match(request).then((cached) => {

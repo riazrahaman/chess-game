@@ -60,8 +60,15 @@ async function waitForSquareData(page, squareId, expectPiece, timeoutMs) {
   return false;
 }
 
+// The page auto-routes to its own room (/game/<id>) since 0b25073, so referee
+// reads must target that room, not the default one.
+let pageRoom = null;
+function roomQuery() {
+  return pageRoom && pageRoom !== 'default' ? `&room=${encodeURIComponent(pageRoom)}` : '';
+}
+
 async function readRefereeState() {
-  const res = await fetch(`${BASE_URL}api/state?t=${Date.now()}`);
+  const res = await fetch(`${BASE_URL}api/state?t=${Date.now()}${roomQuery()}`);
   if (!res.ok) throw new Error(`referee state fetch failed: ${res.status}`);
   return res.json();
 }
@@ -145,7 +152,11 @@ async function main() {
     page.on('pageerror', err => process.stderr.write(`[browser pageerror] ${err.message}\n`));
 
     console.log('Opening', BASE_URL);
-    await page.goto(BASE_URL, { waitUntil: 'load' });
+    await page.goto(BASE_URL + '#/play', { waitUntil: 'load' }); // Wave 2 shell: land on the Play view
+    try {
+      pageRoom = await page.evaluate(() => (typeof getCurrentRoomId === 'function' ? getCurrentRoomId() : 'default'));
+    } catch (_) { pageRoom = 'default'; }
+    console.log(`Page room: ${pageRoom}`);
 
     // 2. Assert 32 .chess-piece SVG elements render on the 8x8 board.
     console.log('Waiting for 32 .chess-piece elements...');

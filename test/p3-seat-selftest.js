@@ -56,6 +56,19 @@ async function main() {
   const blackClaim = mgr.claimSeat('room1', 'black');
   assert(blackClaim.ok === true, 'Black seat claimed successfully');
 
+  // 4b. Wave 2: seat -> account link (rating layer) — anonymous seats carry null
+  const linkMgr = new SeatAuthManager();
+  const linked = linkMgr.claimSeat('linkroom', 'white', { account: { userId: 'acct-1', username: 'alice' } });
+  assert(linked.ok === true && linked.accountId === 'acct-1' && linked.username === 'alice', 'Claim with account stores accountId/username');
+  const anon = linkMgr.claimSeat('linkroom', 'black');
+  assert(anon.ok === true && anon.accountId === null, 'Anonymous claim carries accountId null');
+  const holders = linkMgr.getSeatAccounts('linkroom');
+  assert(holders.white.accountId === 'acct-1' && holders.black.accountId === null && holders.white.isBot === false, 'getSeatAccounts reports both seats without tokens');
+  assert(!('token' in holders.white), 'getSeatAccounts never exposes seat tokens');
+  const botMgr = new SeatAuthManager();
+  botMgr.claimSeat('botroom', 'black', { isBot: true });
+  assert(botMgr.getSeatAccounts('botroom').black.isBot === true && botMgr.getSeatAccounts('botroom').white === null, 'Bot seats flagged isBot; empty seats null');
+
   // 5. Spectator claim
   const specClaim = mgr.claimSeat('room1', 'spectator');
   assert(specClaim.ok === true, 'Spectator claimed successfully');

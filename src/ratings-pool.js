@@ -200,6 +200,26 @@ class RatingsPoolStore {
     return createPoolPlayer({ ...defaults, playerId: id });
   }
 
+  /**
+   * Read-only lookup: memory, then archive, else null. Unlike getPlayer() this
+   * never inserts a default entry, so routes such as /api/ratings/me do not
+   * manufacture phantom provisional players.
+   */
+  peekPlayer(timeControl, playerId) {
+    const pool = normalizePool(timeControl);
+    const id = normalizePlayerId(playerId);
+    const rememberedPool = this.pools.get(pool);
+    const remembered = rememberedPool && rememberedPool.get(id);
+    if (remembered) return { ...remembered };
+    if (this.archive && typeof this.archive.getPoolRating === 'function') {
+      try {
+        const saved = this.archive.getPoolRating(pool, id);
+        if (saved) return createPoolPlayer(saved);
+      } catch (_) {}
+    }
+    return null;
+  }
+
   setPlayer(timeControl, player) {
     return this._persist(timeControl, player);
   }

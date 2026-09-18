@@ -9,6 +9,7 @@ async function testUiFeatures() {
   const page = await context.newPage();
 
   const consoleErrors = [];
+  const failedResponses = [];
   page.on('console', (msg) => {
     if (msg.type() === 'error') {
       consoleErrors.push(msg.text());
@@ -17,13 +18,20 @@ async function testUiFeatures() {
   page.on('pageerror', (err) => {
     consoleErrors.push(err.message);
   });
+  page.on('response', async r => {
+    if (r.status() >= 400) {
+      let body = '';
+      try { body = (await r.text()).slice(0, 160); } catch (_) {}
+      failedResponses.push(`${r.status()} ${r.request().method()} ${r.url()} ${body}`);
+    }
+  });
   page.on('response', (res) => {
     if (res.status() >= 400) {
       console.log('HTTP status', res.status(), res.request().method(), res.url());
     }
   });
 
-  await page.goto(URL, { waitUntil: 'domcontentloaded' });
+  await page.goto(URL + '#/play', { waitUntil: 'domcontentloaded' }); // Wave 2 shell: land on the Play view
   await page.waitForSelector('.chess-piece');
 
   // 1. Verify all modules loaded on window
@@ -172,13 +180,16 @@ async function testUiFeatures() {
   // Reset and play moves up to 5... Qxd4
   await page.evaluate(async () => {
     if (window.leaveSeat) await window.leaveSeat();
-    await fetch('/api/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    // The page auto-routes to its own room (/game/<id>); target it, not 'default'.
+    const q = (typeof getCurrentRoomId === 'function' && getCurrentRoomId() !== 'default') ? `?room=${encodeURIComponent(getCurrentRoomId())}` : '';
+    await fetch('/api/reset' + q, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   });
   await page.waitForTimeout(200);
   const testMoves = ['d2d4', 'd7d5', 'g1f3', 'b8c6', 'c2c4', 'd5c4', 'd1a4', 'c8g4', 'f3e5', 'd8d4'];
   for (const m of testMoves) {
     await page.evaluate(async (move) => {
-      await fetch('/api/move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ move }) });
+      const q = (typeof getCurrentRoomId === 'function' && getCurrentRoomId() !== 'default') ? `?room=${encodeURIComponent(getCurrentRoomId())}` : '';
+      await fetch('/api/move' + q, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ move }) });
     }, m);
     await page.waitForTimeout(50);
   }
@@ -217,6 +228,7 @@ async function testUiFeatures() {
 
   // 7. Check console errors
   if (consoleErrors.length > 0) {
+    console.error('Failed HTTP responses seen:\n' + failedResponses.join('\n'));
     throw new Error('Console errors occurred during test:\n' + consoleErrors.join('\n'));
   }
 

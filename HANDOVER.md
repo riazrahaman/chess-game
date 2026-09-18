@@ -206,3 +206,50 @@ files 200 (`application/javascript` / `application/wasm`, ETag + `max-age=0, mus
 Merge-time follow-ups applied in 20fdcc6: `#bot-level-select` labels 800–2300, `vendor/` added to revalidatable static prefixes,
 `wave1-engine-selftest` wired into `test:unit` + `lint`. Known follow-ups: `'unsafe-inline'` in script-src (hash the SW-registration
 inline block), `personality-bots.pickMove` still not fed MultiPV candidates, `game-archive.saveEval` does not persist the `engine` field.
+
+---
+
+## 7. WAVE 2 — Site shell + reachability (branch `feat/wave2-shell`, started 2026-09-18)
+
+Roadmap §4 R1–R5 + E3/E4. Step 0 (lead): both Playwright suites made green again (they had been red since the
+auto-room commit, not since Wave 0/1 — commit 21c2c92). Step 1 (lead): `src/shell.js` hash router + view
+scaffolding so workers code against a fixed contract.
+
+### Shell view contract (`src/shell.js`)
+```js
+window.Shell.registerView({
+  id: 'puzzles',           // route #/puzzles → <section data-view="puzzles"> (already in index.html)
+  title: 'Puzzles', order: 30, nav: true,
+  mount(el, params) {},    // first navigation; build your DOM inside `el`
+  show(el, params) {},     // every navigation after mount (optional)
+  hide(el) {}              // navigating away (optional)
+});
+Shell.navigate('puzzles', { theme: 'fork' });   // → #/puzzles?theme=fork
+Shell.onChange(({ id, params }) => {});         // route listener
+```
+- Known view ids/sections: `home`, `play` (= existing `<main id="workspace">`), `analysis`, `puzzles`, `library`,
+  `compete`, `me`. Unregistered views show a placeholder; registering a `mount()` later takes over the section.
+- `index.html` has `<base href="/">`, so never write `href="#/x"` expecting same-document navigation from
+  code — use `Shell.navigate()`; the shell delegates clicks on `a[href^="#"]` for markup.
+- A plain visit lands on Home; `/game/<room>` links land on Play. Play params: `#/play?bot=1` enables the bot,
+  `#/play?invite=1` copies the room link.
+- Every new client module: `ALLOWED_FILES` (server.js) + `PRECACHE_ASSETS` (service-worker.js) + `<script>` in
+  index.html before `ui.js`, and it must have a call site or `test/reachability-selftest.js` fails. Wiring a
+  formerly-dark module = delete it from `KNOWN_DARK` there (the list may only shrink).
+- Browser suites: `scripts/smoke-test.mjs` / `test-ui-features.mjs` open `#/play` and use the page's own room.
+
+| Item | Owner | Status | Commit | Notes |
+|---|---|---|---|---|
+| Step 0 — Playwright suites green | lead | DONE | 21c2c92 | room-aware scripts, seat release on bot off, serialised bot config |
+| R1 — `shell.js` router, nav, Home cards, view sections, CSS | lead | DONE | (this commit) | base-href click delegation; hash preserved across the room rewrite |
+| R1/R3/R4 — Play view slimming, Assist drawer, Settings view, a11y modules wired | Worker A | DONE | 1a5e6fe…e4e2ef0 | above-fold controls 16→11 (390px), <44px targets 33→1; typed/voice commands + swipes live; 2 latent voice bugs fixed |
+| E4 — Puzzles: 8,861 CC0 lichess rows, SQLite tables, `/api/puzzle/*`, Daily/Rated/Custom/Storm/Review view | Worker B | DONE | 1493b02…bd73995 | server-side solve verification, Glicko-2 puzzle rating, spaced repetition |
+| R2 — rating on game end, lobby/leaderboard/arena/social routes, Compete + Profile views | Worker C | DONE | 3a879b8…a50513c | only signed-in human-vs-human games are rated; found SW `/api` cache bug (fixed d85baa9) |
+| E3/R5 — real chess-openings TSV (3,810 lines), fabricated stats deleted, Analysis view with own engine worker | Worker D | DONE | f0ff460…762893f | `/api/openings/*`, `/api/fen/validate`; tablebase parser fixed for the real lichess shape |
+
+**Wave 2 result (lead):** `KNOWN_DARK` 30 → 11 (remaining: chess960, variants, chat-upgrades, correspondence,
+personality-bots, i18n, puzzle-racer, study-tree, fen-setup, game-archive/time-control browser copies). All views
+render at 390px with 0 console errors; `smoke-test` + `test-ui-features` PASS. Follow-ups: Library view is still a
+placeholder (archive modal remains the entry point); `personal` openings stats can't bind games to a player until
+accounts bind archived games; `scripts/test-analysis-view.mjs` needs port parameterisation before joining
+`test:browser`; `'unsafe-inline'` still in `script-src`; every auto-room visitor leaves `.referee-state-<room>.json` + journal in the repo root forever (add room-file retention/GC).

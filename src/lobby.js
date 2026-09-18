@@ -166,6 +166,42 @@ class LobbyStore {
     return true;
   }
 
+  getSeek(seekId) {
+    return copy(this.seeks.get(String(seekId)));
+  }
+
+  /**
+   * Accept a specific open seek (Wave 2 lobby route). Unlike matchmake(), the
+   * accepter picks the seek explicitly; the seeker keeps their advertised
+   * rating and the acceptor's rating is read from the ratings store.
+   */
+  acceptSeek(seekId, playerId, options = {}) {
+    const seek = this.seeks.get(String(seekId));
+    if (!seek || seek.status !== 'open') return null;
+    const accepterId = normalizePlayerId(playerId);
+    if (seek.playerId === accepterId) return null;
+    const rating = this._ratingFor(accepterId, seek.timeControl, options.rating);
+    seek.status = 'matched';
+    seek.closedReason = 'paired';
+    seek.closedAt = this.now();
+    const pairing = this._createPairing(
+      { playerId: seek.playerId, rating: seek.rating },
+      { playerId: accepterId, rating },
+      { timeControl: seek.timeControl, rated: seek.rated, roomId: options.roomId }
+    );
+    seek.pairingId = pairing.id;
+    seek.roomId = pairing.roomId;
+    return { seek: copy(seek), pairing };
+  }
+
+  listPairings(filters = {}) {
+    const playerId = filters.playerId == null ? null : normalizePlayerId(filters.playerId);
+    return Array.from(this.pairings.values())
+      .filter(p => playerId == null || p.whiteId === playerId || p.blackId === playerId)
+      .sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))
+      .map(copy);
+  }
+
   createChallenge(options = {}) {
     const challengerId = normalizePlayerId(options.challengerId || options.challenger);
     const challengedId = normalizePlayerId(options.challengedId || options.challenged);
@@ -276,6 +312,9 @@ const Lobby = {
   createSeek: options => getDefaultLobby().createSeek(options),
   listOpenSeeks: filters => getDefaultLobby().listOpenSeeks(filters),
   cancelSeek: (seekId, playerId) => getDefaultLobby().cancelSeek(seekId, playerId),
+  getSeek: seekId => getDefaultLobby().getSeek(seekId),
+  acceptSeek: (seekId, playerId, options) => getDefaultLobby().acceptSeek(seekId, playerId, options),
+  listPairings: filters => getDefaultLobby().listPairings(filters),
   createChallenge: options => getDefaultLobby().createChallenge(options),
   listChallenges: filters => getDefaultLobby().listChallenges(filters),
   acceptChallenge: (challengeId, playerId, options) => getDefaultLobby().acceptChallenge(challengeId, playerId, options),
