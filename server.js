@@ -9,6 +9,7 @@ const { seatAuthManager } = require('./src/seat-auth.js');
 const gameArchive = require('./src/game-archive.js');
 const { BotService, BOT_LEVELS } = require('./src/bot-service.js');
 const Accounts = require('./src/accounts.js');
+const { Chess } = require('chess.js');
 const accountsManager = Accounts.getDefaultManager();
 const botService = new BotService(seatAuthManager);
 
@@ -920,18 +921,41 @@ function handlePostGameEndpoint(req, res) {
   });
 }
 
+// B3: archived games ship referee-computed per-ply positions so the client
+// never replays moves itself (Gate 4). UCI move lists are used directly; PGN-only
+// records are converted through chess.js first.
+function archivedGamePositions(game) {
+  try {
+    let uci = [];
+    const movesStr = typeof game.moves === 'string' ? game.moves.trim() : '';
+    const split = movesStr ? movesStr.split(/\s+/) : [];
+    if (split.length > 0 && /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(split[0])) {
+      uci = split;
+    } else if (game.pgn) {
+      const c = new Chess();
+      c.loadPgn(game.pgn);
+      uci = c.history({ verbose: true }).map(m => m.from + m.to + (m.promotion || ''));
+    }
+    return referee.buildPositions(uci);
+  } catch (_) {
+    return null;
+  }
+}
+
 function handleGetGameEndpoint(req, res, id) {
   const game = gameArchive.getGame(id);
   if (!game) {
     sendJsonError(res, 404, 'game not found');
     return;
   }
+  const positions = archivedGamePositions(game);
+  const payload = positions ? Object.assign({}, game, { positions }) : game;
   const origin = req.headers.origin;
   if (origin && isOriginAllowed(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }
-  sendJson(res, 200, { ok: true, game });
+  sendJson(res, 200, { ok: true, game: payload });
 }
 
 function handleGetGamePgnEndpoint(req, res, id) {

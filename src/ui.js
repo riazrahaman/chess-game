@@ -815,25 +815,67 @@ function getLivePly() {
   return liveHistory.length;
 }
 
-function computeHistoryPositions(history) {
-  const positions = [];
-  const engineLookup = typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : {});
-  const initBoardFn = engineLookup['create' + 'InitialBoard'];
-  const stepMoveFn = engineLookup['make' + 'Move'];
-  if (!initBoardFn || !stepMoveFn) return positions;
-  let b = initBoardFn();
-  positions.push({ board: b, lastMove: null, turn: b.turn });
-  if (!history || !Array.isArray(history)) return positions;
-  for (let i = 0; i < history.length; i++) {
-    const m = history[i];
-    const from = m.slice(0, 2);
-    const to = m.slice(2, 4);
-    const promo = m[4];
-    b = stepMoveFn(b, from, to, promo);
-    positions.push({ board: b, lastMove: { from, to }, turn: b.turn });
+// B3: per-ply positions come from the referee (`state.positions`, one entry
+// per ply: { fen, san, lastMove }). The client only *parses* FEN placement for
+// rendering; it never replays moves, so no engine mutator is called here.
+function fenToDisplayBoard(fen) {
+  if (typeof fen !== 'string' || !fen) return null;
+  const parts = fen.trim().split(/\s+/);
+  const rows = (parts[0] || '').split('/');
+  if (rows.length !== 8) return null;
+  const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+  const pieces = {};
+  for (let r = 0; r < 8; r++) {
+    const rank = 8 - r;
+    let file = 0;
+    for (const ch of rows[r]) {
+      if (/[1-8]/.test(ch)) {
+        for (let k = 0; k < Number(ch); k++) { pieces[files[file++] + rank] = null; }
+      } else if (/[prnbqkPRNBQK]/.test(ch)) {
+        pieces[files[file++] + rank] = { type: ch.toLowerCase(), color: ch === ch.toUpperCase() ? 'white' : 'black' };
+      } else {
+        return null;
+      }
+    }
+    if (file !== 8) return null;
   }
-  return positions;
+  const castlingStr = parts[2] || '-';
+  return {
+    pieces,
+    castling: {
+      white: { kingSide: castlingStr.includes('K'), queenSide: castlingStr.includes('Q') },
+      black: { kingSide: castlingStr.includes('k'), queenSide: castlingStr.includes('q') }
+    },
+    enPassant: parts[3] && parts[3] !== '-' ? parts[3] : null,
+    turn: parts[1] === 'b' ? 'black' : 'white',
+    halfmoveClock: Number(parts[4]) || 0,
+    fullmoveNumber: Number(parts[5]) || 1
+  };
 }
+
+function positionsToHistorySnapshots(positions) {
+  const snapshots = [];
+  if (!Array.isArray(positions)) return snapshots;
+  for (const p of positions) {
+    const b = p && fenToDisplayBoard(p.fen);
+    if (!b) break; // keep the prefix that parsed; the scrubber guards missing plies
+    snapshots.push({ board: b, fen: p.fen, san: p.san || null, lastMove: p.lastMove || null, turn: b.turn });
+  }
+  return snapshots;
+}
+
+function sanListFromPositions(positions, fallbackHistory) {
+  const sans = [];
+  if (Array.isArray(positions)) {
+    for (let i = 1; i < positions.length; i++) sans.push((positions[i] && positions[i].san) || '');
+  }
+  if (Array.isArray(fallbackHistory)) {
+    while (sans.length < fallbackHistory.length) sans.push(fallbackHistory[sans.length]);
+  }
+  return sans;
+}
+
+let livePositions = [];
 
 function updateScrubberButtons() {
   const total = liveHistory.length;
@@ -1116,7 +1158,6 @@ function refereeStateValidationError(state) {
       !Number.isFinite(state.clocks.white) || !Number.isFinite(state.clocks.black) ||
       state.clocks.white < 0 || state.clocks.black < 0)) return 'clocks are invalid';
   try {
-    historyToSan(state.history || []);
     getKingStatus(state.board, state.board.turn);
   } catch (error) {
     return 'board or history cannot be rendered';
@@ -1204,7 +1245,7 @@ function applyRefereeState(state) {
   let lastMove = null;
   if (state.history && state.history.length > 0) {
     const history = state.history;
-    const sanHistory = historyToSan(history);
+    const sanHistory = sanListFromPositions(state.positions, history);
     const latest = history[history.length - 1];
     lastMove = { from: latest.slice(0, 2), to: latest.slice(2, 4) };
     const moves = [];
@@ -1240,9 +1281,8 @@ function applyRefereeState(state) {
   }
   liveBoard = state.board;
   liveHistory = state.history || [];
-  if (typeof computeHistoryPositions === 'function') {
-    historyPositions = computeHistoryPositions(liveHistory);
-  }
+  livePositions = Array.isArray(state.positions) ? state.positions : [];
+  historyPositions = positionsToHistorySnapshots(livePositions);
   if (viewedPly !== null && viewedPly >= liveHistory.length) {
     viewedPly = null;
   }
@@ -1403,7 +1443,7 @@ function pgnResultToken() {
 
 async function copyPgn() {
   const rawHistory = moveHistory.flatMap(move => [move.raw, move.rawBlack].filter(Boolean));
-  const pgn = buildPgn(historyToSan(rawHistory), pgnResultToken());
+  const pgn = buildPgn(sanListFromPositions(livePositions, rawHistory), pgnResultToken());
   try {
     await navigator.clipboard.writeText(pgn);
     if (statusElement) statusElement.textContent = 'PGN copied';
@@ -2043,7 +2083,7 @@ function renderPostGameNarrativeReport() {
   if (!reportModule || typeof reportModule.generatePostGameReport !== 'function') return;
 
   const rawHistory = (moveHistory || []).flatMap(m => [m.raw, m.rawBlack].filter(Boolean));
-  const sanList = historyToSan(rawHistory);
+  const sanList = sanListFromPositions(livePositions, rawHistory);
 
   const report = reportModule.generatePostGameReport({
     moveHistory: rawHistory,
