@@ -1458,6 +1458,7 @@ function createServer() {
         handleGetGameEndpoint(req, res, decodeURIComponent(gameIdMatch[1]));
         return;
       }
+      if (require('./src/routes-openings.js').handleOpeningsRoute(req, res, urlPath, { sendJson, sendJsonError, readJsonBody })) return; // Wave 2 E3: /api/openings/*, /api/fen/validate
 
       sendJsonError(res, 404, 'not found');
       return;
