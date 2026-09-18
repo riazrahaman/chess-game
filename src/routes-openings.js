@@ -149,7 +149,7 @@ function handleOpeningsRoute(req, res, urlPath, ctx) {
         return;
       }
       const result = validateFen(body.fen);
-      sendJson(res, result.valid ? 200 : 422, result);
+      sendJson(res, 200, result); // a rejected FEN is a normal answer, not an HTTP error
     }).catch(() => {
       if (!res.headersSent) sendJsonError(res, 413, 'request body too large');
     });

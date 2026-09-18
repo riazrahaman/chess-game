@@ -29,8 +29,13 @@
 
   const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
   const WORKER_PATH = '/src/stockfish-worker.js';
+  // Depth is only pinned once the worker reports the real engine: the PST
+  // fallback searches synchronously and a deep request would block the worker
+  // (and the 'engine-ready' upgrade) for minutes. Before that the worker's own
+  // default depth applies (PST: 3, Stockfish: 16).
   const ENGINE_DEPTH = 16;
   const BATCH_DEPTH = 12;
+  const SF_ENGINE_ID = 'stockfish19-lite';
   const MULTIPV = 3;
   const FILES = 'abcdefgh';
 
@@ -323,7 +328,13 @@
     state.lines = [];
     const ul = $('[data-an="lines"]');
     if (ul) ul.innerHTML = '<li class="an-muted">Thinking…</li>';
-    state.worker.postMessage({ type: 'position', fen, depth: ENGINE_DEPTH });
+    state.worker.postMessage(positionRequest(fen, ENGINE_DEPTH));
+  }
+
+  function positionRequest(fen, depth) {
+    const msg = { type: 'position', fen };
+    if (state.workerReady && state.engine && state.engine.id === SF_ENGINE_ID) msg.depth = depth;
+    return msg;
   }
 
   function startBatch() {
@@ -335,8 +346,8 @@
   }
   function batchStep() {
     const lbl = $('[data-an="batch-label"]');
-    if (lbl) lbl.textContent = `Analysing ${state.batch.i + 1} / ${state.batch.total} (depth ${BATCH_DEPTH})…`;
-    state.worker.postMessage({ type: 'position', fen: state.positions[state.batch.i].fen, depth: BATCH_DEPTH });
+    if (lbl) lbl.textContent = `Analysing ${state.batch.i + 1} / ${state.batch.total}…`;
+    state.worker.postMessage(positionRequest(state.positions[state.batch.i].fen, BATCH_DEPTH));
   }
   function batchNext() {
     state.batch.i++;

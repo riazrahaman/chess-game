@@ -9,8 +9,8 @@
  * data/README-openings.md). It is a presence check, nothing more.
  *
  * Wave 2 / E3: the previous version of this file shipped 21 positions with
- * uncited round-number "master game counts" (42000, 38000, …) and called them
- * a "real-data subset". Those numbers were invented and are gone. This module
+ * uncited round-number "master game counts" (42000, 38000, …) presented as
+ * real master data. Those numbers were invented and are gone. This module
  * exposes NO game counts: every `games` field is `null`, and
  * `MIN_MASTER_GAMES` no longer exists. If real master-game statistics are ever
  * wanted they must come from a cited source (e.g. explorer.lichess.ovh/masters,
