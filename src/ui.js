@@ -28,6 +28,8 @@ let modalReturnFocus = null;
 let gameEndReturnFocus = null;
 let commandPending = false;
 let retryCommand = null;
+// B5: timer for the auto-dismissing non-blocking error pill (showUiError).
+let uiErrorDismissTimer = null;
 // C3: drag-and-drop state. dragFromSquare holds the source square while a
 // drag is in progress; dragLegalMoves caches the legal targets so dragover
 // can validate without re-computing on every mousemove. Both are view-only.
@@ -735,13 +737,28 @@ function getAuthHeaders(extraHeaders = {}) {
   return headers;
 }
 
+// B5: non-blocking, auto-dismissing error pill. Writes to #command-status
+// (the assertive live region) and never touches #status, which is reserved
+// for referee-reported game status. Does not go through setCommandState so
+// a display-only error never disables the command buttons.
+const UI_ERROR_DISMISS_MS = 5000;
 function showUiError(message) {
-  if (statusElement) {
-    statusElement.textContent = message;
-    statusElement.style.color = '#ef4444';
-  } else {
-    console.error(message);
+  const text = String(message || '');
+  if (!commandStatusElement) {
+    console.error(text);
+    return;
   }
+  commandStatusElement.dataset.state = 'error';
+  commandStatusElement.textContent = text;
+  if (uiErrorDismissTimer) clearTimeout(uiErrorDismissTimer);
+  uiErrorDismissTimer = setTimeout(() => {
+    uiErrorDismissTimer = null;
+    // Only clear if nothing else (e.g. setCommandState) has replaced the text.
+    if (commandStatusElement.textContent === text) {
+      commandStatusElement.textContent = '';
+      commandStatusElement.dataset.state = commandPending ? 'pending' : 'idle';
+    }
+  }, UI_ERROR_DISMISS_MS);
 }
 
 async function submitMoveToReferee(moveStr) {
