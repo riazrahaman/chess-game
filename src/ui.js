@@ -3133,8 +3133,11 @@ function buildLegalMoveCandidates() {
     for (const to of dests) {
       const promos = isPromotionMove(from, to) ? ['q', 'r', 'b', 'n'] : [undefined];
       for (const pr of promos) {
-        const san = typeof moveToSan === 'function' ? moveToSan(board, from, to, pr) : `${from}${to}`;
-        candidates.push({ from, to, promo: pr, san, uci: `${from}${to}${pr || ''}` });
+        const uci = `${from}${to}${pr || ''}`;
+        // engine.js moveToSan(board, uciString) — display-only SAN for matching typed/spoken input.
+        let san = uci;
+        try { if (typeof moveToSan === 'function') san = moveToSan(board, uci); } catch (_) {}
+        candidates.push({ from, to, promo: pr, san, uci });
       }
     }
   }
