@@ -1167,6 +1167,46 @@ function refereeStateValidationError(state) {
 
 let evalWorker = null;
 let currentMultiPvCount = 3;
+// Which analysis engine the worker reported (display only; set on 'engine-ready').
+let activeEngineInfo = null;
+
+function fenPositionKey(fen) {
+  if (typeof fen !== 'string') return '';
+  const parts = fen.trim().split(/\s+/);
+  return parts.length >= 2 ? `${parts[0]} ${parts[1]}` : parts[0] || '';
+}
+
+// Maps an engine eval back to the ply it belongs to. Stockfish answers
+// asynchronously, so an eval can arrive after the referee state moved on;
+// matching on the FEN keeps evalHistory (review, coach, puzzles) aligned.
+function plyForEvalFen(fen) {
+  const livePly = liveHistory ? liveHistory.length : 0;
+  const key = fenPositionKey(fen);
+  if (!key) return livePly;
+  if (Array.isArray(livePositions)) {
+    for (let i = livePositions.length - 1; i >= 0; i--) {
+      if (livePositions[i] && fenPositionKey(livePositions[i].fen) === key) return i;
+    }
+  }
+  const liveFen = getFenFromStateOrBoard(previousRefereeState || (liveBoard ? { board: liveBoard } : null));
+  if (liveFen && fenPositionKey(liveFen) === key) return livePly;
+  return null;
+}
+
+function renderEngineHeader(info) {
+  const select = document.getElementById('multipv-select');
+  const label = select && select.parentElement
+    ? Array.from(select.parentElement.children).find(el => el !== select && el.tagName === 'SPAN')
+    : null;
+  if (!label) return;
+  if (info && info.engine === 'stockfish19-lite') {
+    label.textContent = `Position analysis \u00b7 Stockfish 19 (lite) \u00b7 d${info.depth || 16}`;
+    label.title = info.name || 'Stockfish 19 Lite WASM';
+  } else {
+    label.textContent = 'Position analysis \u00b7 Local heuristic (fallback)';
+    label.title = info && info.fallbackReason ? `Stockfish unavailable: ${info.fallbackReason}` : 'Local heuristic engine';
+  }
+}
 
 function getFenFromStateOrBoard(state) {
   if (state && typeof state.fen === 'string' && state.fen) return state.fen;
@@ -1367,8 +1407,8 @@ function updateEvalUI(data) {
   if (scoreText) scoreText.textContent = cp >= 0 ? `+${cp.toFixed(1)}` : `${cp.toFixed(1)}`;
 
   const cpScore = typeof data.eval === 'number' ? data.eval : (typeof data.evalCp === 'number' ? Math.round(data.evalCp * 100) : 0);
-  const currentPly = liveHistory ? liveHistory.length : 0;
-  evalHistory[currentPly] = cpScore;
+  const targetPly = data.fen ? plyForEvalFen(data.fen) : (liveHistory ? liveHistory.length : 0);
+  if (targetPly !== null) evalHistory[targetPly] = cpScore;
 
   if (data.multipv && Array.isArray(data.multipv) && data.multipv.length > 0) {
     engineMultiPvLines = data.multipv.map((item, idx) => {
@@ -1422,8 +1462,21 @@ function initEvalWorker() {
     try {
       evalWorker = new Worker('src/stockfish-worker.js');
       evalWorker.onmessage = function (event) {
-        if (!event.data || event.data.type !== 'eval') return;
-        updateEvalUI(event.data);
+        const msg = event.data;
+        if (!msg) return;
+        if (msg.type === 'engine-ready') {
+          activeEngineInfo = {
+            engine: msg.engine,
+            name: msg.name,
+            depth: msg.depth,
+            loadMs: msg.loadMs,
+            fallbackReason: msg.fallbackReason || null
+          };
+          renderEngineHeader(activeEngineInfo);
+          return;
+        }
+        if (msg.type !== 'eval') return;
+        updateEvalUI(msg);
       };
       evalWorker.postMessage({ type: 'uci', command: `setoption name MultiPV value ${currentMultiPvCount}` });
       const initialFen = getFenFromStateOrBoard(previousRefereeState || (board ? { board } : null));
@@ -3195,6 +3248,7 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.runGameReview = runGameReview;
   window.getLatestGameReview = () => latestGameReview;
   window.getEvalHistory = () => evalHistory;
+  window.getActiveEngineInfo = () => activeEngineInfo;
   window.setEvalHistory = (h) => { evalHistory = h; };
   window.updateOpeningExplorerUI = updateOpeningExplorerUI;
   window.updateEvalGraphUI = updateEvalGraphUI;
