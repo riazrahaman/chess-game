@@ -139,3 +139,32 @@ Summary of test results:
 ## 4. RUNNING SERVICES
 - **Chess Server**: `http://127.0.0.1:39281`
 - **Kanban Server**: `http://localhost:4100` (PID: 30317)
+---
+
+## 5. WAVE 0 — Audit bugs & truth (branch `fix/wave0-audit-bugs`, started 2026-09-18)
+
+Source of truth for scope: `docs/06-world-class-roadmap.md` §2 (bug table, has a Status column) and §7
+(sequencing). Loop per item: build → targeted selftest → wire into `package.json` if new → verify → one
+commit per item with `Co-Authored-By` + `Claude-Session` trailers. Work was parallelised across three
+worktree workers with strict file ownership (A: `src/ui.js` + `index.html`; B: `server.js` +
+`service-worker.js`; C: `test/` + `package.json`) and merged serially by the lead; the full
+`npm run check` runs once, after the merge.
+
+| Item | Status | Commit | Notes |
+|---|---|---|---|
+| B12 Google OAuth `client_secret*.json` unignored in repo root | DONE | e3b18dd | Never committed (verified `git log --all --full-history`). Server already reads `GOOGLE_CLIENT_ID` from env. **Owner action:** rotate the credential in Google Cloud Console only if the file was ever shared outside this machine. |
+| E2 Honest bot ladder + dedupe 5/6, 7/8 | DONE | 8c42752 | Ratings 800–2200 → 600–1400; `topN` near-equal sampler differentiates levels; tests assert monotonic/no-dup/≤1400. `index.html` option labels pending (Worker A owns the file) — see below. |
+| B8 Fake `id alias Stockfish 17 NNUE WASM` | DONE | 8c42752 | Alias removed; `p2-stockfish-selftest` now asserts absence. |
+| E5 CLAUDE.md truth pass | DONE | 8c42752 | DB path, puzzle-service in-memory, fen-setup unused, ui-auth/accounts, revised DoD (step 6). |
+| B1 clock counts down pre-game | IN PROGRESS | — | Worker A |
+| B2 unclosed `<details>` hides chat | IN PROGRESS | — | Worker A |
+| B4 draw offer/accept/decline/claim UI | IN PROGRESS | — | Worker A |
+| B5 `showUiError` clobbers `#status` | IN PROGRESS | — | Worker A |
+| B6 600 ms poll forever | IN PROGRESS | — | Worker A |
+| B10 phantom `stockfish.*` allowlist + dead ui fallbacks | IN PROGRESS | — | A (ui half) + B (server half) |
+| B11 `ui-auth.js` 404 (not in ALLOWED_FILES/precache) | IN PROGRESS | — | Worker B |
+| D1 gzip/brotli · D2 cache headers + ETag/304 · D3 precache worker | IN PROGRESS | — | Worker B |
+| `reachability-selftest.js` (§7 DoD guard) + wiring | IN PROGRESS | — | Worker C |
+| B7 selftest residue files | IN PROGRESS | — | Worker C |
+| B3 Gate-4 string-concat workaround → referee-served per-ply FEN/SAN | DEFERRED | — | Own commit after the rest is green (changes `stateView` shape). |
+| B9 remove tracked `game-log.md` / `brief.html` | AWAITING CONFIRMATION | — | Deletes deliberately-committed files; not covered by the "go ahead". |
