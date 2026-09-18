@@ -164,17 +164,191 @@ function loadPuzzles(fileOrText) {
   throw new TypeError('loadPuzzles expects CSV text, a Node.js file path, or a browser File');
 }
 
+/* ------------------------------------------------------------------ *
+ * Persistent store (Wave 2 E4). When a game-archive.js instance (or any
+ * object with the same puzzles surface) is attached via setStore(), the
+ * getters below read from it; without one they fall back to the in-memory
+ * array filled by loadPuzzles(), so the pure parser API keeps working in
+ * the browser and in unit tests.
+ * ------------------------------------------------------------------ */
+
+let store = null;
+
+function setStore(archive) {
+  store = archive && typeof archive.listPuzzles === 'function' ? archive : null;
+  return store;
+}
+
+function getStore() {
+  return store;
+}
+
+function hasStore() {
+  return !!store;
+}
+
+/** Normalises a store row or a parsed CSV row into the shape the routes serve. */
+function normalizePuzzle(p) {
+  if (!p) return null;
+  const movesUci = Array.isArray(p.movesUci)
+    ? p.movesUci
+    : (typeof p.moves === 'string' ? p.moves.split(/\s+/).filter(Boolean) : (Array.isArray(p.moves) ? p.moves : []));
+  const movesSan = Array.isArray(p.moves) && !Array.isArray(p.movesUci) ? p.moves
+    : (typeof p.movesSan === 'string' ? p.movesSan.split(/\s+/).filter(Boolean) : (Array.isArray(p.moves) ? p.moves : []));
+  const themes = Array.isArray(p.themes) ? p.themes : String(p.themes || '').split(/\s+/).filter(Boolean);
+  return {
+    id: String(p.id),
+    fen: p.fen,
+    movesUci,
+    moves: movesSan,
+    rating: Number.isFinite(Number(p.rating)) ? Number(p.rating) : null,
+    ratingDeviation: Number.isFinite(Number(p.ratingDeviation)) ? Number(p.ratingDeviation) : 100,
+    popularity: Number(p.popularity) || 0,
+    nbPlays: Number(p.nbPlays) || 0,
+    themes,
+    gameUrl: p.gameUrl || '',
+    openingTags: p.openingTags || ''
+  };
+}
+
+/** Converts a parsed CSV puzzle into the flat record savePuzzles() stores. */
+function toStoreRecord(p) {
+  const n = normalizePuzzle(p);
+  return {
+    id: n.id,
+    fen: n.fen,
+    moves: n.movesUci.join(' '),
+    movesSan: n.moves.join(' '),
+    rating: n.rating == null ? 1500 : n.rating,
+    ratingDeviation: n.ratingDeviation,
+    popularity: n.popularity,
+    nbPlays: n.nbPlays,
+    themes: n.themes.join(' '),
+    gameUrl: n.gameUrl,
+    openingTags: n.openingTags
+  };
+}
+
+/**
+ * Imports lichess CSV text (or a Node file path) into the attached store.
+ * Rows that fail SAN conversion are skipped and counted, never fatal.
+ * @returns {{imported:number, skipped:number}}
+ */
+function importCsvIntoStore(fileOrText, options = {}) {
+  if (!store) throw new Error('puzzle-service.js: importCsvIntoStore needs setStore() first');
+  let text = fileOrText;
+  if (fs && typeof text === 'string' && !/[\r\n]/.test(text) && fs.existsSync(text)) {
+    text = fs.readFileSync(text, 'utf8');
+  }
+  const rows = parseCsvRows(String(text || ''));
+  if (rows.length > 0) rows[0][0] = rows[0][0].replace(/^\uFEFF/, '');
+  if (rows.length > 0 && rows[0][0].trim() === 'PuzzleId') rows.shift();
+  const limit = Number.isFinite(options.limit) ? options.limit : Infinity;
+  let imported = 0;
+  let skipped = 0;
+  let batch = [];
+  for (const row of rows) {
+    if (imported >= limit) break;
+    if (!row.some(field => field.trim() !== '')) continue;
+    try {
+      const fen = (row[1] || '').trim();
+      const movesUci = (row[2] || '').trim().split(/\s+/).filter(Boolean);
+      if (movesUci.length < 2) throw new Error('needs opponent move + solution');
+      batch.push(toStoreRecord({
+        id: (row[0] || '').trim(),
+        fen,
+        movesUci,
+        moves: uciToSan(fen, movesUci),
+        rating: Number(row[3]),
+        ratingDeviation: Number(row[4]),
+        popularity: Number(row[5]),
+        nbPlays: Number(row[6]),
+        themes: (row[7] || '').trim(),
+        gameUrl: (row[8] || '').trim(),
+        openingTags: (row[9] || '').trim()
+      }));
+      imported++;
+    } catch (_) {
+      skipped++;
+    }
+    if (batch.length >= 500) { store.savePuzzles(batch); batch = []; }
+  }
+  if (batch.length) store.savePuzzles(batch);
+  return { imported, skipped };
+}
+
 function getRandomPuzzle() {
+  if (store) {
+    const [p] = store.listPuzzles({ random: true, limit: 1 });
+    return normalizePuzzle(p);
+  }
   if (puzzles.length === 0) return null;
   return puzzles[Math.floor(Math.random() * puzzles.length)];
 }
 
 function getPuzzle(id) {
+  if (store) return normalizePuzzle(store.getPuzzle(String(id)));
   return puzzlesById.get(String(id)) || null;
 }
 
 function puzzleCount() {
+  if (store) return store.countPuzzles();
   return puzzles.length;
+}
+
+/**
+ * Filtered listing. options: { theme, minRating, maxRating, limit, offset, random, excludeIds }
+ */
+function listPuzzles(options = {}) {
+  if (store) return store.listPuzzles(options).map(normalizePuzzle);
+  const exclude = new Set((options.excludeIds || []).map(String));
+  let items = puzzles.filter(p => {
+    if (options.theme && !p.themes.includes(options.theme)) return false;
+    if (Number.isFinite(options.minRating) && !(p.rating >= options.minRating)) return false;
+    if (Number.isFinite(options.maxRating) && !(p.rating <= options.maxRating)) return false;
+    return !exclude.has(p.id);
+  });
+  if (options.random) items = items.slice().sort(() => Math.random() - 0.5);
+  const limit = Number.isFinite(options.limit) && options.limit > 0 ? options.limit : 50;
+  const offset = Number.isFinite(options.offset) && options.offset >= 0 ? options.offset : 0;
+  return items.slice(offset, offset + limit);
+}
+
+function listPuzzleIds() {
+  if (store) return store.listPuzzleIds();
+  return puzzles.map(p => p.id).sort();
+}
+
+function listThemes() {
+  if (store) return store.listPuzzleThemes();
+  const counts = new Map();
+  for (const p of puzzles) for (const t of p.themes) counts.set(t, (counts.get(t) || 0) + 1);
+  return Array.from(counts.entries()).map(([theme, count]) => ({ theme, count })).sort((a, b) => b.count - a.count || a.theme.localeCompare(b.theme));
+}
+
+/**
+ * Picks the puzzle closest to `rating` within ±band (widening if needed),
+ * preferring a random candidate among the closest few so repeats are rare.
+ */
+function pickNearRating(rating, options = {}) {
+  const target = Number.isFinite(Number(rating)) ? Number(rating) : 1500;
+  const excludeIds = options.excludeIds || [];
+  for (const band of [100, 200, 400, 800, Infinity]) {
+    const candidates = listPuzzles({
+      theme: options.theme,
+      minRating: band === Infinity ? undefined : target - band,
+      maxRating: band === Infinity ? undefined : target + band,
+      excludeIds,
+      random: true,
+      limit: 20
+    });
+    if (candidates.length > 0) {
+      const sorted = candidates.slice().sort((a, b) => Math.abs(a.rating - target) - Math.abs(b.rating - target));
+      const top = sorted.slice(0, Math.min(5, sorted.length));
+      return top[Math.floor(Math.random() * top.length)];
+    }
+  }
+  return null;
 }
 
 const PuzzleService = {
@@ -184,7 +358,18 @@ const PuzzleService = {
   loadPuzzlesFromFile,
   getRandomPuzzle,
   getPuzzle,
-  puzzleCount
+  puzzleCount,
+  // store-backed surface (Wave 2)
+  setStore,
+  getStore,
+  hasStore,
+  normalizePuzzle,
+  toStoreRecord,
+  importCsvIntoStore,
+  listPuzzles,
+  listPuzzleIds,
+  listThemes,
+  pickNearRating
 };
 
 if (typeof module !== 'undefined' && module.exports) {
