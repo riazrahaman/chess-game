@@ -10,12 +10,25 @@ let legalMoves = [];
 let whiteTime = null;
 let blackTime = null;
 let refereeClockAt = null;
+// B1: true only once the referee reports the game has actually started
+// (history non-empty, moveStartTs running). Before that, clocks render the
+// referee value verbatim — no interpolation, so a fresh game shows full time.
+let refereeClockRunning = false;
 let clockTickInterval = null;
 let moveHistory = [];
 let lastKnownStateJson = "";
 let pollStarted = false;
 let sseStarted = false;
 let sseEventSource = null;
+// B6: poll cadence. While SSE is open the poll is only a slow liveness check;
+// when SSE is down it resumes the fast cadence. Consecutive /api/state failures
+// back off exponentially (capped) so a down server doesn't spam the console.
+const POLL_FAST_MS = 600;
+const POLL_SSE_LIVENESS_MS = 15000;
+const POLL_FAIL_CAP_MS = 10000;
+let pollTimer = null;
+let pollFailures = 0;
+let sseConnected = false;
 let refereeStatus = 'ongoing';
 let gameOver = false;
 let result = null;
@@ -28,6 +41,8 @@ let modalReturnFocus = null;
 let gameEndReturnFocus = null;
 let commandPending = false;
 let retryCommand = null;
+// B5: timer for the auto-dismissing non-blocking error pill (showUiError).
+let uiErrorDismissTimer = null;
 // C3: drag-and-drop state. dragFromSquare holds the source square while a
 // drag is in progress; dragLegalMoves caches the legal targets so dragover
 // can validate without re-computing on every mousemove. Both are view-only.
@@ -139,7 +154,9 @@ function setCommandState(state, message, retry) {
     retryCommandButton.classList.toggle('hidden', !retryCommand);
     retryCommandButton.disabled = commandPending;
   }
-  commandButtons.forEach(button => { button.disabled = commandPending; });
+  // B4: a button marked data-locked (e.g. "Draw offered…") stays disabled
+  // between commands until the referee reports the offer resolved.
+  commandButtons.forEach(button => { button.disabled = commandPending || button.dataset.locked === 'true'; });
   if (boardElement && boardElement.setAttribute) {
     boardElement.setAttribute('aria-busy', commandPending || !board ? 'true' : 'false');
   }
@@ -192,6 +209,9 @@ function formatTime(seconds) {
 function interpolatedActiveSeconds() {
   if (whiteTime === null || blackTime === null || refereeClockAt === null) return null;
   if (gameOver) return turn === 'white' ? whiteTime : blackTime;
+  // B1: the referee only starts a clock after the first move. Until then
+  // nothing is elapsing, so show the reported value unchanged.
+  if (!refereeClockRunning) return turn === 'white' ? whiteTime : blackTime;
   const elapsedMs = Date.now() - refereeClockAt;
   const elapsed = Math.max(0, elapsedMs / 1000);
   if (turn === 'white') return Math.max(0, whiteTime - elapsed);
@@ -735,18 +755,33 @@ function getAuthHeaders(extraHeaders = {}) {
   return headers;
 }
 
+// B5: non-blocking, auto-dismissing error pill. Writes to #command-status
+// (the assertive live region) and never touches #status, which is reserved
+// for referee-reported game status. Does not go through setCommandState so
+// a display-only error never disables the command buttons.
+const UI_ERROR_DISMISS_MS = 5000;
 function showUiError(message) {
-  if (statusElement) {
-    statusElement.textContent = message;
-    statusElement.style.color = '#ef4444';
-  } else {
-    console.error(message);
+  const text = String(message || '');
+  if (!commandStatusElement) {
+    console.error(text);
+    return;
   }
+  commandStatusElement.dataset.state = 'error';
+  commandStatusElement.textContent = text;
+  if (uiErrorDismissTimer) clearTimeout(uiErrorDismissTimer);
+  uiErrorDismissTimer = setTimeout(() => {
+    uiErrorDismissTimer = null;
+    // Only clear if nothing else (e.g. setCommandState) has replaced the text.
+    if (commandStatusElement.textContent === text) {
+      commandStatusElement.textContent = '';
+      commandStatusElement.dataset.state = commandPending ? 'pending' : 'idle';
+    }
+  }, UI_ERROR_DISMISS_MS);
 }
 
 async function submitMoveToReferee(moveStr) {
   const roomParam = getCurrentRoomId() !== 'default' ? `?room=${encodeURIComponent(getCurrentRoomId())}` : '';
-  const currentTurn = (refereeState && refereeState.board && refereeState.board.turn) || 'white';
+  const currentTurn = (previousRefereeState && previousRefereeState.board && previousRefereeState.board.turn) || 'white';
   if (!currentSeatRole) {
     try {
       await claimSeat(currentTurn);
@@ -1096,13 +1131,8 @@ function getFenFromStateOrBoard(state) {
   if (state && typeof state.fen === 'string' && state.fen) return state.fen;
   const boardObj = (state && state.board) || (state && state.pieces ? state : board);
   if (!boardObj || !boardObj.pieces) return null;
-  if (typeof boardToFen === 'function') {
-    try { return boardToFen(boardObj); } catch (e) {}
-  }
-  const rules = typeof RulesEngine !== 'undefined' ? RulesEngine : null;
-  if (rules && typeof rules.boardToFen === 'function') {
-    try { return rules.boardToFen(boardObj); } catch (e) {}
-  }
+  // The browser has no RulesEngine / boardToFen global (those live server-side
+  // in rules-engine.js), so build the FEN placement string directly.
   try {
     const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
     const rows = [];
@@ -1163,6 +1193,12 @@ function applyRefereeState(state) {
     // A8: stamp the moment referee truth arrived so render-only interpolation
     // can subtract elapsed seconds between polls. This never mutates the truth.
     refereeClockAt = Date.now();
+    // B1: interpolate only once the referee says the game is underway. The
+    // referee keeps moveStartTs at 0 until the first move lands (and zeroes it
+    // again at game end); history is the primary signal, moveStartTs secondary.
+    const historyLength = Array.isArray(state.history) ? state.history.length : 0;
+    const moveStartTs = typeof state.moveStartTs === 'number' ? state.moveStartTs : null;
+    refereeClockRunning = !gameOver && historyLength > 0 && (moveStartTs === null || moveStartTs > 0);
     ensureClockTick();
   }
   let lastMove = null;
@@ -1273,6 +1309,7 @@ function applyRefereeState(state) {
   updateStatus();
   updateHistoryUI();
   if (typeof updateMatchgradeSocialUI === 'function') updateMatchgradeSocialUI(state);
+  if (typeof updateDrawNegotiationUI === 'function') updateDrawNegotiationUI(state);
   return true;
 }
 
@@ -1404,11 +1441,34 @@ async function pollReferee() {
       lastKnownStateJson = stateJson;
     }
     setConnectionState('connected', 'Connected to referee.');
+    pollFailures = 0;
   } catch (e) {
-    console.error('pollReferee error:', e);
+    if (pollFailures === 0) console.error('pollReferee error:', e);
+    pollFailures += 1;
     setConnectionState('disconnected', 'Connection lost. Reconnecting…');
   }
-  setTimeout(pollReferee, 600);
+  schedulePoll(nextPollDelayMs());
+}
+
+// B6: pick the next poll delay from transport health. Failures dominate
+// (exponential backoff, capped); otherwise SSE-open means a slow liveness
+// check and SSE-down means the fast fallback cadence.
+function nextPollDelayMs() {
+  if (pollFailures > 0) {
+    return Math.min(POLL_FAIL_CAP_MS, POLL_FAST_MS * Math.pow(2, pollFailures - 1));
+  }
+  return sseConnected ? POLL_SSE_LIVENESS_MS : POLL_FAST_MS;
+}
+
+// B6: single-owner timer so SSE open/error handlers can re-arm the loop
+// without ever creating a second concurrent poll chain.
+function schedulePoll(delayMs) {
+  if (!pollStarted) return;
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(() => {
+    pollTimer = null;
+    pollReferee();
+  }, delayMs);
 }
 
 // D1: SSE push handler. When an EventSource event arrives, apply the same
@@ -1441,7 +1501,12 @@ function startSSE() {
   sseStarted = true;
   try {
     sseEventSource = new EventSource(withRoomParam('/api/events'));
-    sseEventSource.onopen = () => setConnectionState('connected', 'Connected to referee.');
+    sseEventSource.onopen = () => {
+      setConnectionState('connected', 'Connected to referee.');
+      // B6: SSE is now the primary transport; drop polling to a liveness check.
+      sseConnected = true;
+      schedulePoll(nextPollDelayMs());
+    };
     sseEventSource.addEventListener('state', (event) => {
       try {
         const state = JSON.parse(event.data);
@@ -1459,8 +1524,11 @@ function startSSE() {
       }
     });
     sseEventSource.onerror = (e) => {
-      console.warn('SSE connection error; pollReferee fallback remains active');
+      if (sseConnected) console.warn('SSE connection error; pollReferee fallback remains active');
       setConnectionState('reconnecting', 'Live updates interrupted. Reconnecting; polling remains active…');
+      // B6: SSE is down; resume the fast poll cadence immediately.
+      sseConnected = false;
+      schedulePoll(nextPollDelayMs());
     };
   } catch (e) {
     console.warn('EventSource unavailable; falling back to polling only');
@@ -1770,6 +1838,7 @@ function initGame() {
   whiteTime = null;
   blackTime = null;
   refereeClockAt = null;
+  refereeClockRunning = false;
   moveHistory = [];
   refereeStatus = 'ongoing';
   gameOver = false;
@@ -1812,11 +1881,81 @@ if (resignButton) resignButton.onclick = async () => {
   await runRefereeCommand('Submitting resignation', () =>
     fetch(withRoomParam(`/api/resign?color=${encodeURIComponent(resignRole)}`), { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ id: cmdId }) }));
 };
+// B4: draw negotiation. Every action is a referee command; the UI only reflects
+// state.drawOffer (color that offered, or null) and the claimable-draw signal
+// from the next referee update. Explicit /api/draw/offer is used (not the
+// legacy /api/draw, whose unseated fallback ends the game outright).
 const drawButton = document.getElementById('offer-draw');
-if (drawButton) drawButton.onclick = async () => {
-  const cmdId = 'draw:' + Date.now() + ':' + Math.random().toString(36).slice(2);
-  await runRefereeCommand('Offering draw', () => fetch(withRoomParam('/api/draw'), { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ id: cmdId }) }));
-};
+const claimDrawButton = document.getElementById('claim-draw');
+const drawOfferBanner = document.getElementById('draw-offer-banner');
+const drawOfferText = document.getElementById('draw-offer-text');
+const drawOfferActions = document.getElementById('draw-offer-actions');
+const acceptDrawButton = document.getElementById('accept-draw');
+const declineDrawButton = document.getElementById('decline-draw');
+let drawCmdSeq = 0;
+
+function drawCmdId(action) {
+  drawCmdSeq += 1;
+  return `draw-${action}:${currentSeatRole || 'unseated'}:${Date.now()}:${drawCmdSeq}`;
+}
+
+function postDrawCommand(label, action) {
+  const cmdId = drawCmdId(action);
+  return runRefereeCommand(label, () => fetch(withRoomParam(`/api/draw/${action}`), {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ id: cmdId })
+  }));
+}
+
+// B4: display-only derivation of "a draw may be claimed". Prefers an explicit
+// referee field if present; otherwise falls back to the referee-reported
+// halfmove clock (50-move rule = 100 plies). The referee re-validates on claim.
+function isDrawClaimable(state) {
+  if (!state || state.gameOver) return false;
+  const explicit = state.claimableDraw;
+  if (explicit !== undefined && explicit !== null) {
+    return typeof explicit === 'object' ? explicit.claimable === true : explicit === true;
+  }
+  const halfmoveClock = state.board && typeof state.board.halfmoveClock === 'number' ? state.board.halfmoveClock : 0;
+  return halfmoveClock >= 100;
+}
+
+function updateDrawNegotiationUI(state) {
+  const offer = state && !state.gameOver && (state.drawOffer === 'white' || state.drawOffer === 'black') ? state.drawOffer : null;
+  const seated = currentSeatRole === 'white' || currentSeatRole === 'black';
+  const capitalize = (c) => c.charAt(0).toUpperCase() + c.slice(1);
+  if (drawButton) {
+    const mine = offer !== null && offer === currentSeatRole;
+    drawButton.textContent = mine ? 'Draw offered…' : 'Draw';
+    drawButton.dataset.locked = mine ? 'true' : 'false';
+    drawButton.disabled = mine || commandPending;
+  }
+  if (drawOfferBanner) {
+    if (!offer) {
+      drawOfferBanner.classList.add('hidden');
+    } else {
+      drawOfferBanner.classList.remove('hidden');
+      const incoming = seated && offer !== currentSeatRole;
+      if (drawOfferText) {
+        drawOfferText.textContent = incoming
+          ? `${capitalize(offer)} offers a draw.`
+          : offer === currentSeatRole
+            ? 'Draw offered. Waiting for your opponent…'
+            : `${capitalize(offer)} has offered a draw.`;
+      }
+      if (drawOfferActions) drawOfferActions.classList.toggle('hidden', !incoming);
+    }
+  }
+  if (claimDrawButton) {
+    claimDrawButton.classList.toggle('hidden', !(seated && isDrawClaimable(state)));
+  }
+}
+
+if (drawButton) drawButton.onclick = () => postDrawCommand('Offering draw', 'offer');
+if (acceptDrawButton) acceptDrawButton.onclick = () => postDrawCommand('Accepting draw', 'accept');
+if (declineDrawButton) declineDrawButton.onclick = () => postDrawCommand('Declining draw', 'decline');
+if (claimDrawButton) claimDrawButton.onclick = () => postDrawCommand('Claiming draw', 'claim');
 if (undoButton) undoButton.onclick = async () => {
   const cmdId = 'undo:' + Date.now() + ':' + Math.random().toString(36).slice(2);
   await runRefereeCommand('Requesting undo', () => fetch(withRoomParam('/api/undo'), { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ id: cmdId }) }));
@@ -2110,6 +2249,11 @@ function updateSeatUI() {
   if (leaveBtn) leaveBtn.classList.toggle('hidden', !currentSeatRole);
   if (claimWhite) claimWhite.disabled = currentSeatRole === 'white';
   if (claimBlack) claimBlack.disabled = currentSeatRole === 'black';
+  // B4: the draw banner is seat-relative, so re-derive it from the last
+  // referee state whenever the seat changes.
+  if (previousRefereeState && typeof updateDrawNegotiationUI === 'function') {
+    updateDrawNegotiationUI(previousRefereeState);
+  }
 }
 
 let seatHeartbeatTimer = null;

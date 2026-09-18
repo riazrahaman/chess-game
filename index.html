@@ -998,6 +998,14 @@
             <button id="resign" type="button">Resign</button>
             <button id="offer-draw" type="button">Draw</button>
             <button id="undo" type="button">Undo</button>
+            <button id="claim-draw" type="button" class="hidden" style="grid-column: span 2; background: #0f766e; border-color: #0f766e; color: #fff; font-weight: 600;">Claim draw</button>
+            <div id="draw-offer-banner" class="hidden" role="status" aria-live="polite" style="grid-column: span 4; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; padding: 8px 12px; background: rgba(15, 118, 110, 0.08); border: 1px solid rgba(15, 118, 110, 0.35); border-radius: 6px; font-size: 0.82rem;">
+                <span id="draw-offer-text" style="font-weight: 600; color: #0f766e;"></span>
+                <span id="draw-offer-actions" style="display: flex; gap: 6px;">
+                    <button id="accept-draw" type="button" style="padding: 4px 10px; background: #0f766e; border-color: #0f766e; color: #fff; font-weight: 600;">Accept</button>
+                    <button id="decline-draw" type="button" style="padding: 4px 10px;">Decline</button>
+                </span>
+            </div>
             <button id="coach-hint-btn" type="button" style="grid-column: span 2; background: #d97706; border-color: #d97706; color: #fff; font-weight: 600;">Coach Hint 💡</button>
             <button id="rematch-btn" type="button" class="hidden" style="grid-column: span 4; background: #059669; border-color: #059669; color: #fff; font-weight: 600;">Offer Rematch</button>
         </div>
@@ -1108,6 +1116,7 @@
             <div id="eval-graph-container">
                 <svg id="eval-graph-svg" viewBox="0 0 400 80" preserveAspectRatio="none"></svg>
             </div>
+        </details>
         <div id="chat-panel" style="background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 6px; padding: 10px; margin-top: 12px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                 <span style="font-size: 0.85rem; font-weight: 600;">Room Chat</span>
