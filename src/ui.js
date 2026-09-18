@@ -3080,6 +3080,35 @@ function setupAiCoachUI() {
   }
 }
 
+// Wave 2 R1: the Assist drawer (engine eval + candidate lines) is opt-in and
+// closed by default. Open/closed is a per-browser display preference only —
+// it never touches game state.
+const ASSIST_DRAWER_KEY = 'chess.assist.open';
+
+function setAssistDrawerOpen(open) {
+  const drawer = document.getElementById('assist-drawer');
+  if (!drawer) return;
+  drawer.open = !!open;
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(ASSIST_DRAWER_KEY, open ? '1' : '0');
+  } catch (_) {}
+}
+
+function setupAssistDrawer() {
+  const drawer = document.getElementById('assist-drawer');
+  if (!drawer) return;
+  let saved = null;
+  try {
+    if (typeof localStorage !== 'undefined') saved = localStorage.getItem(ASSIST_DRAWER_KEY);
+  } catch (_) {}
+  drawer.open = saved === '1';
+  drawer.addEventListener('toggle', () => {
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.setItem(ASSIST_DRAWER_KEY, drawer.open ? '1' : '0');
+    } catch (_) {}
+  });
+}
+
 let accessibilityController = null;
 
 function handleVoiceTranscript(transcript) {
@@ -3388,6 +3417,7 @@ setupBotUI();
 setupMistakePuzzlesUI();
 setupAiCoachUI();
 setupAccessibilityVoiceUI();
+setupAssistDrawer();
 if (typeof setInterval === 'function') {
   setInterval(syncNtpClock, 10000);
 }
