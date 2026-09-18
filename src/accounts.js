@@ -68,23 +68,32 @@ function verifyPassword(password, storedHash) {
 
 function publicAccount(account) {
   if (!account) return null;
-  return {
+  const pub = {
     id: String(account.id),
     username: String(account.username),
     createdAt: Number(account.createdAt)
   };
+  if (account.email) pub.email = String(account.email);
+  if (account.picture) pub.picture = String(account.picture);
+  if (account.authProvider) pub.authProvider = String(account.authProvider);
+  return pub;
 }
 
 class MemoryAccountsAdapter {
   constructor() {
     this.byId = new Map();
     this.byUsername = new Map();
+    this.byGoogleId = new Map();
+    this.byEmail = new Map();
+    this.sessions = new Map();
   }
 
   save(account) {
     const saved = Object.assign({}, account);
     this.byId.set(saved.id, saved);
     this.byUsername.set(saved.usernameKey, saved);
+    if (saved.googleId) this.byGoogleId.set(String(saved.googleId), saved);
+    if (saved.email) this.byEmail.set(String(saved.email).toLowerCase(), saved);
     return Object.assign({}, saved);
   }
 
@@ -96,6 +105,31 @@ class MemoryAccountsAdapter {
   getById(id) {
     const account = this.byId.get(String(id));
     return account ? Object.assign({}, account) : null;
+  }
+
+  getByGoogleId(googleId) {
+    const account = this.byGoogleId.get(String(googleId));
+    return account ? Object.assign({}, account) : null;
+  }
+
+  getByEmail(email) {
+    const account = this.byEmail.get(String(email).toLowerCase());
+    return account ? Object.assign({}, account) : null;
+  }
+
+  saveSession(session) {
+    const saved = Object.assign({}, session);
+    this.sessions.set(saved.token, saved);
+    return Object.assign({}, saved);
+  }
+
+  getSession(token) {
+    const session = this.sessions.get(String(token));
+    return session ? Object.assign({}, session) : null;
+  }
+
+  deleteSession(token) {
+    this.sessions.delete(String(token));
   }
 
   close() {}
@@ -115,7 +149,12 @@ class JsonAccountsAdapter extends MemoryAccountsAdapter {
       const accounts = Array.isArray(payload) ? payload : payload.accounts;
       if (Array.isArray(accounts)) {
         for (const account of accounts) {
-          if (account && account.id && account.usernameKey && account.passwordHash) super.save(account);
+          if (account && account.id && account.usernameKey) super.save(account);
+        }
+      }
+      if (payload && Array.isArray(payload.sessions)) {
+        for (const session of payload.sessions) {
+          if (session && session.token) super.saveSession(session);
         }
       }
     } catch (_) {
@@ -127,7 +166,10 @@ class JsonAccountsAdapter extends MemoryAccountsAdapter {
     if (!fs || !this.filePath || this.filePath === ':memory:') return;
     try {
       const tempPath = `${this.filePath}.tmp.${Date.now()}`;
-      const payload = JSON.stringify({ accounts: Array.from(this.byId.values()) }, null, 2);
+      const payload = JSON.stringify({
+        accounts: Array.from(this.byId.values()),
+        sessions: Array.from(this.sessions.values())
+      }, null, 2);
       fs.writeFileSync(tempPath, payload, { encoding: 'utf8', mode: 0o600 });
       fs.renameSync(tempPath, this.filePath);
     } catch (_) {
@@ -139,6 +181,17 @@ class JsonAccountsAdapter extends MemoryAccountsAdapter {
     const saved = super.save(account);
     this._saveToDisk();
     return saved;
+  }
+
+  saveSession(session) {
+    const saved = super.saveSession(session);
+    this._saveToDisk();
+    return saved;
+  }
+
+  deleteSession(token) {
+    super.deleteSession(token);
+    this._saveToDisk();
   }
 
   close() {
@@ -156,40 +209,131 @@ class SqliteAccountsAdapter {
         username TEXT NOT NULL,
         username_key TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
+        google_id TEXT,
+        email TEXT,
+        picture TEXT,
+        auth_provider TEXT,
         created_at INTEGER NOT NULL
-      )
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        username TEXT NOT NULL,
+        email TEXT,
+        picture TEXT,
+        auth_provider TEXT,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
     `);
+    // Ensure columns exist if migrating from older schema
+    try { this.db.exec('ALTER TABLE accounts ADD COLUMN google_id TEXT;'); } catch (_) {}
+    try { this.db.exec('ALTER TABLE accounts ADD COLUMN email TEXT;'); } catch (_) {}
+    try { this.db.exec('ALTER TABLE accounts ADD COLUMN picture TEXT;'); } catch (_) {}
+    try { this.db.exec('ALTER TABLE accounts ADD COLUMN auth_provider TEXT;'); } catch (_) {}
+  }
+
+  _rowToAccount(row) {
+    if (!row) return null;
+    return {
+      id: row.id,
+      username: row.username,
+      usernameKey: row.username_key,
+      passwordHash: row.password_hash,
+      googleId: row.google_id || null,
+      email: row.email || null,
+      picture: row.picture || null,
+      authProvider: row.auth_provider || 'local',
+      createdAt: row.created_at
+    };
   }
 
   save(account) {
     const statement = this.db.prepare(`
-      INSERT INTO accounts (id, username, username_key, password_hash, created_at)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO accounts (id, username, username_key, password_hash, google_id, email, picture, auth_provider, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        username=excluded.username,
+        username_key=excluded.username_key,
+        password_hash=excluded.password_hash,
+        google_id=excluded.google_id,
+        email=excluded.email,
+        picture=excluded.picture,
+        auth_provider=excluded.auth_provider
     `);
-    statement.run(account.id, account.username, account.usernameKey, account.passwordHash, account.createdAt);
+    statement.run(
+      account.id,
+      account.username,
+      account.usernameKey,
+      account.passwordHash,
+      account.googleId || null,
+      account.email || null,
+      account.picture || null,
+      account.authProvider || 'local',
+      account.createdAt
+    );
     return Object.assign({}, account);
   }
 
   getByUsername(key) {
     const row = this.db.prepare('SELECT * FROM accounts WHERE username_key = ?').get(String(key));
-    return row ? {
-      id: row.id,
-      username: row.username,
-      usernameKey: row.username_key,
-      passwordHash: row.password_hash,
-      createdAt: row.created_at
-    } : null;
+    return this._rowToAccount(row);
   }
 
   getById(id) {
     const row = this.db.prepare('SELECT * FROM accounts WHERE id = ?').get(String(id));
-    return row ? {
-      id: row.id,
+    return this._rowToAccount(row);
+  }
+
+  getByGoogleId(googleId) {
+    const row = this.db.prepare('SELECT * FROM accounts WHERE google_id = ?').get(String(googleId));
+    return this._rowToAccount(row);
+  }
+
+  getByEmail(email) {
+    const row = this.db.prepare('SELECT * FROM accounts WHERE LOWER(email) = ?').get(String(email).toLowerCase());
+    return this._rowToAccount(row);
+  }
+
+  saveSession(session) {
+    const statement = this.db.prepare(`
+      INSERT INTO sessions (token, user_id, username, email, picture, auth_provider, created_at, expires_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(token) DO UPDATE SET
+        expires_at=excluded.expires_at
+    `);
+    statement.run(
+      session.token,
+      session.userId,
+      session.username,
+      session.email || null,
+      session.picture || null,
+      session.authProvider || 'local',
+      session.createdAt,
+      session.expiresAt
+    );
+    return Object.assign({}, session);
+  }
+
+  getSession(token) {
+    const row = this.db.prepare('SELECT * FROM sessions WHERE token = ?').get(String(token));
+    if (!row) return null;
+    return {
+      token: row.token,
+      userId: row.user_id,
       username: row.username,
-      usernameKey: row.username_key,
-      passwordHash: row.password_hash,
-      createdAt: row.created_at
-    } : null;
+      email: row.email || null,
+      picture: row.picture || null,
+      authProvider: row.auth_provider || 'local',
+      createdAt: row.created_at,
+      expiresAt: row.expires_at
+    };
+  }
+
+  deleteSession(token) {
+    try {
+      this.db.prepare('DELETE FROM sessions WHERE token = ?').run(String(token));
+    } catch (_) {}
   }
 
   close() {
@@ -250,6 +394,32 @@ class AccountsManager {
     }
   }
 
+  _getByGoogleId(googleId) {
+    const cached = this.memory.getByGoogleId(googleId);
+    if (cached) return cached;
+    if (!this.storage || typeof this.storage.getByGoogleId !== 'function') return null;
+    try {
+      const stored = this.storage.getByGoogleId(googleId);
+      if (stored) this.memory.save(stored);
+      return stored || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _getByEmail(email) {
+    const cached = this.memory.getByEmail(email);
+    if (cached) return cached;
+    if (!this.storage || typeof this.storage.getByEmail !== 'function') return null;
+    try {
+      const stored = this.storage.getByEmail(email);
+      if (stored) this.memory.save(stored);
+      return stored || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   createAccount({ username, password } = {}) {
     requireCrypto();
     const displayName = normalizeUsername(username);
@@ -292,6 +462,107 @@ class AccountsManager {
   getAccountById(id) {
     if (id == null) return null;
     return publicAccount(this._getById(String(id)));
+  }
+
+  createOrFindGoogleUser({ googleId, email, name, picture } = {}) {
+    if (!googleId) throw new TypeError('googleId must be provided');
+    const gid = String(googleId);
+    let account = this._getByGoogleId(gid);
+    if (account) {
+      if (picture && account.picture !== picture) {
+        account.picture = picture;
+        if (this.storage && typeof this.storage.save === 'function') {
+          try { this.storage.save(account); } catch (_) {}
+        }
+        this.memory.save(account);
+      }
+      return publicAccount(account);
+    }
+
+    if (email) {
+      account = this._getByEmail(email);
+      if (account) {
+        account.googleId = gid;
+        account.authProvider = account.authProvider || 'google';
+        if (picture) account.picture = picture;
+        if (this.storage && typeof this.storage.save === 'function') {
+          try { this.storage.save(account); } catch (_) {}
+        }
+        this.memory.save(account);
+        return publicAccount(account);
+      }
+    }
+
+    let baseName = normalizeUsername(name || (email ? email.split('@')[0] : 'Player'));
+    if (!baseName) baseName = 'Player';
+    let candidateName = baseName;
+    let suffix = 1;
+    while (this._getByUsername(usernameKey(candidateName))) {
+      candidateName = `${baseName}_${suffix++}`;
+    }
+
+    account = {
+      id: cryptoMod && cryptoMod.randomUUID ? cryptoMod.randomUUID() : (cryptoMod ? cryptoMod.randomBytes(16).toString('hex') : 'u-' + Date.now()),
+      username: candidateName,
+      usernameKey: usernameKey(candidateName),
+      passwordHash: `oauth$google$${gid}`,
+      googleId: gid,
+      email: email ? String(email) : null,
+      picture: picture ? String(picture) : null,
+      authProvider: 'google',
+      createdAt: Date.now()
+    };
+
+    if (this.storage && typeof this.storage.save === 'function') {
+      try { this.storage.save(account); } catch (_) {}
+    }
+    this.memory.save(account);
+    return publicAccount(account);
+  }
+
+  createSession(account, ttlMs = 7 * 24 * 60 * 60 * 1000) {
+    if (!account || !account.id) throw new TypeError('valid account required');
+    const token = cryptoMod ? cryptoMod.randomBytes(32).toString('hex') : 's-' + Date.now() + Math.random().toString(36).slice(2);
+    const session = {
+      token,
+      userId: String(account.id),
+      username: String(account.username),
+      email: account.email ? String(account.email) : null,
+      picture: account.picture ? String(account.picture) : null,
+      authProvider: account.authProvider || 'local',
+      createdAt: Date.now(),
+      expiresAt: Date.now() + ttlMs
+    };
+    if (this.storage && typeof this.storage.saveSession === 'function') {
+      try { this.storage.saveSession(session); } catch (_) {}
+    }
+    this.memory.saveSession(session);
+    return session;
+  }
+
+  getSession(token) {
+    if (!token || typeof token !== 'string') return null;
+    let session = this.memory.getSession(token);
+    if (!session && this.storage && typeof this.storage.getSession === 'function') {
+      try {
+        session = this.storage.getSession(token);
+        if (session) this.memory.saveSession(session);
+      } catch (_) {}
+    }
+    if (!session) return null;
+    if (session.expiresAt && session.expiresAt < Date.now()) {
+      this.revokeSession(token);
+      return null;
+    }
+    return session;
+  }
+
+  revokeSession(token) {
+    if (!token) return;
+    if (this.storage && typeof this.storage.deleteSession === 'function') {
+      try { this.storage.deleteSession(token); } catch (_) {}
+    }
+    this.memory.deleteSession(token);
   }
 
   close() {
@@ -452,6 +723,11 @@ const Accounts = {
   verifyAccount: data => getDefaultManager().verifyAccount(data),
   getAccount: username => getDefaultManager().getAccount(username),
   getAccountById: id => getDefaultManager().getAccountById(id),
+  createOrFindGoogleUser: data => getDefaultManager().createOrFindGoogleUser(data),
+  createSession: (account, ttl) => getDefaultManager().createSession(account, ttl),
+  getSession: token => getDefaultManager().getSession(token),
+  revokeSession: token => getDefaultManager().revokeSession(token),
+  getDefaultManager,
   resetDefaultManager,
   DEFAULT_DB_PATH,
   DEFAULT_JSON_PATH
