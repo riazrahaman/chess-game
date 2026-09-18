@@ -1259,7 +1259,7 @@ function createServer() {
           try { parsed = body ? JSON.parse(body) : {}; } catch (e) { parsed = {}; }
           const role = parsed.role;
           const targetRoom = parsed.room || roomId;
-          const result = seatAuthManager.claimSeat(targetRoom, role);
+          const result = seatAuthManager.claimSeat(targetRoom, role, { account: getAuthUser(req) }); // Wave 2: seat -> account link for rating-hook.js
           if (result.ok) {
             sendJson(res, 200, result);
           } else {

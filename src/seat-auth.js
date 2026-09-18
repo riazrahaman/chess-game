@@ -40,6 +40,12 @@ class SeatAuthManager {
    */
   claimSeat(roomId = 'default', role, options = {}) {
     const isBot = typeof options === 'boolean' ? options : Boolean(options && options.isBot);
+    // Wave 2 (R2): optional seat -> account link, resolved by the server from the
+    // caller's auth session at claim time. Anonymous seats carry accountId null,
+    // which rating-hook.js treats as "unrated".
+    const account = (options && typeof options === 'object' && options.account) ? options.account : null;
+    const accountId = account && (account.userId || account.id) ? String(account.userId || account.id) : null;
+    const username = account && account.username ? String(account.username) : null;
     const room = this._getRoom(roomId);
     const now = Date.now();
 
@@ -63,10 +69,28 @@ class SeatAuthManager {
       token,
       claimedAt: now,
       lastSeen: now,
-      isBot
+      isBot,
+      accountId,
+      username
     };
 
-    return { ok: true, role, token, roomId };
+    return { ok: true, role, token, roomId, accountId, username };
+  }
+
+  /**
+   * Who holds each player seat, for the rating layer. Returns the stored link
+   * regardless of idle expiry — identity at game end is what matters, not
+   * activity — but always reports isBot. Never exposes tokens.
+   */
+  getSeatAccounts(roomId = 'default') {
+    const room = this._getRoom(roomId);
+    const view = seat => (seat ? {
+      accountId: seat.accountId || null,
+      username: seat.username || null,
+      isBot: Boolean(seat.isBot),
+      expired: this._isExpired(seat)
+    } : null);
+    return { white: view(room.white), black: view(room.black) };
   }
 
   /**

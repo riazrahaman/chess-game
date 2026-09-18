@@ -113,4 +113,21 @@ test('custom room ids enforce the server room-id contract', () => {
   );
 });
 
+test('acceptSeek pairs the acceptor with a specific seek and exposes pairings', () => {
+  const lobby = Lobby.createLobby({ seed: 'accept', now: fixedClock() });
+  const seek = lobby.createSeek({ playerId: 'alice', rating: 1500, timeControl: 'blitz' });
+  assert.strictEqual(lobby.acceptSeek(seek.id, 'alice'), null, 'seeker cannot accept own seek');
+  assert.strictEqual(lobby.acceptSeek('seek-999', 'bob'), null, 'unknown seek returns null');
+  const accepted = lobby.acceptSeek(seek.id, 'bob', { rating: 1600, roomId: 'lobby-abc123' });
+  assert.strictEqual(accepted.seek.status, 'matched');
+  assert.strictEqual(accepted.pairing.roomId, 'lobby-abc123');
+  assert.strictEqual(accepted.pairing.timeControl, 'blitz');
+  assert.deepStrictEqual([accepted.pairing.whiteId, accepted.pairing.blackId].sort(), ['alice', 'bob']);
+  assert.strictEqual(lobby.listOpenSeeks().length, 0, 'accepted seek no longer open');
+  assert.strictEqual(lobby.acceptSeek(seek.id, 'carol'), null, 'a matched seek cannot be accepted twice');
+  assert.strictEqual(lobby.listPairings({ playerId: 'alice' }).length, 1);
+  assert.strictEqual(lobby.listPairings({ playerId: 'carol' }).length, 0);
+  assert.strictEqual(lobby.getSeek(seek.id).roomId, 'lobby-abc123');
+});
+
 console.log(`\nAll ${passed} tests passed successfully!`);
