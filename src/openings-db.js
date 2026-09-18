@@ -3,7 +3,7 @@
 // ECO opening names (compact fallback) + eval-graph geometry.
 //
 // Wave 2 / E3: this table carries ONLY eco + name for 25 common lines. The
-// former `stats: {white, draw, black}` percentages and `popularMoves[].frequency`
+// former `stats` (white/draw/black percentages) and `popularMoves` frequency
 // figures were invented ("illustrative") and have been deleted, not replaced —
 // there is no real game-count source in this repo. Real opening names for
 // ~3,800 lines come from data/openings.tsv (lichess chess-openings, CC0) via
