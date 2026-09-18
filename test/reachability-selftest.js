@@ -60,13 +60,8 @@ const KNOWN_DARK = {
   'rating.js':            'roadmap §1 DARK-never-loaded; Phase 2 ratings/leaderboard shell (P2)',
   'ratings-pool.js':      'roadmap §1 DARK-never-loaded; Phase 2 ratings/leaderboard shell (P2)',
   'lobby.js':             'roadmap §1 DARK-never-loaded; Phase 2 lobby/seek shell (P2)',
-  'puzzle-service.js':    'roadmap §1 DARK-never-loaded; Phase 2 puzzles shell (P2)',
-  'puzzle-rating.js':     'roadmap §1 DARK-never-loaded; Phase 2 puzzles shell (P2)',
-  'puzzle-storm.js':      'roadmap §1 DARK-never-loaded; Phase 2 puzzles shell (P2)',
-  'daily-puzzle.js':      'roadmap §1 DARK-never-loaded; Phase 2 puzzles shell (P2)',
   'study-tree.js':        'roadmap §1 DARK-never-loaded; Phase 2 studies shell (P2)',
   'openings-explorer.js': 'roadmap §1 DARK-never-loaded; Phase 2 opening explorer shell (P2)',
-  'puzzle-repetition.js': 'roadmap §1 DARK-never-loaded; Phase 2 puzzles shell (P2)',
   'fen-setup.js':         'roadmap §1 doc/code contradiction: referee _cmdSetup uses rulesEngine.fenToBoard, not this module (P2 setup UI)',
 
   // --- DARK, shipped to browser with zero call sites (§1 lists 18: these 17 +

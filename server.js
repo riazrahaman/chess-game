@@ -353,6 +353,7 @@ const ALLOWED_FILES = new Set([
   'src/i18n.js',
   'src/ui-auth.js',
   'src/shell.js',
+  'src/ui-puzzles.js',
   'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'
@@ -1458,6 +1459,8 @@ function createServer() {
         handleGetGameEndpoint(req, res, decodeURIComponent(gameIdMatch[1]));
         return;
       }
+
+      if (require('./src/routes-puzzles.js').handlePuzzleRoute(req, res, urlPath, { sendJson, sendJsonError, readJsonBody, getAuthUser, parseCookies, gameArchive })) return; // Wave 2 E4: /api/puzzle/*
 
       sendJsonError(res, 404, 'not found');
       return;
