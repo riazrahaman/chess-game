@@ -69,7 +69,8 @@ const KNOWN_DARK = {
   'puzzle-repetition.js': 'roadmap §1 DARK-never-loaded; Phase 2 puzzles shell (P2)',
   'fen-setup.js':         'roadmap §1 doc/code contradiction: referee _cmdSetup uses rulesEngine.fenToBoard, not this module (P2 setup UI)',
 
-  // --- DARK, shipped to browser with zero call sites (§1: 18) ---
+  // --- DARK, shipped to browser with zero call sites (§1 lists 18: these 17 +
+  //     time-control.js, which is filed under PARTIAL below) ---
   'masters-db.js':        'roadmap §1 DARK-shipped; Phase 1 game-review reclassification wiring (P1)',
   'acpl.js':              'roadmap §1 DARK-shipped; Phase 1 accuracy/ACPL panel wiring (P1)',
   'puzzle-racer.js':      'roadmap §1 DARK-shipped; Phase 2 puzzles shell (P2)',
@@ -214,6 +215,9 @@ function exposedNames(code) {
   return out;
 }
 
+// KNOWN-LOOSE heuristic (documented): the DOMContentLoaded check is a substring
+// match, so a comment or a listener that never fires would also satisfy it.
+// Correct for every currently-loaded module; tighten if a false pass appears.
 // Heuristic for self-initialising modules (documented): a module counts as
 // "called" if it wires itself up on load — a top-level (column-0) bare call
 // statement like `initThemeBar();`, a DOMContentLoaded listener, or a
@@ -264,6 +268,11 @@ test('(a) every <script src> / Worker path exists on disk', () => {
   const missing = clientLoaded.filter((p) => !fs.existsSync(path.join(ROOT, p)));
   assert(missing.length === 0, 'loaded but missing on disk: ' + missing.join(', '));
 });
+// NOTE on fixing an (a) failure: the right fix depends on the module.
+//   - a browser UI module (e.g. ui-auth.js)  -> add it to ALLOWED_FILES
+//   - a Node-only module (crypto.scrypt / fs / DB paths, e.g. accounts.js) ->
+//     REMOVE its <script> tag from index.html; allowlisting it would ship
+//     server-side password-hashing + DB-path code to the browser.
 test('(a) every <script src> / Worker path is in server.js ALLOWED_FILES', () => {
   const notAllowed = clientLoaded.filter((p) => !allowedSet.has(p));
   assert(notAllowed.length === 0,
