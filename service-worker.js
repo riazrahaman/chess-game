@@ -6,6 +6,7 @@ const PRECACHE_ASSETS = [
   '/index.html',
   '/src/engine.js',
   '/src/pieces.js',
+  '/src/stockfish-worker.js',
   '/src/move-review.js',
   '/src/ai-coach.js',
   '/src/game-report.js',
