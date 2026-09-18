@@ -92,7 +92,7 @@ rematch `decline` arm. No orphan client fetches.
 |---|---|---|---|---|---|
 | B1 | **White clock counts down before the game starts.** `interpolatedActiveSeconds` subtracts wall-time since `refereeClockAt`, which is stamped on *any* state arrival with no "game started" guard. Screenshot shows 9:57 while `/api/state` says 600/600. The display layer is fabricating authoritative state. Guard on `moveStartTs > 0` / `history.length > 0`. | `ui.js:192-199`, `ui.js:1165` | display | S | **done** 3245d37 |
 | B2 | **Room chat is hidden.** `<details id="graph-panel">` is never closed; the parser swallows `#chat-panel` into the collapsed "Evaluation history" disclosure. | `index.html:1089`, `:1095-1104` | display | S | **done** 152aadd |
-| B3 | **Gate-4 guard is string-matched and this call site slips past it.** `computeHistoryPositions` calls `engineLookup['create'+'InitialBoard']` and `['make'+'Move']` (`ui.js:786-787`); the concatenated names don't match the `makeMove(` / `createInitialBoard(` string checks in `t0-deadcode-selftest.js:97-98` and `gate4-selftest.js:184`, so at runtime ui.js does invoke the engine mutators (display-only scrubber replay, but the guard no longer catches the next real violation). Fix structurally: have the referee ship per-ply FENs (`/api/positions` or in `stateView`) and delete the workaround; then make the test un-dodgeable (AST or runtime spy). | `ui.js:783-801` (call at 786-787) | referee + display | S/M | deferred (own commit) |
+| B3 | **Gate-4 guard is string-matched and this call site slips past it.** `computeHistoryPositions` calls `engineLookup['create'+'InitialBoard']` and `['make'+'Move']` (`ui.js:786-787`); the concatenated names don't match the `makeMove(` / `createInitialBoard(` string checks in `t0-deadcode-selftest.js:97-98` and `gate4-selftest.js:184`, so at runtime ui.js does invoke the engine mutators (display-only scrubber replay, but the guard no longer catches the next real violation). Fix structurally: have the referee ship per-ply FENs (`/api/positions` or in `stateView`) and delete the workaround; then make the test un-dodgeable (AST or runtime spy). | `ui.js:783-801` (call at 786-787) | referee + display | S/M | **done** 10b3855 |
 | B4 | **Draw negotiation is half-wired** (see dead routes above). Render `state.drawOffer`, add Accept/Decline, add a "Claim draw" button when `claimableDraw` is truthy. | `ui.js:1802`, `server.js:917-929` | display | S | **done** e2855fa |
 | B5 | **`showUiError` permanently clobbers `#status`**; command errors use a second channel (`#command-status`). Unify on one auto-dismissing toast. | `ui.js:738-745` | display | S | **done** 4f1892a |
 | B6 | **Polling never stops.** `pollReferee` re-polls `/api/state` every 600 ms forever, even with SSE open; no client backoff, no `Last-Event-ID`; Playwright `networkidle` never settles. Back off to 10–15 s liveness when SSE `onopen`, resume 600 ms on `onerror`. | `ui.js:1378-1411`, `1439-1470` | display | S | **done** 5b38dfc |
@@ -148,6 +148,9 @@ Only after E1a is stable.
 ### E4 Real puzzle data `[server]` — M
 - Actually import the lichess puzzle CSV (CC0, 6.1M rows; ship a themed 50–100k subset in-repo, full import as an admin script) into a real SQLite `puzzles` table in `game-archive.js`; add routes `/api/puzzle/daily|next|batch/:theme|dashboard/:days|activity` (lichess-shaped).
 - Use lila's `puzzleTheme.xml` as the canonical theme taxonomy.
+
+### G4b Draw-claim policy `[referee]` — S (decision needed)
+The referee auto-draws at threefold repetition and the 50-move rule (`referee-service.js` via `evaluateDraw`, asserted in `t0-draw-flagfall-selftest.js`). FIDE, lichess and Chess.com make those *claimable* and auto-draw only at fivefold / 75-move; `rules-engine.js` already distinguishes the two (`claimableDraw` vs `evaluateDraw`) and B3 now ships `state.claimableDraw` + a Claim button. Switching the referee to claimable-only is a one-line policy change plus a test update — but it changes game outcomes, so it is a product decision, not a bug fix.
 
 ### E5 Documentation truth pass `[docs]` — S — **CLAUDE.md done 8c42752**; RECOMMENDATIONS.md strike-through and B9 file removal still open
 Update CLAUDE.md (DB path, fen-setup, puzzle-service storage), strike the false "Done" marks in
@@ -213,7 +216,7 @@ files; **no ETag / Last-Modified / 304**; keep-alive on.
 - D4 CSP hardening: `'wasm-unsafe-eval'`, drop `'unsafe-eval'` and `'unsafe-inline'` (move the SW-registration inline script to a file; hash the stylesheet or externalise it). `frame-ancestors 'none'` contradicts `embed-viewer.js` — add a dedicated `/embed/:id` route with a permissive frame policy — S.
 - D5 `connect-src` allowlist for `tablebase.lichess.ovh` (or proxy it) — S.
 - D6 SSE-first transport (B6) and client `Last-Event-ID` resume — S. **Poll backoff done 5b38dfc**; `Last-Event-ID` resume still open.
-- D7 `historyToSan` (`engine.js:727-736`) replays from the initial board with disambiguation on every state: 8.3 ms at 200 plies, ~0.9 s cumulative. Have the referee include SAN per ply in `stateView` so the client never recomputes it (also removes the Gate-4 workaround, B3) — S.
+- D7 `historyToSan` (`engine.js:727-736`) replays from the initial board with disambiguation on every state: 8.3 ms at 200 plies, ~0.9 s cumulative. Have the referee include SAN per ply in `stateView` so the client never recomputes it (also removes the Gate-4 workaround, B3) — S. **Done 10b3855** (`state.positions[].san`).
 
 ---
 
