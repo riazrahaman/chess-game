@@ -153,7 +153,7 @@ function createHarness() {
     'scrub-start', 'scrub-prev', 'scrub-next', 'scrub-end', 'multipv-container', 'multipv-select',
     'multipv-lines', 'review-panel', 'white-accuracy', 'black-accuracy', 'classification-summary',
     'game-review-btn', 'close-review', 'explorer-panel', 'opening-eco-badge', 'opening-name',
-    'opening-stats-bar', 'stat-white', 'stat-draw', 'stat-black', 'opening-moves-list',
+    'opening-moves-list',
     'graph-panel', 'eval-graph-container', 'eval-graph-svg'
   ];
 

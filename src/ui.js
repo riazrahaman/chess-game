@@ -2200,45 +2200,14 @@ function updateOpeningExplorerUI() {
 
   const ecoBadge = document.getElementById('opening-eco-badge');
   const nameEl = document.getElementById('opening-name');
-  const wStat = document.getElementById('stat-white');
-  const dStat = document.getElementById('stat-draw');
-  const bStat = document.getElementById('stat-black');
   const movesListEl = document.getElementById('opening-moves-list');
 
   if (ecoBadge) ecoBadge.textContent = opening.eco || 'A00';
   if (nameEl) nameEl.textContent = opening.name || 'Starting Position';
-
-  if (wStat && dStat && bStat && opening.stats) {
-    wStat.style.width = `${opening.stats.white}%`;
-    wStat.textContent = `${opening.stats.white}%`;
-    wStat.title = `White wins: ${opening.stats.white}%`;
-
-    dStat.style.width = `${opening.stats.draw}%`;
-    dStat.textContent = `${opening.stats.draw}%`;
-    dStat.title = `Draws: ${opening.stats.draw}%`;
-
-    bStat.style.width = `${opening.stats.black}%`;
-    bStat.textContent = `${opening.stats.black}%`;
-    bStat.title = `Black wins: ${opening.stats.black}%`;
-  }
-
-  if (movesListEl) {
-    movesListEl.innerHTML = '';
-    if (opening.popularMoves && Array.isArray(opening.popularMoves)) {
-      opening.popularMoves.slice(0, 4).forEach(pm => {
-        const item = document.createElement('div');
-        item.className = 'rec-move-item';
-        item.innerHTML = `
-          <div>
-            <span class="rec-move-san">${pm.san || pm.uci}</span>
-            <span style="color:#64748b; margin-left:6px;">${pm.name || ''}</span>
-          </div>
-          <span style="font-weight:600; color:#475569;">${pm.frequency}%</span>
-        `;
-        movesListEl.appendChild(item);
-      });
-    }
-  }
+  // Win-rate bars and "popular move" percentages were removed in Wave 2 (E3):
+  // the bundled data carries names/ECO only. Real continuation data lives in
+  // the Analysis view via /api/openings/lookup.
+  if (movesListEl) movesListEl.innerHTML = '';
 }
 
 function updateEvalGraphUI() {
