@@ -84,7 +84,9 @@ async function main() {
   // 6. Server MIME and ALLOWED_FILES for WASM
   const serverSource = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
   assert(serverSource.includes("'.wasm': 'application/wasm'"), 'server.js defines .wasm MIME type application/wasm');
-  assert(serverSource.includes("'src/stockfish.wasm'"), 'server.js includes stockfish.wasm in ALLOWED_FILES');
+  // B10: the phantom src/stockfish.{js,wasm} entries must stay gone (the real
+  // engine lives in vendor/stockfish/ — see test/wave1-engine-selftest.js).
+  assert(!serverSource.includes("'src/stockfish.wasm'"), 'server.js does not allowlist the phantom src/stockfish.wasm');
 
   // 7. Backward compatibility check with findBestMove
   const best = stockfish.findBestMove(parsed);
