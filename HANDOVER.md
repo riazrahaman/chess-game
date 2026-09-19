@@ -253,3 +253,33 @@ render at 390px with 0 console errors; `smoke-test` + `test-ui-features` PASS. F
 placeholder (archive modal remains the entry point); `personal` openings stats can't bind games to a player until
 accounts bind archived games; `scripts/test-analysis-view.mjs` needs port parameterisation before joining
 `test:browser`; `'unsafe-inline'` still in `script-src`; every auto-room visitor leaves `.referee-state-<room>.json` + journal in the repo root forever (add room-file retention/GC).
+
+---
+
+## 8. WAVE 3 — Retention (branch `feat/wave3-retention`, 2026-09-19)
+
+Kanban: project `chess` on https://agent-kanban-board-production.up.railway.app (cards `w3-*`, round 5). Loop per
+card: claim (needs `agent_id` + `role`; claims expire in 5 min and an admin reaper resets unowned BUILDING cards)
+→ BUILDING → IN_REVIEW on merge → IN_TEST when the full check + browser suites pass → DONE on push to `main`.
+`depends_on` is enforced by the board (`w3-achievements` waits for `w3-streaks`).
+
+| Card | Owner | Commits | What landed |
+|---|---|---|---|
+| `w3-streaks` | Worker A | 9bceb19…9c8dda7 | `streaks.js` (UTC days, +1 per day, 2 idle days of slack, reset after 3), tables in `social-store.js`, `/api/streak`, `/api/activity`, `#streak-badge`, Home line, Profile card. Game-over hook fires for both signed-in seats; puzzle solve/review and analysis batches count. |
+| `w3-achievements` | Worker A | same | 12-badge catalogue, server-verified client events (brilliant/tablebase need an archived game the caller played), puzzle-rating badges ignore provisional RD. `first_league_promotion` hook wired to leagues. |
+| `w3-leagues` | Worker B | 1e6a5a5…5faeb9e | ISO-week leagues, 8 tiers Wood→Legend, divisions ≤50, top 20% promote, no relegation; `leagues.db` (`CHESS_LEAGUES_DB_PATH`); fed from rated results; admin `POST /api/league/close-week` (`CHESS_ADMIN_TOKEN`). |
+| `w3-insights` | Worker B | same | `insights.js` metric×dimension×filter; `/api/insights`; Insights view with SVG chart. `moveTime`/`ratingGain` honestly `available:false` (schema has no per-move times / rating history). |
+| `w3-external-import` | Worker C | 2d236ba…2798e07 | `games.owner_id/source/external_id/room_id`; lichess + Chess.com importers (stubbed fetch in tests, 429 backoff, 500-game cap); `/api/import/*`, `/api/library`, claim guest games. |
+| `w3-library-view` | Worker C | same | `#/library` replaces the placeholder: search, source chips, paging, Open in Analysis, PGN paste, import forms. |
+| `w3-room-file-gc` | Worker D | 07bc832…72c61b9 | idle-room GC (24 h idle, no SSE/human seats/in-flight cmd, unstarted or finished; finished games archived first), cap eviction, `GET/POST /api/admin/rooms[/gc]`, boot sweep + hourly (`CHESS_ROOM_*`, `CHESS_ROOM_GC=0`). |
+| `w3-csp-inline-hash` | Worker D | 58966b1 | inline SW registration → `src/sw-register.js`; `script-src` no longer has `'unsafe-inline'` (style-src still does). |
+| `w3-missed-tactics` | Worker D + lead | febd57c…70a4ae7, ui.js | `Miss` classification (swing ≥150 cp then give-back ≥100 cp while still not losing), `missed-tactics.js`, `/api/games/:id/missed-tactics`, `POST /api/review/missed-tactics`, Analysis "Missed tactics" panel with hidden-engine retry, Miss row in Game Review. |
+
+**Lead follow-ups applied at merge:** `onRated` chain carries both SocialRoutes and insights consumers; Gate-4 module
+loop covers all `ui-*.js`; server-starting suites set `CHESS_LEAGUES_DB_PATH` under tmpdir.
+
+**Open after Wave 3:** `GET /api/games` (archive modal, Profile recent games) is still unscoped — owned/imported
+games are visible to any visitor; `service-worker.js` `CACHE_NAME` is still `chess-ui-v1` (bump to force existing
+installs to refetch `index.html`); brilliant/tablebase achievement events can only be owner-verified once archived
+games carry real player names; `scripts/test-ui-features.mjs` has no Puzzles/Library/Insights/Missed-tactics steps
+yet (DoD item 4); a 300-ply first missed-tactics request can take ~60 s (serial engine).
