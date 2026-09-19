@@ -31,6 +31,12 @@
  *
  * The listener never throws: the referee emits synchronously inside its command
  * dispatch, so an exception here would turn a valid resign into a 500.
+ *
+ * Wave 3 (retention): every finished game — rated or not — is also broadcast to
+ * module-level game-over listeners registered with onGameOver(fn). The event is
+ * the same object handed to deps.onRated ({roomId, rated, reason, result, plies,
+ * white:{accountId,username}|null, black:…, at}); streaks/achievements consume
+ * it for BOTH signed-in seats regardless of rating eligibility.
  */
 
 const RatingsPool = require('./ratings-pool.js');
@@ -39,6 +45,20 @@ const TimeControl = require('./time-control.js');
 const MIN_RATED_PLIES = 2;
 const MAX_REMEMBERED_GAMES = 500;
 const POOLS = ['ultrabullet', 'bullet', 'blitz', 'rapid', 'classical'];
+
+// Wave 3: process-wide game-over subscribers (routes-retention.js registers at load).
+const gameOverListeners = new Set();
+/** Subscribe to every finished game (rated or not). Returns an unsubscribe fn. */
+function onGameOver(listener) {
+  if (typeof listener !== 'function') throw new TypeError('onGameOver: listener function required');
+  gameOverListeners.add(listener);
+  return () => { gameOverListeners.delete(listener); };
+}
+function emitGameOver(event) {
+  for (const listener of Array.from(gameOverListeners)) {
+    try { listener(event); } catch (_) { /* observers never break the referee */ }
+  }
+}
 
 function poolForTimeControl(tc) {
   if (!tc || typeof tc.baseSeconds !== 'number') return RatingsPool.DEFAULT_POOL; // referee default is Rapid 10+15
@@ -174,6 +194,10 @@ function installRatingHook(deps = {}) {
       if (typeof deps.onRated === 'function') {
         try { deps.onRated(event); } catch (_) { /* observers never break the referee */ }
       }
+      if (typeof deps.onGameOver === 'function') {
+        try { deps.onGameOver(event); } catch (_) { /* observers never break the referee */ }
+      }
+      emitGameOver(event);
       if (logger && event.rated && typeof logger.log === 'function') {
         logger.log(`[rating] ${roomId} ${event.pool} ${event.result} ${event.white.username} vs ${event.black.username}`);
       }
@@ -195,6 +219,7 @@ function installRatingHook(deps = {}) {
 
 module.exports = {
   installRatingHook,
+  onGameOver,
   shouldRate,
   poolForTimeControl,
   scoreForWhite,

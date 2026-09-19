@@ -5,6 +5,9 @@
 // friends/followers from /api/social/*, and a "Sign in to get rated" empty
 // state for guests. Pure display layer over server-reported data.
 // Registers with the shell via Shell.registerView({ id: 'me', ... }).
+// Wave 3: renders an empty #profile-retention mount point (between the user
+// card and the grid) that ui-retention.js fills with the streak card and the
+// achievements panel; this module never writes into it.
 
 'use strict';
 
@@ -62,6 +65,7 @@ function profileRenderSkeleton(el) {
   el.innerHTML = `
     <h2 id="profile-title">Profile</h2>
     <div id="profile-card" class="profile-panel"></div>
+    <div id="profile-retention" hidden></div>
     <div class="profile-grid" id="profile-body"></div>`;
 }
 

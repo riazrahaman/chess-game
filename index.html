@@ -1267,6 +1267,7 @@
                     <span>Engine lines, game review, opening explorer, and your mistakes.</span>
                 </a>
             </div>
+            <p id="home-streak" role="status" aria-live="polite" hidden></p>
         </section>
         <section class="shell-view" data-view="analysis" hidden aria-label="Analysis"></section>
         <section class="shell-view" data-view="puzzles" hidden aria-label="Puzzles"></section>
@@ -1435,13 +1436,10 @@
        <script src="src/ui-compete.js"></script>
        <script src="src/ui-profile.js"></script>
        <script src="src/ui-analysis.js"></script>
+       <script src="src/ui-library.js"></script>
+       <script src="src/ui-retention.js"></script>
+       <script src="src/ui-insights.js"></script>
        <script src="src/ui.js"></script>
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/service-worker.js').catch(() => {});
-            });
-        }
-    </script>
+       <script src="src/sw-register.js"></script>
 </body>
 </html>

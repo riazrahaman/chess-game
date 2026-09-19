@@ -68,10 +68,15 @@ test('service worker has install/activate/fetch handlers', () => {
   assert.ok(swSource.includes('cache.addAll'));
 });
 
-test('index.html links the manifest and registers the service worker', () => {
+test('index.html links the manifest and registers the service worker (via src/sw-register.js)', () => {
   const html = fs.readFileSync(indexPath, 'utf8');
   assert.ok(html.includes('rel="manifest"'), 'missing <link rel="manifest">');
-  assert.ok(html.includes("navigator.serviceWorker.register('/service-worker.js')"), 'missing SW registration');
+  // Wave 3 (D4): the registration block is no longer inline — CSP script-src has
+  // no 'unsafe-inline' — it lives in src/sw-register.js, loaded as <script src>.
+  assert.ok(/<script\s+src="src\/sw-register\.js"><\/script>/.test(html), 'index.html must load src/sw-register.js');
+  const reg = fs.readFileSync(path.join(ROOT, '..', 'src', 'sw-register.js'), 'utf8');
+  assert.ok(reg.includes("navigator.serviceWorker.register('/service-worker.js')"), 'missing SW registration in sw-register.js');
+  assert.ok(!/<script(?![^>]*\bsrc=)[^>]*>/i.test(html.replace(/<!--[\s\S]*?-->/g, '')), 'index.html must not contain inline <script> blocks');
 });
 
 test('manifest and service worker are allowlisted in server.js', () => {

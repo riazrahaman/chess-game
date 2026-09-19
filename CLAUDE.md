@@ -32,7 +32,7 @@ Rules of the test harness:
   (edit `package.json` via `python3 json.load/json.dump(indent=2)` then `printf '\n' >> package.json`).
 - Suites that start the server must put state in `os.tmpdir()` via env vars: `CHESS_STATE_FILE`,
   `CHESS_JOURNAL_FILE`, `CHESS_DB_FILE` / `CHESS_JSON_ARCHIVE_FILE`, `CHESS_ACCOUNTS_DB_FILE`,
-  `CHESS_SOCIAL_DB_PATH`. Otherwise `.referee-*` files and `*.db` land in the repo root.
+  `CHESS_SOCIAL_DB_PATH`, `CHESS_LEAGUES_DB_PATH`. Otherwise `.referee-*` files and `*.db` land in the repo root.
 - Do not run two server-starting suites concurrently in the same checkout; they share those files.
 - The browser scripts hard-code port 39281, open `#/play`, and use the page's own auto-room. Start
   `CHESS_PORT=39281 node server.js` first (they don't spawn one reliably). Restart the server after editing
@@ -72,7 +72,13 @@ server.js  ── HTTP + SSE + static allowlist (ALLOWED_FILES) + CSP/headers + 
   ├─ routes-puzzles.js  /api/puzzle/*  (server verifies every move against the solution)
   ├─ routes-social.js   /api/lobby/*, /api/leaderboard/:tc, /api/arena/*, /api/social/*  (+ social-store.js)
   ├─ routes-openings.js /api/openings/lookup|personal, /api/fen/validate
-  └─ rating-hook.js     rates a game on gameOver iff both seats are signed-in humans, no bot, ≥2 plies
+  ├─ routes-library.js  /api/library, /api/import/lichess|chesscom (games carry owner_id/source/external_id)
+  ├─ routes-retention.js /api/streak, /api/activity, /api/achievements (streaks.js, achievements.js; social-store.js)
+  ├─ routes-insights.js /api/insights, /api/league (insights.js, leagues.js + leagues.db)
+  ├─ routes-review.js   /api/games/:id/missed-tactics, POST /api/review/missed-tactics (missed-tactics.js)
+  ├─ rating-hook.js     rates a game on gameOver iff both seats are signed-in humans, no bot, ≥2 plies;
+  │                     also the game-over fan-out (streaks, leagues, insights subscribe to it)
+  └─ room GC           idle personal rooms are archived + deleted (CHESS_ROOM_* env; /api/admin/rooms needs CHESS_ADMIN_TOKEN)
 ```
 
 Route modules export `handleXRoute(req, res, urlPath, ctx) → boolean` and are called from one hook line each
@@ -82,13 +88,13 @@ Client (`index.html` loads ~40 plain scripts, `shell.js` before `ui.js`):
 - `shell.js` — hash router. Views register with
   `Shell.registerView({id, title, order, nav, mount(el, params), show(el, params), hide(el)})`; sections are
   `<section data-view="…">` (the Play view is the existing `<main id="workspace" data-view="play">`). Routes:
-  `#/`, `#/play?bot=1|invite=1`, `#/analysis?game=<id>|fen=…`, `#/puzzles?theme=…`, `#/compete`, `#/me`, `#/settings`.
+  `#/`, `#/play?bot=1|invite=1`, `#/analysis?game=<id>|fen=…`, `#/puzzles?theme=…`, `#/library`, `#/insights?metric=&dimension=`, `#/compete`, `#/me`, `#/settings`.
   `index.html` has `<base href="/">` (so assets resolve under `/game/<room>`), which makes `href="#/x"` a full
   navigation — the shell delegates hash-link clicks; use `Shell.navigate()` from code.
 - `ui.js` — the Play orchestrator: SSE + backoff polling, diff-rendered board, pointer drag, scrubber, premoves,
   seats/bot config, draw negotiation. Siblings: `ui-sound/theme/annotations/archive/auth/settings.js`.
-- Feature views: `ui-puzzles.js`, `ui-analysis.js` (own board + its own engine Worker), `ui-compete.js`,
-  `ui-profile.js`. Each keeps its own DOM inside its section and never touches `#board`.
+- Feature views: `ui-puzzles.js`, `ui-analysis.js` (own board + its own engine Worker), `ui-library.js`,
+  `ui-insights.js`, `ui-compete.js`, `ui-profile.js`; `ui-retention.js` decorates header/Home/Profile. Each keeps its own DOM inside its section and never touches `#board`.
 - `stockfish-worker.js` — the analysis Worker. Loads `/vendor/stockfish/…` as a nested Worker, falls back to the
   PST engine, and reports which is active (`{type:'engine-ready', engine:'stockfish19-lite'|'pst'}`); evals are
   white-perspective and carry `depth`, `engine`, `mate`, `multipv`.
@@ -118,7 +124,7 @@ lichess puzzles, CC0; `scripts/import-puzzles.mjs` streams the full dump).
 
 - `docs/06-world-class-roadmap.md` — audited state vs. claims, bug table with status, phased roadmap and
   sourced feature deltas. Update its status markers when you land an item.
-- `HANDOVER.md` — per-wave status tables (§5 Wave 0, §6 Wave 1, §7 Wave 2 incl. the shell view contract) and
-  open follow-ups. Work is done on feature branches, merged to `main` only after `npm run check` and both
+- `HANDOVER.md` — per-wave status tables (§5 Wave 0, §6 Wave 1, §7 Wave 2 incl. the shell view contract, §8 Wave 3)
+  and open follow-ups. `docs/kanban-tasks.json` + `scripts/kanban-sync.mjs` mirror the plan to the kanban board. Work is done on feature branches, merged to `main` only after `npm run check` and both
   browser scripts pass, then pushed (Render deploys `main`).
 - `RECOMMENDATIONS.md` is the historical roadmap; its "Done" marks predate the audit and are not reliable.

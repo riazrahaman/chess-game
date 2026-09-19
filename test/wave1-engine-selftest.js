@@ -130,6 +130,7 @@ async function sectionCsp() {
     const tokens = scriptSrc.split(/\s+/).slice(1);
     assert(tokens.includes("'wasm-unsafe-eval'"), "script-src lacks 'wasm-unsafe-eval': " + scriptSrc);
     assert(!tokens.includes("'unsafe-eval'"), "script-src still has 'unsafe-eval': " + scriptSrc);
+    assert(!tokens.includes("'unsafe-inline'"), "script-src still has 'unsafe-inline' (Wave 3 D4): " + scriptSrc);
     const workerSrc = csp.split(';').map(s => s.trim()).find(s => s.startsWith('worker-src '));
     assert(workerSrc && workerSrc.includes("'self'") && workerSrc.includes('blob:'), "worker-src must keep 'self' blob:");
   });
