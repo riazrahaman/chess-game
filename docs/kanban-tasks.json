@@ -2,50 +2,345 @@
   "project": "chess",
   "notes": "Source of truth for the agent-kanban-board project 'chess'. Synced by scripts/kanban-sync.mjs (idempotent: creates missing cards, reconciles status/description). Legacy rounds 1-4 were migrated from HANDOVER.md because the original localhost:4100 board's data did not survive. Rounds: 1 = pre-audit orchestration, 2 = Wave 0, 3 = Wave 1, 4 = Wave 2, 5 = Wave 3.",
   "tasks": [
-    { "id": "chess-t0-seat-auth-heartbeat", "round": 1, "status": "DONE", "priority": "high", "title": "T0.2/T0.3 Seat auth on all mutations + client heartbeat", "description": "validateMutation on /api/reset|undo|draw|resign; 25s seat heartbeat. p3-seat-selftest." },
-    { "id": "chess-t0-draw-flagfall", "round": 1, "status": "DONE", "priority": "high", "title": "T0.4/T0.5 Draw rules + flag fall in the referee", "description": "evaluateDraw/claimableDraw wired; /api/draw/offer|accept|decline|claim; checkFlagFall. t0-draw-flagfall-selftest." },
-    { "id": "chess-t0-deadcode-polish", "round": 1, "status": "DONE", "priority": "medium", "title": "T0.6 Rate limiting, NTP sync, idempotency, alert() removal", "description": "checkRateLimit active; bounded idempotency map; cmdIds; showUiError." },
-    { "id": "chess-t0-engine-honesty", "round": 1, "status": "DONE", "priority": "high", "title": "T0.1 Honest engine labelling", "description": "Relabelled PST heuristic; later superseded by the real engine in Wave 1." },
-    { "id": "chess-mobile-and-visuals", "round": 1, "status": "DONE", "priority": "medium", "title": "D5/A7/A9 Pointer events, bevel, shadows, CSS consolidation", "description": "t1-mobile-visuals-selftest." },
-    { "id": "chess-matchgrade-social", "round": 1, "status": "DONE", "priority": "medium", "title": "B7/B8 Time-control picker, spectators, chat, rematch", "description": "p3-social-timecontrol-selftest." },
-    { "id": "chess-ai-c5-computer", "round": 1, "status": "DONE", "priority": "medium", "title": "C5 Play vs Computer levels 1-8", "description": "bot-service.js; ladder re-based on Stockfish in Wave 1." },
-    { "id": "chess-ai-c7-puzzles", "round": 1, "status": "DONE", "priority": "medium", "title": "C7 Mistake puzzles from own blunders", "description": "generateMistakePuzzles + retry mode." },
-    { "id": "chess-ai-c2-c4-coach", "round": 1, "status": "DONE", "priority": "medium", "title": "C2/C4 Why? explanations + coach hints", "description": "ai-coach.js." },
-    { "id": "chess-ai-c6-report", "round": 1, "status": "DONE", "priority": "medium", "title": "C6 Post-game narrative report + annotated PGN", "description": "game-report.js." },
-    { "id": "chess-accessibility-c8-d4-voice", "round": 1, "status": "DONE", "priority": "medium", "title": "C8/D4 Voice moves, announcements, blind mode", "description": "accessibility-voice.js." },
-
-    { "id": "w0-audit-roadmap", "round": 2, "status": "DONE", "priority": "high", "title": "Wave 0: codebase + market audit -> docs/06-world-class-roadmap.md", "description": "4 parallel audits: reachability (29/49 modules dark), data reality (no engine binary, 0 puzzles, fabricated opening stats), online delta research, UX shell review." },
-    { "id": "w0-b12-oauth-secret", "round": 2, "status": "DONE", "priority": "high", "title": "B12 gitignore Google OAuth client_secret JSON", "description": "e3b18dd. Never committed; server reads GOOGLE_CLIENT_ID from env." },
-    { "id": "w0-e2-honest-bot-ladder", "round": 2, "status": "DONE", "priority": "high", "title": "E2/B8/E5 Honest bot ratings, drop fake Stockfish alias, CLAUDE.md truth pass", "description": "8c42752." },
-    { "id": "w0-ui-bugs", "round": 2, "status": "DONE", "priority": "high", "title": "B1/B2/B4/B5/B6/B10 clock pre-start, hidden chat, draw UI, error toast, poll backoff", "description": "Worker A 3245d37..e78d409 + submitMoveToReferee ReferenceError fix." },
-    { "id": "w0-delivery", "round": 2, "status": "DONE", "priority": "high", "title": "B11/D1/D2/D3 ui-auth.js 404, gzip/brotli, ETag/304, precache worker", "description": "Worker B 2c30698..498e2d1; follow-up 5533297 (accounts.js not shipped to browser, demo login gated by ALLOW_DEMO_AUTH)." },
-    { "id": "w0-reachability-guard", "round": 2, "status": "DONE", "priority": "high", "title": "reachability-selftest.js (Definition of Done guard) + B7 residue cleanup", "description": "Worker C 8400e06..4757c9d. KNOWN_DARK may only shrink." },
-    { "id": "w0-b3-referee-positions", "round": 2, "status": "DONE", "priority": "high", "title": "B3 referee-served per-ply FEN/SAN + claimableDraw; Gate-4 scan concatenation-proof", "description": "10b3855. ui.js no longer replays moves." },
-    { "id": "w0-g4b-fide-draws", "round": 2, "status": "DONE", "priority": "medium", "title": "G4b threefold/50-move claimable, fivefold/75/insufficient automatic", "description": "rulesEngine.automaticDraw; t0-draw-flagfall 60/60." },
-    { "id": "w0-b9-repo-hygiene", "round": 2, "status": "DONE", "priority": "low", "title": "B9 remove game-log.md and brief.html", "description": "Agent-orchestration residue removed and gitignored." },
-
-    { "id": "w1-vendor-stockfish", "round": 3, "status": "DONE", "priority": "high", "title": "E1 vendor Stockfish 19 lite single-threaded WASM (GPL-3.0)", "description": "96e5d51. vendor/stockfish/, scripts/engine-probe.js." },
-    { "id": "w1-browser-engine", "round": 3, "status": "DONE", "priority": "high", "title": "E1a Stockfish in the analysis Web Worker (d16 MultiPV, PST fallback)", "description": "Worker A cf327fd, 39474df." },
-    { "id": "w1-server-engine-bots", "round": 3, "status": "DONE", "priority": "high", "title": "E1b/E2 engine-server.js + real bot ladder (Skill L1-3, UCI_Elo 1400-2300)", "description": "Worker B 97115dc..fad7095. Level 8 no longer hangs its queen." },
-    { "id": "w1-csp-proof-docs", "round": 3, "status": "DONE", "priority": "medium", "title": "D4/D5 CSP wasm-unsafe-eval, tablebase connect-src, wave1-engine-selftest, docs", "description": "Worker C 46813ca..c9f4fbc." },
-
-    { "id": "w2-playwright-green", "round": 4, "status": "DONE", "priority": "high", "title": "Step 0: browser suites green again (room-aware scripts, seat release on bot off)", "description": "21c2c92. Failures traced to the auto-room commit, not Waves 0/1." },
-    { "id": "w2-shell", "round": 4, "status": "DONE", "priority": "high", "title": "R1 shell.js hash router, nav, Home onboarding, view sections", "description": "19efeef. <base href> click delegation; view contract in HANDOVER §7." },
-    { "id": "w2-play-settings-a11y", "round": 4, "status": "DONE", "priority": "high", "title": "R1/R3/R4 Play view slimming, Assist drawer, Settings view, a11y modules wired", "description": "Worker A 1a5e6fe..e4e2ef0. Above-fold controls 16->11 on mobile." },
-    { "id": "w2-puzzles", "round": 4, "status": "DONE", "priority": "high", "title": "E4 real lichess puzzles (8,861 CC0), SQLite, /api/puzzle/*, Puzzles view", "description": "Worker B 1493b02..bd73995. Server-side solve verification, Glicko-2, storm, review." },
-    { "id": "w2-compete-profile", "round": 4, "status": "DONE", "priority": "high", "title": "R2 rating on game end, lobby, leaderboards, arenas, social, Compete + Profile views", "description": "Worker C 3a879b8..a50513c. Found SW /api cache bug (fixed d85baa9)." },
-    { "id": "w2-analysis-openings", "round": 4, "status": "DONE", "priority": "high", "title": "E3/R5 chess-openings TSV, fabricated stats deleted, Analysis view", "description": "Worker D f0ff460..762893f." },
-    { "id": "w2-claude-md-rewrite", "round": 4, "status": "DONE", "priority": "low", "title": "CLAUDE.md rewritten around invariants and conventions", "description": "2baf09f." },
-
-    { "id": "w3-streaks", "round": 5, "status": "BACKLOG", "priority": "high", "title": "N2.7 Activity streak with slack", "description": "Any game/puzzle/review counts; pauses after 1 idle day, resets after 3 (Chess.com model; Duolingo evidence). Server ledger keyed by account; flame badge on Home/Profile. Roadmap §6 N2.7.", "depends_on": [] },
-    { "id": "w3-achievements", "round": 5, "status": "BACKLOG", "priority": "medium", "title": "N2.9 Achievements tied to skill events", "description": "First brilliant move, first tablebase-perfect endgame, 7-day puzzle habit, first rated win. No volume grinding. Roadmap §6 N2.9.", "depends_on": ["w3-streaks"] },
-    { "id": "w3-leagues", "round": 5, "status": "BACKLOG", "priority": "medium", "title": "N2.8 Weekly leagues (divisions of 50, promotion-only, Sunday reset)", "description": "Auto-enrol after first rated game each week. Roadmap §6 N2.8.", "depends_on": [] },
-    { "id": "w3-insights", "round": 5, "status": "BACKLOG", "priority": "high", "title": "N3.15 Insights dashboard (metric x dimension x filter)", "description": "ACPL, move time, result, rating gain x phase, colour, opening, opponent strength, piece, castling side. acpl.js has the metrics; needs a pivot surface (new view or Profile tab). Roadmap §6 N3.15.", "depends_on": [] },
-    { "id": "w3-external-import", "round": 5, "status": "BACKLOG", "priority": "high", "title": "N3.17 Import external game history by lichess / Chess.com username", "description": "Public APIs -> archive (bound to the signed-in account) so Insights and personal openings are useful on day one. Roadmap §6 N3.17.", "depends_on": [] },
-    { "id": "w3-missed-tactics", "round": 5, "status": "BACKLOG", "priority": "medium", "title": "N1.3 'Miss' classification + missed-tactic retry loop", "description": "Puzzles from opportunities the player failed to punish (opponent blunders), the other half of C7; feeds puzzle theme dashboard. Roadmap §6 N1.3.", "depends_on": [] },
-    { "id": "w3-library-view", "round": 5, "status": "BACKLOG", "priority": "medium", "title": "Library view: archive as a page (search, import PGN, open in Analysis)", "description": "Wave 2 left #/library as a placeholder; the archive modal is still the entry point. Roadmap §4 R1 Library row.", "depends_on": [] },
-    { "id": "w3-room-file-gc", "round": 5, "status": "BACKLOG", "priority": "high", "title": "Auto-room state-file retention / GC", "description": "Every visitor's personal room leaves .referee-state-<room>.json + journal in the server cwd forever. Add TTL-based GC for idle rooms with no seats and an empty/finished game; archive finished games first. HANDOVER §7 follow-up.", "depends_on": [] },
-    { "id": "w3-csp-inline-hash", "round": 5, "status": "BACKLOG", "priority": "medium", "title": "D4 drop 'unsafe-inline' from script-src (hash the SW-registration inline block)", "description": "buildCsp() computes sha256 of the inline block from index.html at boot. HANDOVER §6 follow-up.", "depends_on": [] },
-    { "id": "w3-kanban-mirroring", "round": 5, "status": "BACKLOG", "priority": "low", "title": "Keep the kanban board in sync each wave (scripts/kanban-sync.mjs)", "description": "Manifest docs/kanban-tasks.json is the source of truth; run the sync after each merge to main.", "depends_on": [] }
+    {
+      "id": "chess-t0-seat-auth-heartbeat",
+      "round": 1,
+      "status": "DONE",
+      "priority": "high",
+      "title": "T0.2/T0.3 Seat auth on all mutations + client heartbeat",
+      "description": "validateMutation on /api/reset|undo|draw|resign; 25s seat heartbeat. p3-seat-selftest."
+    },
+    {
+      "id": "chess-t0-draw-flagfall",
+      "round": 1,
+      "status": "DONE",
+      "priority": "high",
+      "title": "T0.4/T0.5 Draw rules + flag fall in the referee",
+      "description": "evaluateDraw/claimableDraw wired; /api/draw/offer|accept|decline|claim; checkFlagFall. t0-draw-flagfall-selftest."
+    },
+    {
+      "id": "chess-t0-deadcode-polish",
+      "round": 1,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "T0.6 Rate limiting, NTP sync, idempotency, alert() removal",
+      "description": "checkRateLimit active; bounded idempotency map; cmdIds; showUiError."
+    },
+    {
+      "id": "chess-t0-engine-honesty",
+      "round": 1,
+      "status": "DONE",
+      "priority": "high",
+      "title": "T0.1 Honest engine labelling",
+      "description": "Relabelled PST heuristic; later superseded by the real engine in Wave 1."
+    },
+    {
+      "id": "chess-mobile-and-visuals",
+      "round": 1,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "D5/A7/A9 Pointer events, bevel, shadows, CSS consolidation",
+      "description": "t1-mobile-visuals-selftest."
+    },
+    {
+      "id": "chess-matchgrade-social",
+      "round": 1,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "B7/B8 Time-control picker, spectators, chat, rematch",
+      "description": "p3-social-timecontrol-selftest."
+    },
+    {
+      "id": "chess-ai-c5-computer",
+      "round": 1,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "C5 Play vs Computer levels 1-8",
+      "description": "bot-service.js; ladder re-based on Stockfish in Wave 1."
+    },
+    {
+      "id": "chess-ai-c7-puzzles",
+      "round": 1,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "C7 Mistake puzzles from own blunders",
+      "description": "generateMistakePuzzles + retry mode."
+    },
+    {
+      "id": "chess-ai-c2-c4-coach",
+      "round": 1,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "C2/C4 Why? explanations + coach hints",
+      "description": "ai-coach.js."
+    },
+    {
+      "id": "chess-ai-c6-report",
+      "round": 1,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "C6 Post-game narrative report + annotated PGN",
+      "description": "game-report.js."
+    },
+    {
+      "id": "chess-accessibility-c8-d4-voice",
+      "round": 1,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "C8/D4 Voice moves, announcements, blind mode",
+      "description": "accessibility-voice.js."
+    },
+    {
+      "id": "w0-audit-roadmap",
+      "round": 2,
+      "status": "DONE",
+      "priority": "high",
+      "title": "Wave 0: codebase + market audit -> docs/06-world-class-roadmap.md",
+      "description": "4 parallel audits: reachability (29/49 modules dark), data reality (no engine binary, 0 puzzles, fabricated opening stats), online delta research, UX shell review."
+    },
+    {
+      "id": "w0-b12-oauth-secret",
+      "round": 2,
+      "status": "DONE",
+      "priority": "high",
+      "title": "B12 gitignore Google OAuth client_secret JSON",
+      "description": "e3b18dd. Never committed; server reads GOOGLE_CLIENT_ID from env."
+    },
+    {
+      "id": "w0-e2-honest-bot-ladder",
+      "round": 2,
+      "status": "DONE",
+      "priority": "high",
+      "title": "E2/B8/E5 Honest bot ratings, drop fake Stockfish alias, CLAUDE.md truth pass",
+      "description": "8c42752."
+    },
+    {
+      "id": "w0-ui-bugs",
+      "round": 2,
+      "status": "DONE",
+      "priority": "high",
+      "title": "B1/B2/B4/B5/B6/B10 clock pre-start, hidden chat, draw UI, error toast, poll backoff",
+      "description": "Worker A 3245d37..e78d409 + submitMoveToReferee ReferenceError fix."
+    },
+    {
+      "id": "w0-delivery",
+      "round": 2,
+      "status": "DONE",
+      "priority": "high",
+      "title": "B11/D1/D2/D3 ui-auth.js 404, gzip/brotli, ETag/304, precache worker",
+      "description": "Worker B 2c30698..498e2d1; follow-up 5533297 (accounts.js not shipped to browser, demo login gated by ALLOW_DEMO_AUTH)."
+    },
+    {
+      "id": "w0-reachability-guard",
+      "round": 2,
+      "status": "DONE",
+      "priority": "high",
+      "title": "reachability-selftest.js (Definition of Done guard) + B7 residue cleanup",
+      "description": "Worker C 8400e06..4757c9d. KNOWN_DARK may only shrink."
+    },
+    {
+      "id": "w0-b3-referee-positions",
+      "round": 2,
+      "status": "DONE",
+      "priority": "high",
+      "title": "B3 referee-served per-ply FEN/SAN + claimableDraw; Gate-4 scan concatenation-proof",
+      "description": "10b3855. ui.js no longer replays moves."
+    },
+    {
+      "id": "w0-g4b-fide-draws",
+      "round": 2,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "G4b threefold/50-move claimable, fivefold/75/insufficient automatic",
+      "description": "rulesEngine.automaticDraw; t0-draw-flagfall 60/60."
+    },
+    {
+      "id": "w0-b9-repo-hygiene",
+      "round": 2,
+      "status": "DONE",
+      "priority": "low",
+      "title": "B9 remove game-log.md and brief.html",
+      "description": "Agent-orchestration residue removed and gitignored."
+    },
+    {
+      "id": "w1-vendor-stockfish",
+      "round": 3,
+      "status": "DONE",
+      "priority": "high",
+      "title": "E1 vendor Stockfish 19 lite single-threaded WASM (GPL-3.0)",
+      "description": "96e5d51. vendor/stockfish/, scripts/engine-probe.js."
+    },
+    {
+      "id": "w1-browser-engine",
+      "round": 3,
+      "status": "DONE",
+      "priority": "high",
+      "title": "E1a Stockfish in the analysis Web Worker (d16 MultiPV, PST fallback)",
+      "description": "Worker A cf327fd, 39474df."
+    },
+    {
+      "id": "w1-server-engine-bots",
+      "round": 3,
+      "status": "DONE",
+      "priority": "high",
+      "title": "E1b/E2 engine-server.js + real bot ladder (Skill L1-3, UCI_Elo 1400-2300)",
+      "description": "Worker B 97115dc..fad7095. Level 8 no longer hangs its queen."
+    },
+    {
+      "id": "w1-csp-proof-docs",
+      "round": 3,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "D4/D5 CSP wasm-unsafe-eval, tablebase connect-src, wave1-engine-selftest, docs",
+      "description": "Worker C 46813ca..c9f4fbc."
+    },
+    {
+      "id": "w2-playwright-green",
+      "round": 4,
+      "status": "DONE",
+      "priority": "high",
+      "title": "Step 0: browser suites green again (room-aware scripts, seat release on bot off)",
+      "description": "21c2c92. Failures traced to the auto-room commit, not Waves 0/1."
+    },
+    {
+      "id": "w2-shell",
+      "round": 4,
+      "status": "DONE",
+      "priority": "high",
+      "title": "R1 shell.js hash router, nav, Home onboarding, view sections",
+      "description": "19efeef. <base href> click delegation; view contract in HANDOVER §7."
+    },
+    {
+      "id": "w2-play-settings-a11y",
+      "round": 4,
+      "status": "DONE",
+      "priority": "high",
+      "title": "R1/R3/R4 Play view slimming, Assist drawer, Settings view, a11y modules wired",
+      "description": "Worker A 1a5e6fe..e4e2ef0. Above-fold controls 16->11 on mobile."
+    },
+    {
+      "id": "w2-puzzles",
+      "round": 4,
+      "status": "DONE",
+      "priority": "high",
+      "title": "E4 real lichess puzzles (8,861 CC0), SQLite, /api/puzzle/*, Puzzles view",
+      "description": "Worker B 1493b02..bd73995. Server-side solve verification, Glicko-2, storm, review."
+    },
+    {
+      "id": "w2-compete-profile",
+      "round": 4,
+      "status": "DONE",
+      "priority": "high",
+      "title": "R2 rating on game end, lobby, leaderboards, arenas, social, Compete + Profile views",
+      "description": "Worker C 3a879b8..a50513c. Found SW /api cache bug (fixed d85baa9)."
+    },
+    {
+      "id": "w2-analysis-openings",
+      "round": 4,
+      "status": "DONE",
+      "priority": "high",
+      "title": "E3/R5 chess-openings TSV, fabricated stats deleted, Analysis view",
+      "description": "Worker D f0ff460..762893f."
+    },
+    {
+      "id": "w2-claude-md-rewrite",
+      "round": 4,
+      "status": "DONE",
+      "priority": "low",
+      "title": "CLAUDE.md rewritten around invariants and conventions",
+      "description": "2baf09f."
+    },
+    {
+      "id": "w3-streaks",
+      "round": 5,
+      "status": "DONE",
+      "priority": "high",
+      "title": "N2.7 Activity streak with slack",
+      "description": "Any game/puzzle/review counts; pauses after 1 idle day, resets after 3 (Chess.com model; Duolingo evidence). Server ledger keyed by account; flame badge on Home/Profile. Roadmap §6 N2.7.",
+      "depends_on": []
+    },
+    {
+      "id": "w3-achievements",
+      "round": 5,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "N2.9 Achievements tied to skill events",
+      "description": "First brilliant move, first tablebase-perfect endgame, 7-day puzzle habit, first rated win. No volume grinding. Roadmap §6 N2.9.",
+      "depends_on": [
+        "w3-streaks"
+      ]
+    },
+    {
+      "id": "w3-leagues",
+      "round": 5,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "N2.8 Weekly leagues (divisions of 50, promotion-only, Sunday reset)",
+      "description": "Auto-enrol after first rated game each week. Roadmap §6 N2.8.",
+      "depends_on": []
+    },
+    {
+      "id": "w3-insights",
+      "round": 5,
+      "status": "DONE",
+      "priority": "high",
+      "title": "N3.15 Insights dashboard (metric x dimension x filter)",
+      "description": "ACPL, move time, result, rating gain x phase, colour, opening, opponent strength, piece, castling side. acpl.js has the metrics; needs a pivot surface (new view or Profile tab). Roadmap §6 N3.15.",
+      "depends_on": []
+    },
+    {
+      "id": "w3-external-import",
+      "round": 5,
+      "status": "DONE",
+      "priority": "high",
+      "title": "N3.17 Import external game history by lichess / Chess.com username",
+      "description": "Public APIs -> archive (bound to the signed-in account) so Insights and personal openings are useful on day one. Roadmap §6 N3.17.",
+      "depends_on": []
+    },
+    {
+      "id": "w3-missed-tactics",
+      "round": 5,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "N1.3 'Miss' classification + missed-tactic retry loop",
+      "description": "Puzzles from opportunities the player failed to punish (opponent blunders), the other half of C7; feeds puzzle theme dashboard. Roadmap §6 N1.3.",
+      "depends_on": []
+    },
+    {
+      "id": "w3-library-view",
+      "round": 5,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "Library view: archive as a page (search, import PGN, open in Analysis)",
+      "description": "Wave 2 left #/library as a placeholder; the archive modal is still the entry point. Roadmap §4 R1 Library row.",
+      "depends_on": []
+    },
+    {
+      "id": "w3-room-file-gc",
+      "round": 5,
+      "status": "DONE",
+      "priority": "high",
+      "title": "Auto-room state-file retention / GC",
+      "description": "Every visitor's personal room leaves .referee-state-<room>.json + journal in the server cwd forever. Add TTL-based GC for idle rooms with no seats and an empty/finished game; archive finished games first. HANDOVER §7 follow-up.",
+      "depends_on": []
+    },
+    {
+      "id": "w3-csp-inline-hash",
+      "round": 5,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "D4 drop 'unsafe-inline' from script-src (hash the SW-registration inline block)",
+      "description": "buildCsp() computes sha256 of the inline block from index.html at boot. HANDOVER §6 follow-up.",
+      "depends_on": []
+    },
+    {
+      "id": "w3-kanban-mirroring",
+      "round": 5,
+      "status": "DONE",
+      "priority": "low",
+      "title": "Keep the kanban board in sync each wave (scripts/kanban-sync.mjs)",
+      "description": "Manifest docs/kanban-tasks.json is the source of truth; run the sync after each merge to main.",
+      "depends_on": []
+    }
   ]
 }
