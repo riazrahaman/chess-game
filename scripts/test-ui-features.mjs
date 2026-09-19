@@ -377,25 +377,25 @@ async function testUiFeatures() {
   });
   if (!coordsVisible) throw new Error('Coordinates view section not visible after navigation');
 
-  const squaresCount = await page.locator('#coords-board .coords-square').count();
+  const squaresCount = await page.locator('[id="coords-board"] .coords-square').count();
   if (squaresCount !== 64) throw new Error(`Expected 64 squares on coords board, got ${squaresCount}`);
 
   // Start round
-  await page.locator('#coords-action-btn').click();
+  await page.locator('[id="coords-action-btn"]').click();
   await page.waitForTimeout(300);
 
-  const targetText = (await page.locator('#coords-target-display').textContent()).trim().toLowerCase();
+  const targetText = (await page.locator('[id="coords-target-display"]').textContent()).trim().toLowerCase();
   if (!targetText || targetText.length !== 2) throw new Error(`Expected 2-char target square, got: ${targetText}`);
 
   // Click target square
   await page.locator(`.coords-square[data-square="${targetText}"]`).click();
   await page.waitForTimeout(300);
 
-  const scoreText = (await page.locator('#coords-score-display').textContent()).trim();
+  const scoreText = (await page.locator('[id="coords-score-display"]').textContent()).trim();
   if (scoreText !== '1') throw new Error(`Expected score 1 after correct click, got: ${scoreText}`);
 
   // Stop round
-  await page.locator('#coords-action-btn').click();
+  await page.locator('[id="coords-action-btn"]').click();
   await page.waitForTimeout(300);
   console.log('✔ Passed: Coordinates trainer renders 64 squares, starts timed sprint, and scores clicks');
 

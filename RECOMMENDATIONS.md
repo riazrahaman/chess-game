@@ -127,7 +127,7 @@ What follows is the next-generation roadmap.
 - ~~**G2 FEN setup / board editor.**~~ **Done.** New `fen-setup.js` + referee `setup` command + `POST /api/setup`. Start a room from arbitrary FEN (Gate-4-safe referee command). Verified in `fen-setup-selftest.js` (10/10).
 - ~~**G3 Time-control completeness:**~~ **Done.** New `time-control.js` — per-color clocks, delay/Bronstein, odds, lichess TC label formula. Verified in `time-control-selftest.js` (20/20).
 - **G4 Undo as a *request* with opponent consent** (not unilateral) when both seats are human; keep unilateral solo mode.
-- **G5 Coordinates trainer** mini-game (click the named square) — lichess's most-used beginner tool, trivially buildable.
+- ~~**G5 Coordinates trainer**~~ — **Done.** New `coordinates-trainer.js` + `ui-coordinates.js` — click-the-named-square mini-game with 30s/60s sprints, untimed practice, White/Black perspectives, sound cues, keyboard entry, and high score tracking. Verified in `coordinates-trainer-selftest.js` (15/15) + browser suite.
 - ~~**G6 Zen mode**~~ — **Done.** Zen mode (`z` key / button) hides ratings, eval bar, spectator badge, assist block, and chat panel during play. `f` key flip-board keyboard shortcut parity. Documented in shortcuts help. Verified in `test/zen-mode-selftest.js` (7/7).
 
 ## TIER S — Social & platform layer (the biggest gap; biggest scope)
