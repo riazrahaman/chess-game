@@ -16,16 +16,19 @@
  *                (how much the opponent's move just handed over)  >= 150 cp
  *   giveBackCp = eval(i)   - eval(i+1)   from the player's point of view
  *                (how much the reply gave back relative to the best move) >= 100 cp
- *   and the reply did not make things WORSE than before the opponent's gift:
- *                eval(i+1) >= eval(i-1) - 50 cp (player's view). A reply that
- *                also throws away what the player had before is a Blunder in
- *                move-review.js terms; a Miss is "still fine, but you had much
- *                better" (this is why a missed mate-in-1 in an otherwise level
- *                game is a Miss, not a Blunder — Chess.com semantics).
+ *   and the reply still leaves the player "fine" (otherwise it is a Blunder):
+ *                eval(i+1) >= eval(i-1) - 50 cp (not worse than before the
+ *                opponent's gift) AND eval(i+1) >= -200 cp (not losing), both
+ *                from the player's view. A missed mate-in-1 in a level game is
+ *                therefore a Miss; a reply that walks back into a lost position
+ *                (e.g. allows the mate the opponent threatened) is a Blunder —
+ *                Chess.com semantics.
  *
- * Win-probability deltas for both quantities are reported alongside, computed
- * with move-review.js's logistic, so callers can rank misses by how much they
- * mattered rather than by raw centipawns.
+ * Centipawns are clamped to ±2000 (the bound calculateWinProbability uses)
+ * before the swing / give-back arithmetic so mate scores do not leak "+109
+ * pawns" into the UI. Win-probability deltas for both quantities are reported
+ * alongside, computed with move-review.js's logistic, so callers can rank
+ * misses by how much they mattered rather than by raw centipawns.
  *
  * Pure: no I/O, no engine, no DOM. Server-side only (routes-review.js).
  */
@@ -34,8 +37,12 @@ const MoveReview = require('./move-review.js');
 
 const MISS_SWING_CP = 150;
 const MISS_GIVEBACK_CP = 100;
-const MISS_TOLERANCE_CP = 50; // reply may end at most this much below the pre-gift eval
+const MISS_TOLERANCE_CP = 50;  // reply may end at most this much below the pre-gift eval
+const MISS_LOSING_CP = -200;   // a reply that leaves the player below this is a Blunder, not a Miss
+const CP_CLAMP = 2000;         // same bound as move-review.calculateWinProbability
 const MATE_CP = 10000;
+
+function clampCp(cp) { return Math.max(-CP_CLAMP, Math.min(CP_CLAMP, cp)); }
 const UCI_RE = /^[a-h][1-8][a-h][1-8][qrbn]?$/;
 
 function mateToCp(mate) {
@@ -126,10 +133,14 @@ function findMissedTactics(positions, evals, opts = {}) {
     const color = turnFromFen(pos.fen, i);
     if (onlyColor && color !== onlyColor) continue;
     const sign = color === 'white' ? 1 : -1;
-    const swingCp = sign * (at.cp - before.cp);
-    const giveBackCp = sign * (at.cp - after.cp);
+    const pBefore = sign * clampCp(before.cp); // player's view, clamped
+    const pAt = sign * clampCp(at.cp);
+    const pAfter = sign * clampCp(after.cp);
+    const swingCp = pAt - pBefore;
+    const giveBackCp = pAt - pAfter;
     if (swingCp < swingMin || giveBackCp < giveBackMin) continue;
-    if (sign * (after.cp - before.cp) < -MISS_TOLERANCE_CP) continue; // worse than before the gift → Blunder, not Miss
+    if (pAfter < pBefore - MISS_TOLERANCE_CP) continue; // worse than before the gift → Blunder, not Miss
+    if (pAfter < MISS_LOSING_CP) continue;              // left in a losing position → Blunder, not Miss
     const isWhite = color === 'white';
     const giveBackWinProb = MoveReview.calculateDeltaWinProb(at.cp, after.cp, isWhite);
     const swingWinProb = MoveReview.calculateDeltaWinProb(before.cp, at.cp, !isWhite); // opponent's loss = our gain
@@ -161,5 +172,7 @@ module.exports = {
   MISS_SWING_CP,
   MISS_GIVEBACK_CP,
   MISS_TOLERANCE_CP,
+  MISS_LOSING_CP,
+  CP_CLAMP,
   MATE_CP
 };

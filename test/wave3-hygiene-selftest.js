@@ -313,9 +313,25 @@ async function sectionMissedTactics() {
   const kept = evals.slice(); kept[5] = { cp: 300, bestmove: 'x' };
   assert(missedTactics.findMissedTactics(positions, kept).length === 0, 'punishing the blunder (keeping the swing) is not a miss');
   // A full-blown blunder stays a blunder, not a miss.
-  const blunder = evals.slice(); blunder[5] = { cp: -600, bestmove: 'x' }; blunder[6] = { cp: -580, bestmove: 'x' }; // Black then keeps the win
+  const blunder = evals.slice(); blunder[5] = { cp: -600, bestmove: 'x' };
   const bl = missedTactics.findMissedTactics(positions, blunder);
-  assert(bl.length === 0, 'a reply that loses the game outright is a Blunder, not a Miss');
+  assert(!bl.some(m => m.ply === 5), 'a reply that loses the game outright (ply 5) is a Blunder, not a Miss');
+  assert(bl.length === 1 && bl[0].ply === 6 && bl[0].color === 'black', 'and Black failing to keep that gift (ply 6, back to level) is a Miss: ' + JSON.stringify(bl.map(m => m.ply)));
+  // Walking back into the mate the opponent had threatened (the live 1.e4 e5 2.Qh5 Nc6
+  // 3.Bc4 Nf6?? 4.Nc3?? d6?? game: Black could take the queen, instead allows Qxf7#) is a Blunder.
+  const mateBack = [
+    { cp: 30 }, { cp: 30 }, { cp: 30 }, { cp: -30 }, { cp: -30 }, { cp: -25 },
+    { cp: 9990, bestmove: 'h5f7' },   // after 3...Nf6?? White mates in 1
+    { cp: -952, bestmove: 'f6h5' },   // 4.Nc3?? hands Black the queen
+    { cp: 9990, bestmove: 'h5f7' }    // 4...d6?? allows the mate again
+  ];
+  const posN = Array.from({ length: 9 }, (_, i) => ({ fen: `p${i} ${i % 2 ? 'b' : 'w'}`, san: 'x', lastMove: { from: 'a1', to: 'a2' } }));
+  assert(missedTactics.findMissedTactics(posN, mateBack).length === 0, 'walking back into a lost position (allowing the mate) is a Blunder, not a Miss');
+  // A missed mate-in-1 in an otherwise level game IS a Miss, and the cp numbers are clamped.
+  const missedMate = mateBack.slice(); missedMate[7] = { cp: 40, bestmove: 'b1c3' }; missedMate[8] = { cp: 35 };
+  const mm = missedTactics.findMissedTactics(posN, missedMate);
+  assert(mm.length === 1 && mm[0].ply === 7 && mm[0].color === 'white' && mm[0].bestMove === 'h5f7', 'a missed mate-in-1 in a level game is a Miss: ' + JSON.stringify(mm.map(m => m.ply)));
+  assert(mm[0].swingCp === 2000 + 25 && mm[0].giveBackCp === 2000 - 40, `mate scores are clamped to ±2000 before the cp arithmetic (swing=${mm[0].swingCp} giveBack=${mm[0].giveBackCp})`);
   // move-review integration: applyMissLabels reclassifies the ply in a reviewGame() result.
   const MoveReview = require('../src/move-review.js');
   assert(MoveReview.CLASSIFICATIONS.MISS && MoveReview.CLASSIFICATIONS.MISS.key === 'miss', 'move-review exposes a Miss classification');
