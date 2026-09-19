@@ -1,46 +1,60 @@
-# Chess Game — Comprehensive File Inventory
+# Chess Game — File Inventory (by role)
 
-## Server Files
-- `engine.js` — Core chess engine, board representation, legal move generator, checkmate/stalemate detection, SAN/PGN builders, game-end presentation.
-- `rules-engine.js` — Adapter wrapping chess.js for FEN state projections, move validation, and draw rule evaluations.
-- `server.js` — HTTP API + static file server + SSE event stream (`/api/events`), security boundary, rate limiting, and player seat routing.
-- `referee-service.js` — Long-lived referee with serialized FIFO queue, monotonic revision tracking, event journaling, atomic snapshots, and crash recovery.
-- `seat-auth.js` — Cryptographic player seat manager (White, Black, Spectator session tokens) preventing move hijacking.
-- `game-archive.js` — Native Node.js `node:sqlite` resilient game database with fallback JSON storage, Seven Tag Roster PGN parsing, and export.
-- `referee-helper.cjs` — CLI referee wrapper for manual state inspection and move parsing.
+`ls src/` lists ~70 modules; this page groups them by role so you know where a change belongs. Every module's
+reachability (loaded / allowlisted / precached / called) is enforced by `test/reachability-selftest.js`.
 
-## Client Files (Served by server.js)
-- `index.html` — Semantic HTML5 grid layout, board container, evaluation bar, SVG annotation overlay, move history, opening explorer, evaluation graph, game review accuracy panel, and game archive library modal.
-- `ui.js` — Main client UI orchestrator: SSE push receiver, move tree scrubber, multi-premove chaining, board doodling, audio playback, haptics, seat management, and game archive browser.
-- `pieces.js` — Vector inline SVG chess pieces based on Colin M.L. Burnett's standard chess artwork.
-- `stockfish-worker.js` — Web Worker position evaluation engine with UCI protocol support, centipawn scoring, and Multi-PV candidate lines.
-- `move-review.js` — CAPS accuracy scoring engine and win-probability move classification (Brilliant, Great, Best, Excellent, Good, Inaccuracy, Mistake, Blunder).
-- `openings-db.js` — ECO chess openings database with win/draw rates, popular move recommendations, and interactive SVG advantage graph mathematics.
+## Server core (required from `server.js`, never shipped to the browser)
+| Module | Role |
+|---|---|
+| `server.js` | HTTP API, SSE, static allowlist (`ALLOWED_FILES`), CSP/HSTS/CORS, gzip + ETag, rate limiting, auth routes, room router, idle-room GC, admin routes |
+| `src/referee-service.js` | authoritative per-room game state: FIFO command queue, journal + snapshot, per-ply positions, claimable draws, room inspection/deletion for GC |
+| `src/rules-engine.js`, `src/engine.js` | chess.js adapter (legality, FEN, SAN, automatic vs claimable draws) and in-house move generator/PGN builder |
+| `src/seat-auth.js` | seat tokens per room; claims may carry the signed-in account |
+| `src/bot-service.js`, `src/engine-server.js` | Play-vs-Computer ladder over Stockfish in a worker thread; TSV opening book for L1–L4; PST fallback |
+| `src/accounts.js` | scrypt accounts, sessions, Google Identity verification |
+| `src/game-archive.js` | SQLite archive: games (owner/source/external id), eval cache, puzzles + attempts, puzzle ratings/reviews, rating pools, rate limits, imports |
+| `src/social-store.js`, `src/leagues-store.js` | social graph, arenas, activity days, streaks, achievements; league weeks/divisions |
+| `src/rating-hook.js` | game-over fan-out: rates human-vs-human games, notifies streaks/leagues/insights |
 
-## Self-Test & Quality Assurance Suites
-- `engine-selftest.js` — 159 engine & referee unit/integration verification tests.
-- `pieces-selftest.js` — 32 SVG vector piece rendering and color/type validation tests.
-- `security-selftest.js` — 58 path traversal, strict CORS, body limits, and header security tests.
-- `draw-selftest.js` — 30 draw claim and repetition rule policy tests.
-- `gate3-selftest.js` — 114 referee command queue, revision, and elapsed clock tests.
-- `gate4-selftest.js` — 43 ARIA grid, keyboard navigation, modal focus traps, and UX tests.
-- `gate5-selftest.js` — 9 Stockfish evaluation worker and API rate limiting tests.
-- `differential-selftest.js` — 200 random game differential perft test against chess.js (37,800+ plies).
-- `p1-audio-selftest.js` — Web Audio API soundpack and mobile haptics tests.
-- `p1-premove-selftest.js` — Multi-premove chaining queue and turn execution tests.
-- `p1-annotations-selftest.js` — Right-click annotation canvas (colored arrows & circles) tests.
-- `p1-scrubber-selftest.js` — Move tree scrubber, keyboard arrow navigation, and history jump tests.
-- `p2-stockfish-selftest.js` — Stockfish WASM Web Worker UCI protocol and Multi-PV tests.
-- `p2-multipv-selftest.js` — Multi-PV candidate evaluation arrows and breakdown panel tests.
-- `p2-review-selftest.js` — Win probability, CAPS accuracy, move classification, and review panel DOM tests.
-- `p2-opening-selftest.js` — ECO opening database lookups and SVG evaluation graph tests.
-- `p3-seat-selftest.js` — Cryptographic player seat tokens, 409 conflict, and 403 move rejection tests.
-- `p3-lag-selftest.js` — NTP-style latency tracking and move transit clock lag compensation tests.
-- `p3-multiroom-selftest.js` — Multi-tenant room isolation, dynamic routing (/game/:id), and isolated SSE broadcast tests.
-- `p3-sqlite-selftest.js` — SQLite database CRUD, PGN import/export, and API route tests.
+## Route modules (`handleXRoute(req, res, urlPath, ctx) → boolean`, one hook line each in `server.js`)
+`routes-puzzles.js` (`/api/puzzle/*`) · `routes-social.js` (`/api/lobby|leaderboard|arena|social/*`) ·
+`routes-openings.js` (`/api/openings/*`, `/api/fen/validate`) · `routes-library.js` (`/api/library`, `/api/import/*`) ·
+`routes-retention.js` (`/api/streak`, `/api/activity`, `/api/achievements`) · `routes-insights.js` (`/api/insights`, `/api/league`) ·
+`routes-review.js` (`/api/games/:id/missed-tactics`, `POST /api/review/missed-tactics`).
 
-## Runtime Artifacts
-- `.referee-state.json` — Atomic referee game state snapshot.
-- `.referee-journal.jsonl` — Append-only journal of game events for crash recovery.
-- `games.db` — SQLite database for persistent game archive and PGN history.
-- `.worktrees/` — Isolated git worktrees for concurrent feature development.
+## Server-side feature libraries (pure logic, injected stores; each has a selftest)
+`rating.js` (Glicko-2) · `ratings-pool.js` · `lobby.js` · `arena.js` · `social-graph.js` · `streaks.js` ·
+`achievements.js` · `leagues.js` · `insights.js` · `puzzle-service.js` · `puzzle-rating.js` · `puzzle-storm.js` ·
+`daily-puzzle.js` · `puzzle-repetition.js` · `openings-explorer.js` (TSV index) · `import-external.js` ·
+`missed-tactics.js` · `time-control.js` · `fen-setup.js`.
+
+## Client shell and views (plain `<script>` tags in `index.html`, `shell.js` before `ui.js`)
+| Module | Role |
+|---|---|
+| `src/shell.js` | hash router, nav, view registry (`Shell.registerView`), Home onboarding |
+| `src/ui.js` | Play view orchestrator: SSE + backoff polling, diff-rendered board, drag, scrubber, premoves, seats/bot config, draw UI, Game Review |
+| `ui-sound.js`, `ui-theme.js`, `ui-annotations.js`, `ui-archive.js`, `ui-auth.js`, `ui-settings.js`, `ui-retention.js` | Play/header helpers: audio, themes, arrows, archive modal + auto-save, sign-in, Settings view, streak badge + achievements panel |
+| `ui-puzzles.js`, `ui-analysis.js`, `ui-library.js`, `ui-insights.js`, `ui-compete.js`, `ui-profile.js` | feature views (`#/puzzles`, `#/analysis`, `#/library`, `#/insights`, `#/compete`, `#/me`); each owns its own DOM and board, never `#board` |
+| `stockfish-worker.js` | analysis Web Worker: nested Stockfish 19 Worker, PST fallback, MultiPV, engine-ready reporting |
+| `sw-register.js`, `service-worker.js`, `manifest.webmanifest` | PWA registration (external file so CSP has no inline scripts), precache of the shell, never `/api/*` |
+
+## Client analysis/display libraries (also loaded by `index.html`)
+`pieces.js` (cburnett SVG) · `move-review.js` (CAPS accuracy, classifications incl. Miss, mistake puzzles) ·
+`ai-coach.js` · `game-report.js` · `accessibility-voice.js` · `a11y-text-entry.js` · `a11y-gestures.js` ·
+`voice-intents.js` · `openings-db.js` (names/ECO only) · `masters-db.js` (book membership) · `eval-graph.js` ·
+`acpl.js` · `tablebase.js` · `pov-export.js` · `embed-viewer.js`.
+
+## Still dark (shipped or present but not yet wired — listed in `KNOWN_DARK`)
+`chess960.js`, `variants.js`, `chat-upgrades.js`, `correspondence.js`, `personality-bots.js`, `i18n.js`,
+`puzzle-racer.js`, `study-tree.js`, `fen-setup.js`, and the browser copies of `game-archive.js` / `time-control.js`.
+
+## Data, vendor, scripts, tests
+- `data/openings.tsv`, `data/puzzles-sample.csv` (+ READMEs with provenance/licence)
+- `vendor/stockfish/` — engine loader + WASM + `Copying.txt` + upgrade notes
+- `scripts/smoke-test.mjs`, `scripts/test-ui-features.mjs` (Playwright), `scripts/engine-probe.js`, `scripts/import-puzzles.mjs`, `scripts/kanban-sync.mjs`
+- `test/*-selftest.js` — one standalone script per area; `wave0`–`wave3` suites cover the audited work; `reachability` and `t0-deadcode` are the structural guards
+
+## Runtime artifacts (gitignored)
+`.referee-state.json` / `.referee-journal.jsonl` (default room) and `.referee-state-<room>.json` /
+`.referee-journal-<room>.jsonl` per personal room (garbage-collected when idle), `src/games.db`,
+`src/accounts.db`, `social.db`, `leagues.db`, `.claude/worktrees/` (agent worktrees).

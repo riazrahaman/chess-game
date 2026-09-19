@@ -36,15 +36,19 @@ Long-lived referee service
   ├─ Versioned public-state projector + event journaler
   └─ Atomic snapshot + previous-snapshot fallback
 
-Optional workers
-  ├─ Stockfish analysis / bot (Web Worker, UCI adapter)
-  └─ PGN import/export validation worker
+Engines (vendored Stockfish 19 lite WASM, GPL-3.0)
+  ├─ Browser: analysis Web Worker (MultiPV d16, PST heuristic fallback) — display only
+  └─ Node: engine-server.js worker thread — bots (Skill / UCI_Elo), missed tactics, Insights evals
+
+Site shell (hash router) → views: Home · Play · Analysis · Puzzles · Library · Insights · Compete · Profile · Settings
+Route modules → /api/puzzle · lobby/leaderboard/arena/social · library/import · streak/achievements · insights/league · review · openings
 ```
 
 ## UI design direction
 - Warm neutral field, high-contrast board, tabular numerals for clocks, one status accent.
 - Wide screen: two-column composition (board + game rail). Narrow screen: active player/clock nearest the board.
-- Minimum 24×24px touch target; preserve focus across reconciliation and orientation changes.
+- Minimum 44×44px touch target on phones (Wave 2 audit); preserve focus across reconciliation and orientation changes.
+- One primary action per screen; engine assistance is opt-in (Assist drawer) and never shown at the starting position by default.
 
 # Sources & references
 [FIDE Laws of Chess 2023](https://handbook.fide.com/chapter/e012023); [chess.js API docs](https://github.com/jhlywa/chess.js/blob/master/website/docs/index.md); [cm-chessboard (MIT)](https://github.com/shaack/cm-chessboard)
