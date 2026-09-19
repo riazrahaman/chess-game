@@ -367,11 +367,43 @@ async function testUiFeatures() {
   }
   console.log('✔ Passed: Analysis view renders with missed-tactics panel');
 
+  // 11. Test Coordinates View (#/coordinates)
+  console.log('Testing Coordinates trainer view...');
+  await page.evaluate(() => window.Shell && window.Shell.navigate('coordinates'));
+  await page.waitForTimeout(500);
+  const coordsVisible = await page.evaluate(() => {
+    const sec = document.querySelector('[data-view="coordinates"]');
+    return sec && !sec.hidden;
+  });
+  if (!coordsVisible) throw new Error('Coordinates view section not visible after navigation');
+
+  const squaresCount = await page.locator('[id="coords-board"] .coords-square').count();
+  if (squaresCount !== 64) throw new Error(`Expected 64 squares on coords board, got ${squaresCount}`);
+
+  // Start round
+  await page.locator('[id="coords-action-btn"]').click();
+  await page.waitForTimeout(300);
+
+  const targetText = (await page.locator('[id="coords-target-display"]').textContent()).trim().toLowerCase();
+  if (!targetText || targetText.length !== 2) throw new Error(`Expected 2-char target square, got: ${targetText}`);
+
+  // Click target square
+  await page.locator(`.coords-square[data-square="${targetText}"]`).click();
+  await page.waitForTimeout(300);
+
+  const scoreText = (await page.locator('[id="coords-score-display"]').textContent()).trim();
+  if (scoreText !== '1') throw new Error(`Expected score 1 after correct click, got: ${scoreText}`);
+
+  // Stop round
+  await page.locator('[id="coords-action-btn"]').click();
+  await page.waitForTimeout(300);
+  console.log('✔ Passed: Coordinates trainer renders 64 squares, starts timed sprint, and scores clicks');
+
   // Return to Play view for cleanup
   await page.evaluate(() => window.Shell && window.Shell.navigate('play'));
   await page.waitForTimeout(300);
 
-  // 11. Check console errors
+  // 12. Check console errors
   if (consoleErrors.length > 0) {
     console.error('Failed HTTP responses seen:\n' + failedResponses.join('\n'));
     throw new Error('Console errors occurred during test:\n' + consoleErrors.join('\n'));
