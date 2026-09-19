@@ -63,6 +63,8 @@ const SETTINGS_GROUPS = [
       ['V', 'Voice announcements'],
       ['B', 'Blind mode'],
       ['M', 'Microphone: speak a move'],
+      ['F', 'Flip board'],
+      ['Z', 'Toggle Zen mode (distraction-free)'],
       ['Esc', 'Cancel selection / premove']
     ]
   }
