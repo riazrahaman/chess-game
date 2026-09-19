@@ -59,7 +59,7 @@
 **Why now:** After the game loop is production-decent, we add AI depth so players can train against an engine in-browser without network dependency.
 
 **Deliverables:**
-- Stockfish 17 WASM (Web Worker). FEN → best-move / analysis scores push to browser overlay.
+- Engine in a Web Worker. (Phases 5–8 shipped a PST heuristic labelled as Stockfish; the real, vendored Stockfish 19 arrived in Wave 1 — see below.)
 - Move accuracy labels: brilliant / best / good / inaccuracy / mistake / blunder mapped to Δeval threshold from Stockfish.
 - LLM move explainer (GPT-based or distilled) triggered on selected moves.
 - Auto post-game report (prose summary + key moments + PGN annotations).
@@ -77,7 +77,25 @@
 | 4     | Gate 4       | Playing experience (accessibility, UX)   | Completed ✅ |
 | 5     | Gate 5       | Stockfish worker + analysis arrows       | Completed ✅ |
 | 6     | Phase 1      | Web Audio soundpack, multi-premoves (1-5 plies), right-click doodling canvas, move tree scrubber | Completed ✅ |
-| 7     | Phase 2      | Stockfish 17 NNUE WASM, Multi-PV top-3 arrows, CAPS accuracy review & badges, ECO Opening Explorer & SVG graph | Completed ✅ |
+| 7     | Phase 2      | PST heuristic engine (mislabelled Stockfish 17 at the time), Multi-PV arrows, CAPS accuracy review, ECO explorer & SVG graph | Completed ✅ (superseded) |
 | 8     | Phase 3      | Cryptographic seat auth (anti-hijack), NTP latency lag compensation, multi-tenant room router (/game/:id), SQLite game archive & PGN library | Completed ✅ |
 
 All gates and roadmap phases pass their exit criteria across 12+ automated test suites with 0 regressions.
+
+## 2026-09 — Audit and Waves 0–3
+
+An independent audit (`docs/06-world-class-roadmap.md`) found that "Done" in the earlier roadmap often meant
+"module + selftest exist": 29 of 49 modules were unreachable, no engine binary shipped, zero puzzles were
+loaded, and the opening explorer rendered invented win-rates. The work since is organised in waves, each a
+feature branch merged to `main` only after the full check and both browser suites pass; per-wave status lives
+in `HANDOVER.md` §5–§8 and on the kanban board (`docs/kanban-tasks.json`).
+
+| Wave | Theme | Key deliverables |
+|---|---|---|
+| 0 | Bugs & truth | audit report; honest bot ratings; pre-game clock, hidden chat, draw-offer UI, poll backoff; `ui-auth.js` 404; gzip/ETag; referee-served per-ply positions (Gate 4 made concatenation-proof); FIDE claimable-draw policy; `reachability-selftest.js` |
+| 1 | Real engine | vendored Stockfish 19 lite WASM in the analysis Worker (d16 MultiPV) and in Node for bots (Skill/UCI_Elo ~800–2300); CSP `wasm-unsafe-eval`; engine proof test |
+| 2 | Site shell | hash-routed shell + Home onboarding; Play view slimmed + Settings; 8,861 CC0 puzzles with server-verified solving; rating on game end, lobby, leaderboards, arenas, social; Analysis view; lichess chess-openings TSV, fabricated stats deleted; SW no longer caches `/api` |
+| 3 | Retention | streaks with slack, achievements, weekly leagues, Insights, Library + lichess/Chess.com import, idle-room GC, `script-src` without `unsafe-inline`, Miss classification + retry loop |
+
+`KNOWN_DARK` went 30 → 11 across Waves 2–3. Next: Wave 4 (training depth — repertoire trainer, Maia-style
+human-like opponents, practice curriculum, endgames trainer).

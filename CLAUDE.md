@@ -15,7 +15,7 @@ server-side (bots). Deployed on Render at https://chess-game-0zax.onrender.com f
 npm install
 node server.js                        # http://127.0.0.1:39281  (CHESS_PORT=… or PORT=… to override)
 
-npm run check                         # lint + all unit suites  (~6 min; the differential suite replays 200 games)
+npm run check                         # lint + all ~60 unit suites (~7 min; the differential suite replays 200 games)
 npm run lint                          # node --check over server, client, and test files
 npm run test:unit                     # every wired *-selftest.js, serially
 npm run test:browser                  # Playwright: scripts/smoke-test.mjs + scripts/test-ui-features.mjs
@@ -84,7 +84,7 @@ server.js  ── HTTP + SSE + static allowlist (ALLOWED_FILES) + CSP/headers + 
 Route modules export `handleXRoute(req, res, urlPath, ctx) → boolean` and are called from one hook line each
 in `server.js` just before the `/api/` 404 fallthrough. Add new API families the same way.
 
-Client (`index.html` loads ~40 plain scripts, `shell.js` before `ui.js`):
+Client (`index.html` loads ~43 plain scripts, `shell.js` before `ui.js`):
 - `shell.js` — hash router. Views register with
   `Shell.registerView({id, title, order, nav, mount(el, params), show(el, params), hide(el)})`; sections are
   `<section data-view="…">` (the Play view is the existing `<main id="workspace" data-view="play">`). Routes:
@@ -119,6 +119,13 @@ A feature is done only when all four hold — this repo previously accumulated ~
 That list may only shrink. Datasets shipped in-repo must be small and openly licensed (`data/README*.md`
 records provenance): `data/openings.tsv` (lichess chess-openings, CC0) and `data/puzzles-sample.csv` (8,861
 lichess puzzles, CC0; `scripts/import-puzzles.mjs` streams the full dump).
+
+## Known gaps (as of Wave 3)
+
+`GET /api/games` is unscoped (owned/imported games visible to any visitor); `service-worker.js` `CACHE_NAME` is
+still `chess-ui-v1`; brilliant/tablebase achievement events can only be owner-verified once archived games carry
+real player names; `scripts/test-ui-features.mjs` lacks Puzzles/Library/Insights/Missed-tactics steps; still-dark
+modules are listed in `KNOWN_DARK`. Full list: `HANDOVER.md` §8.
 
 ## Where the plan lives
 

@@ -1,3 +1,8 @@
+> **Historical document (2026-09-14).** The audit of 2026-09-17 found that many "Done" marks below meant
+> "module + selftest exist", not "reachable with real data". The current plan, verified state and status
+> markers live in [`docs/06-world-class-roadmap.md`](docs/06-world-class-roadmap.md) and `HANDOVER.md`;
+> this file is kept as the baseline the audit was measured against and is no longer updated.
+
 # Chess Game — Improvement Recommendations
 
 *Updated 2026-09-14. Part 1 (Tiers 0–D) documents the shipped single-board client — all complete and
