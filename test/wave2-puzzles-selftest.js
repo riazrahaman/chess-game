@@ -112,9 +112,25 @@ async function run() {
     assert(fs.existsSync(path.join(ROOT, 'scripts', 'import-puzzles.mjs')), 'scripts/import-puzzles.mjs missing');
   });
 
-  await test('puzzle-service imports the sample into the SQLite puzzles table (store-backed API)', async () => {
+  const hasSqlite = (() => {
+    if (process.env.CHESS_ARCHIVE_FORCE_JSON === '1') return false;
+    try {
+      const { DatabaseSync } = require('node:sqlite');
+      return typeof DatabaseSync === 'function';
+    } catch (_) {
+      return false;
+    }
+  })();
+
+  await test('puzzle-service imports the sample into the puzzles store (store-backed API)', async () => {
     const archive = gameArchive.getArchive();
-    assert.strictEqual(archive.backendType, 'sqlite', 'expected node:sqlite backend');
+    assert.strictEqual(
+      archive.backendType,
+      hasSqlite ? 'sqlite' : 'json',
+      hasSqlite
+        ? 'expected node:sqlite backend'
+        : 'expected JSON fallback when node:sqlite is unavailable (Node < 22.5)'
+    );
     PuzzleService.setStore(gameArchive);
     assert.strictEqual(PuzzleService.puzzleCount(), 0);
     const { imported, skipped } = PuzzleService.importCsvIntoStore(csvPath);
