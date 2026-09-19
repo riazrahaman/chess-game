@@ -75,7 +75,11 @@ function resetInsightsState() {
 function onRatedGame(event) {
   try {
     if (!event || event.rated !== true) return null;
-    return getLeague().onRatedGame(event);
+    const lg = getLeague();
+    // Close any finished week first so a promoted player enrols in the new
+    // week's division at their new tier, even before anyone opens /api/league.
+    try { lg.autoClose(); } catch (_) { /* fall through to scoring */ }
+    return lg.onRatedGame(event);
   } catch (_) {
     return null; // observers never break the referee
   }
