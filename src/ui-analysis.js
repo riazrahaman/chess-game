@@ -18,7 +18,13 @@
 //   * tablebase: window.Tablebase (lichess Syzygy, ≤ 7 pieces; offline → "n/a").
 //   * ACPL / phase accuracy: window.Acpl over the evals this view collected.
 //   * exports: window.PovExport (annotated PGN + summary-card SVG) and
-//     window.EmbedViewer (FEN→SVG + iframe snippet).
+//     window.EmbedViewer (FEN→SVG + iframe embed snippet).
+//   * missed tactics (Wave 3, N1.3): `GET /api/games/:id/missed-tactics` for an
+//     archived game or `POST /api/review/missed-tactics {moves}` for the room
+//     game — server-side Stockfish + missed-tactics.js. "Retry" puts the
+//     analysis board on the position before the Miss, hides the engine, and
+//     compares the user's two-click attempt with the best move. The attempt is
+//     display-only: it is never sent to the referee.
 //
 // Gate 4: display only. This file never mutates game state, never replays moves
 // client-side, and never posts to a referee command endpoint.
@@ -59,6 +65,9 @@
     personalCache: new Map(),
     tbCache: new Map(),
     pendingFen: null,
+    gameId: null,           // archive id when source === 'archive'
+    missed: null,           // { misses:[], engine, plies } from the review route
+    retry: null,            // { miss, from, attempts, solved, revealed } while retrying a Miss
     el: null,
     mounted: false
   };
@@ -147,6 +156,16 @@
     .an-actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .an-mono { font-family: ui-monospace, Menlo, monospace; font-size: 0.8rem; word-break: break-all; }
     .an-muted { color: var(--muted, #666); font-size: 0.8rem; }
+    .an-board .an-sel { box-shadow: inset 0 0 0 3px rgba(255, 119, 105, 0.9); }
+    .an-board .an-reveal { box-shadow: inset 0 0 0 3px rgba(22, 163, 74, 0.85); }
+    .an-board.an-retry .square { cursor: pointer; }
+    .an-moves button.an-miss { text-decoration: underline wavy #ff7769; }
+    .an-misses { list-style: none; margin: 0; padding: 0; font-size: 0.85rem; }
+    .an-misses li { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 4px 0; border-top: 1px solid var(--panel-row-border, #eee); }
+    .an-misses li:first-child { border-top: 0; }
+    .an-misses .an-miss-tag { color: #ff7769; font-weight: 700; }
+    .an-retry-box { margin-top: 8px; padding: 8px; border: 1px dashed #ff7769; border-radius: 6px; }
+    .an-retry-box.an-solved { border-color: #16a34a; }
   `;
 
   function buildMarkup() {
@@ -199,6 +218,15 @@
               <h3>Accuracy <span class="an-sub" data-an="acpl-sub">from this view's engine evals</span></h3>
               <div data-an="acpl" class="an-muted">Run "Analyse all plies" to compute ACPL and phase accuracy.</div>
             </section>
+            <section class="an-panel" aria-label="Missed tactics">
+              <h3>Missed tactics <span class="an-sub" data-an="missed-sub">opponent blunders you did not punish</span></h3>
+              <div class="an-actions">
+                <button type="button" data-an="missed-load">Find missed tactics</button>
+                <span class="an-muted" data-an="missed-label"></span>
+              </div>
+              <ul class="an-misses" data-an="missed-list"><li class="an-muted">Load a game, then "Find missed tactics". Server engine, depth 12; a Miss = the opponent handed you ≥ 1.5 pawns and your reply gave ≥ 1 pawn back.</li></ul>
+              <div class="an-retry-box hidden" data-an="retry-box" aria-live="polite"></div>
+            </section>
             <section class="an-panel" aria-label="Export">
               <h3>Export</h3>
               <div class="an-actions">
@@ -222,8 +250,11 @@
     const fen = currentFen();
     const arr = window.EmbedViewer ? window.EmbedViewer.fenBoardToArray(fen.split(/\s+/)[0]) : [];
     const last = state.positions[state.ply] && state.positions[state.ply].lastMove;
-    const best = state.lines[0] && state.lines[0].move;
+    const retry = state.retry && state.retry.miss && state.ply === state.retry.miss.ply - 1 ? state.retry : null;
+    const best = !retry && state.lines[0] && state.lines[0].move; // hidden while retrying a Miss
+    const reveal = retry && (retry.revealed || retry.solved) ? String(retry.miss.bestMove || '') : '';
     const markup = typeof pieceSvgMarkup === 'function' ? pieceSvgMarkup : null;
+    board.classList.toggle('an-retry', !!retry && !retry.solved);
     let html = '';
     for (let i = 0; i < 64; i++) {
       const r = Math.floor(i / 8), c = i % 8;
@@ -232,6 +263,8 @@
       const cls = ['square', light ? 'white-sq' : 'black-sq'];
       if (last && (last.from === sq || last.to === sq)) cls.push('an-last');
       if (best && (best.slice(0, 2) === sq || best.slice(2, 4) === sq)) cls.push('an-best');
+      if (retry && retry.from === sq) cls.push('an-sel');
+      if (reveal && (reveal.slice(0, 2) === sq || reveal.slice(2, 4) === sq)) cls.push('an-reveal');
       const p = arr[i];
       let piece = '';
       if (p && markup) piece = markup(p === p.toUpperCase() ? 'white' : 'black', p.toLowerCase());
@@ -251,7 +284,8 @@
     for (let i = 1; i < state.positions.length; i++) {
       if (i % 2 === 1) html += `<span class="an-num">${Math.ceil(i / 2)}.</span>`;
       const san = state.positions[i].san || state.uci[i - 1] || '?';
-      html += `<button type="button" data-an-ply="${i}" ${state.ply === i ? 'aria-current="true"' : ''}>${esc(san)}</button>`;
+      const isMiss = missSet().has(i);
+      html += `<button type="button" data-an-ply="${i}" class="${isMiss ? 'an-miss' : ''}" ${isMiss ? 'title="Miss"' : ''} ${state.ply === i ? 'aria-current="true"' : ''}>${esc(san)}${isMiss ? ' ✕' : ''}</button>`;
     }
     host.innerHTML = html;
     const range = $('[data-an="range"]');
@@ -298,6 +332,7 @@
       return; // batch mode shows the summary, not per-position lines
     }
     if (msg.fen !== currentFen()) return; // stale answer for a position we left
+    if (state.retry && !state.retry.solved && !state.retry.revealed && state.ply === state.retry.miss.ply - 1) return; // engine hidden during retry
     const lines = Array.isArray(msg.multipv) && msg.multipv.length ? msg.multipv : [{ pvIndex: 1, bestMove: msg.bestMove, scoreRaw: msg.eval, depth: msg.depth, mate: msg.mate, pv: msg.pv }];
     state.lines = lines.filter(Boolean).map((l, i) => ({
       idx: l.pvIndex || i + 1,
@@ -327,6 +362,10 @@
     const fen = currentFen();
     state.lines = [];
     const ul = $('[data-an="lines"]');
+    if (state.retry && !state.retry.solved && !state.retry.revealed && state.ply === state.retry.miss.ply - 1) {
+      if (ul) ul.innerHTML = '<li class="an-muted">Engine hidden while you retry the missed tactic.</li>';
+      return;
+    }
     if (ul) ul.innerHTML = '<li class="an-muted">Thinking…</li>';
     state.worker.postMessage(positionRequest(fen, ENGINE_DEPTH));
   }
@@ -515,6 +554,143 @@
     setStatus('Position SVG exported.');
   }
 
+  // ---------------------------------------------------------------- missed tactics (Wave 3, N1.3)
+  function missSet() {
+    const set = new Set();
+    if (state.missed && Array.isArray(state.missed.misses)) for (const m of state.missed.misses) set.add(m.ply);
+    return set;
+  }
+  function colorLabel(c) { return c === 'white' ? 'White' : 'Black'; }
+  function uciToText(uci) { return uci ? uci.slice(0, 2) + '→' + uci.slice(2, 4) + (uci[4] ? '=' + uci[4].toUpperCase() : '') : '?'; }
+
+  function loadMissed() {
+    const label = $('[data-an="missed-label"]');
+    if (!state.source || state.source === 'fen' || state.uci.length < 3) {
+      if (label) label.textContent = 'Load a game with moves first (a bare FEN has no history).';
+      return Promise.resolve();
+    }
+    if (label) label.textContent = 'Asking the server engine…';
+    const btn = $('[data-an="missed-load"]');
+    if (btn) btn.disabled = true;
+    const req = state.source === 'archive' && state.gameId
+      ? fetchJson('/api/games/' + encodeURIComponent(state.gameId) + '/missed-tactics')
+      : fetchJson('/api/review/missed-tactics', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ moves: state.uci }) });
+    return req.then(r => {
+      if (!r.body || !r.body.ok) throw new Error((r.body && r.body.error) || ('HTTP ' + r.status));
+      state.missed = { misses: r.body.misses || [], engine: r.body.engine, plies: r.body.plies, evaluated: r.body.evaluated, cached: r.body.cached };
+      state.retry = null;
+      if (label) label.textContent = r.body.engine ? `${r.body.engine} · depth ${r.body.depth} · ${r.body.cached} cached / ${r.body.evaluated} new` : 'Server engine unavailable — nothing evaluated.';
+      renderMissed();
+      renderMoves();
+      renderBoard();
+    }).catch(err => {
+      if (label) label.textContent = 'Could not compute missed tactics: ' + err.message;
+    }).then(() => { if (btn) btn.disabled = false; });
+  }
+
+  function renderMissed() {
+    const ul = $('[data-an="missed-list"]');
+    if (!ul) return;
+    if (!state.missed) {
+      ul.innerHTML = '<li class="an-muted">Load a game, then "Find missed tactics". Server engine, depth 12; a Miss = the opponent handed you ≥ 1.5 pawns and your reply gave ≥ 1 pawn back.</li>';
+      renderRetryBox();
+      return;
+    }
+    const list = state.missed.misses;
+    if (!list.length) {
+      ul.innerHTML = `<li class="an-muted" data-an="missed-empty">No missed tactics in this game (${state.missed.plies} plies checked${state.missed.engine ? '' : ' — engine unavailable'}).</li>`;
+      renderRetryBox();
+      return;
+    }
+    ul.innerHTML = list.map((m, i) => `
+      <li data-an-miss="${i}">
+        <span class="an-miss-tag" title="Miss">✕</span>
+        <span>Ply ${m.ply} · ${colorLabel(m.color)} played <strong>${esc(m.playedSan || uciToText(m.playedMove))}</strong></span>
+        <span class="an-muted">swing +${(m.swingCp / 100).toFixed(1)} · gave back ${(m.giveBackCp / 100).toFixed(1)} (${esc(m.theme || 'tactic')})</span>
+        <button type="button" data-an="missed-retry" data-idx="${i}">Retry</button>
+      </li>`).join('');
+    renderRetryBox();
+  }
+
+  function startRetry(idx) {
+    const miss = state.missed && state.missed.misses[idx];
+    if (!miss) return;
+    state.retry = { miss, from: null, attempts: 0, solved: false, revealed: false, message: `${colorLabel(miss.color)} to move. Find the move ${colorLabel(miss.color)} missed — click a piece, then its destination.` };
+    goTo(miss.ply - 1);
+    renderRetryBox();
+  }
+
+  function retryActiveHere() {
+    return state.retry && state.ply === state.retry.miss.ply - 1;
+  }
+
+  // Display-only: the attempted move is compared with the engine's best move
+  // and never sent anywhere (Gate 4).
+  function onRetrySquare(sq) {
+    const retry = state.retry;
+    if (!retry || retry.solved || !retryActiveHere()) return;
+    const fen = currentFen();
+    const piece = fenPieceAt(fen, sq);
+    const mover = fenTurn(fen);
+    const own = piece && ((mover === 'white' && piece === piece.toUpperCase()) || (mover === 'black' && piece === piece.toLowerCase()));
+    if (!retry.from) {
+      if (!own) { retry.message = 'Pick one of your own pieces first.'; renderRetryBox(); return; }
+      retry.from = sq;
+      renderBoard(); renderRetryBox();
+      return;
+    }
+    if (own && sq !== retry.from) { retry.from = sq; renderBoard(); renderRetryBox(); return; }
+    if (sq === retry.from) { retry.from = null; renderBoard(); renderRetryBox(); return; }
+    const attempt = retry.from + sq;
+    retry.from = null;
+    retry.attempts++;
+    const best = String(retry.miss.bestMove || '');
+    if (best && best.slice(0, 4) === attempt) {
+      retry.solved = true;
+      retry.message = `Correct — ${uciToText(best)} was the move you missed. (${retry.attempts} attempt${retry.attempts === 1 ? '' : 's'})`;
+      renderBoard(); renderRetryBox(); requestEval();
+      return;
+    }
+    retry.message = `${uciToText(attempt)} is not it${attempt === (retry.miss.playedMove || '').slice(0, 4) ? ' — that is what you played in the game' : ''}. Try again or reveal.`;
+    renderBoard(); renderRetryBox();
+  }
+
+  function revealRetry() {
+    if (!state.retry) return;
+    state.retry.revealed = true;
+    state.retry.message = `Best was ${uciToText(state.retry.miss.bestMove)} (engine). You played ${esc(state.retry.miss.playedSan || uciToText(state.retry.miss.playedMove))}.`;
+    renderBoard(); renderRetryBox(); requestEval();
+  }
+
+  function exitRetry() {
+    state.retry = null;
+    renderBoard(); renderRetryBox(); requestEval();
+  }
+
+  function renderRetryBox() {
+    const box = $('[data-an="retry-box"]');
+    if (!box) return;
+    const retry = state.retry;
+    if (!retry) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    box.classList.remove('hidden');
+    box.classList.toggle('an-solved', !!retry.solved);
+    const m = retry.miss;
+    box.innerHTML = `
+      <div><strong>Retry ply ${m.ply}</strong> · ${colorLabel(m.color)} to move${retryActiveHere() ? '' : ' · <button type="button" data-an="missed-back">back to the position</button>'}</div>
+      <div data-an="retry-message" style="margin:4px 0">${retry.message}</div>
+      <div class="an-actions">
+        ${retry.solved || retry.revealed ? '' : '<button type="button" data-an="missed-reveal">Reveal best move</button>'}
+        <button type="button" data-an="missed-exit">Done</button>
+      </div>`;
+  }
+
+  function fenPieceAt(fen, sq) {
+    const arr = window.EmbedViewer ? window.EmbedViewer.fenBoardToArray(String(fen).split(/\s+/)[0]) : [];
+    const file = FILES.indexOf(sq[0]);
+    const rank = 8 - Number(sq[1]);
+    return arr[rank * 8 + file] || null;
+  }
+
   // ---------------------------------------------------------------- loading
   function setGame(g) {
     state.source = g.source;
@@ -524,6 +700,9 @@
     state.tags = g.tags || {};
     state.result = g.result || '*';
     state.evals = []; state.evalDepth = []; state.lines = [];
+    state.gameId = g.gameId || null;
+    state.missed = null; state.retry = null;
+    renderMissed();
     state.ply = typeof g.ply === 'number' ? Math.max(0, Math.min(g.ply, state.positions.length - 1)) : state.positions.length - 1;
     setStatus(g.label || '');
     const acpl = $('[data-an="acpl"]');
@@ -572,7 +751,8 @@
         positions: g.positions,
         uci: uciFromPositions(g.positions, g.moves),
         tags: { Event: 'Archived game', White: g.white, Black: g.black, Date: g.date, Result: g.result || '*', ECO: g.eco || '' },
-        result: g.result || '*'
+        result: g.result || '*',
+        gameId: g.id
       });
       const input = $('[data-an="archive-id"]');
       if (input) input.value = g.id;
@@ -600,6 +780,7 @@
     renderOpening();
     renderTablebase();
     renderAccuracy();
+    renderRetryBox();
     requestEval();
   }
 
@@ -607,8 +788,9 @@
   function bind() {
     const el = state.el;
     el.addEventListener('click', ev => {
-      const t = ev.target.closest('[data-an], [data-an-ply]');
+      const t = ev.target.closest('[data-an], [data-an-ply], [data-an-square]');
       if (!t) return;
+      if (t.hasAttribute('data-an-square')) { onRetrySquare(t.getAttribute('data-an-square')); return; }
       if (t.hasAttribute('data-an-ply')) { goTo(Number(t.getAttribute('data-an-ply'))); return; }
       switch (t.getAttribute('data-an')) {
         case 'load-room': loadRoom(); break;
@@ -624,6 +806,11 @@
         case 'export-card': exportCard(); break;
         case 'export-embed': exportEmbed(); break;
         case 'export-svg': exportSvg(); break;
+        case 'missed-load': loadMissed(); break;
+        case 'missed-retry': startRetry(Number(t.getAttribute('data-idx'))); break;
+        case 'missed-reveal': revealRetry(); break;
+        case 'missed-back': if (state.retry) goTo(state.retry.miss.ply - 1); break;
+        case 'missed-exit': exitRetry(); break;
         default: break;
       }
     });
@@ -676,5 +863,5 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', register);
   else register();
 
-  window.UiAnalysis = { view, state, goTo, loadRoom, loadArchive, loadFen };
+  window.UiAnalysis = { view, state, goTo, loadRoom, loadArchive, loadFen, loadMissed, startRetry };
 })();

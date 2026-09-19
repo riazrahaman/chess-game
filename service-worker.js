@@ -49,6 +49,7 @@ const PRECACHE_ASSETS = [
   '/src/ui-retention.js',
   '/src/ui-insights.js',
   '/src/ui.js',
+  '/src/sw-register.js',
   '/manifest.webmanifest',
   '/assets/icon.svg'
 ];

@@ -64,6 +64,8 @@ async function run() {
     const scriptSrc = directive('script-src');
     assert(scriptSrc.includes("'wasm-unsafe-eval'"), "CSP script-src allows 'wasm-unsafe-eval' (D4)");
     assert(!scriptSrc.includes("'unsafe-eval'"), "CSP script-src no longer contains 'unsafe-eval' (D4)");
+    assert(!scriptSrc.includes("'unsafe-inline'"), "CSP script-src no longer contains 'unsafe-inline' (D4, Wave 3: SW registration externalised)");
+    assert(directive('style-src').includes("'unsafe-inline'"), "CSP style-src keeps 'unsafe-inline' (inline <style> + style= attributes remain)");
     assert(directive('worker-src').includes("'self'") && directive('worker-src').includes('blob:'),
       "CSP worker-src keeps 'self' blob:");
     assert(directive('connect-src').includes('https://tablebase.lichess.ovh'),

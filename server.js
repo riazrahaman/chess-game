@@ -289,6 +289,244 @@ function handleSSEEndpoint(req, res, roomId = 'default') {
   req.on('error', () => removeRoomSSEClient(roomId, client));
 }
 
+// ---------------------------------------------------------------------------
+// Wave 3 (w3-room-file-gc): auto-room retention / GC.
+//
+// Every `/game/<room>` visitor gets a personal room = two files in the state
+// dir + an in-memory RefereeService. Without a collector they accumulate
+// forever. A room is collectable when ALL of:
+//   * it is not the default room;
+//   * it has been idle (no API request for that room, no referee command, no
+//     snapshot write) for >= CHESS_ROOM_IDLE_MS (default 24 h);
+//   * it has no connected SSE client;
+//   * it has no live human seat lease (seat-auth; bot seats never expire and
+//     are in-memory only, so they do not pin a room) and no recent spectator;
+//   * its referee has no in-flight command;
+//   * the game is unstarted (0 plies) or finished (gameOver).
+// Finished games are archived first (unless a game with the same UCI move
+// string is already in the archive — the client auto-saves on game end), with
+// the same field set ui-archive.js POSTs to /api/games.
+// Cap: if more than CHESS_ROOM_MAX rooms exist (default 2000), the oldest
+// otherwise-collectable rooms are collected even below the idle threshold
+// (never below CHESS_ROOM_MIN_IDLE_MS, default 60 s) until the cap holds.
+// Runs at boot and every CHESS_ROOM_GC_INTERVAL_MS (default 1 h) — only when
+// server.js is the entrypoint; CHESS_ROOM_GC=0 disables the scheduler.
+// Operators: GET /api/admin/rooms and POST /api/admin/rooms/gc (X-Admin-Token
+// must equal CHESS_ADMIN_TOKEN; both routes are 404 when it is unset).
+// ---------------------------------------------------------------------------
+function envInt(name, dflt, min) {
+  const n = Number(process.env[name]);
+  if (!Number.isFinite(n) || n < min) return dflt;
+  return Math.floor(n);
+}
+
+const ROOM_GC_CONFIG = {
+  idleMs: envInt('CHESS_ROOM_IDLE_MS', 24 * 60 * 60 * 1000, 1000),
+  intervalMs: envInt('CHESS_ROOM_GC_INTERVAL_MS', 60 * 60 * 1000, 1000),
+  maxRooms: envInt('CHESS_ROOM_MAX', 2000, 1),
+  minIdleMs: envInt('CHESS_ROOM_MIN_IDLE_MS', 60 * 1000, 0),
+  enabled: process.env.CHESS_ROOM_GC !== '0'
+};
+
+// roomId -> last time any API request named this room (polling counts).
+const roomLastSeen = new Map();
+function touchRoom(roomId) {
+  if (roomId && roomId !== 'default') roomLastSeen.set(roomId, Date.now());
+}
+
+function roomSeatSummary(roomId) {
+  const seats = seatAuthManager.rooms.get(roomId);
+  if (!seats) return { white: null, black: null, spectators: 0, liveHuman: false, liveSpectator: false };
+  const now = Date.now();
+  const view = seat => (seat ? { isBot: !!seat.isBot, expired: seatAuthManager._isExpired(seat), username: seat.username || null } : null);
+  const w = view(seats.white);
+  const b = view(seats.black);
+  const liveHuman = !!((w && !w.isBot && !w.expired) || (b && !b.isBot && !b.expired));
+  let liveSpectator = false;
+  const spectatorTimeout = Number(process.env.CHESS_SEAT_TIMEOUT_MS) || 300000;
+  for (const lastSeen of seats.spectators.values()) {
+    if (now - lastSeen <= spectatorTimeout) { liveSpectator = true; break; }
+  }
+  return { white: w, black: b, spectators: seats.spectators.size, liveHuman, liveSpectator };
+}
+
+function describeRoom(roomId, now = Date.now()) {
+  const info = referee.inspectRoom(roomId);
+  const sseClients = roomSseClients.get(roomId) ? roomSseClients.get(roomId).size : 0;
+  const seats = roomSeatSummary(roomId);
+  const lastActivityMs = Math.max(info.lastActivityMs || 0, roomLastSeen.get(roomId) || 0);
+  const idleMs = lastActivityMs ? Math.max(0, now - lastActivityMs) : Infinity;
+  const bot = botService.getBotConfig(roomId);
+  const reasons = [];
+  if (roomId === 'default') reasons.push('default room');
+  if (sseClients > 0) reasons.push('sse clients');
+  if (seats.liveHuman) reasons.push('live seat');
+  if (seats.liveSpectator) reasons.push('live spectator');
+  if (info.pendingCommands > 0) reasons.push('command in flight');
+  if (info.plies > 0 && !info.gameOver) reasons.push('game in progress');
+  const eligible = reasons.length === 0;
+  return {
+    roomId,
+    exists: info.exists,
+    inMemory: info.inMemory,
+    plies: info.plies,
+    gameOver: info.gameOver,
+    status: info.status,
+    result: info.result,
+    lastActivityAt: lastActivityMs ? new Date(lastActivityMs).toISOString() : null,
+    idleMs: Number.isFinite(idleMs) ? idleMs : null,
+    sseClients,
+    seats: { white: seats.white, black: seats.black, spectators: seats.spectators },
+    bot: bot && bot.enabled ? { level: bot.level, color: bot.color } : null,
+    eligible,
+    collectable: eligible && Number.isFinite(idleMs) && idleMs >= ROOM_GC_CONFIG.idleMs,
+    blockedBy: reasons,
+    _info: info
+  };
+}
+
+function listRooms(now = Date.now()) {
+  return referee.listRoomIds().map(id => describeRoom(id, now));
+}
+
+function publicRoom(r) {
+  const out = Object.assign({}, r);
+  delete out._info;
+  return out;
+}
+
+function archiveRoomIfMissing(desc) {
+  const info = desc._info;
+  if (!info.gameOver || info.plies === 0) return { archived: false, reason: info.gameOver ? 'no moves' : 'not finished' };
+  const movesStr = info.history.join(' ');
+  try {
+    const hits = gameArchive.searchGames(movesStr, { limit: 20 });
+    if (Array.isArray(hits) && hits.some(g => g && String(g.moves || '').trim() === movesStr)) {
+      return { archived: false, reason: 'already archived' };
+    }
+  } catch (_) { /* archive lookup failed — fall through and save */ }
+  const record = referee.archiveRecordForRoom(info);
+  const saved = gameArchive.saveGame(record);
+  return { archived: true, id: saved && saved.id };
+}
+
+function collectRoom(desc) {
+  const roomId = desc.roomId;
+  const archive = archiveRoomIfMissing(desc);
+  stopStateWatcher(roomId);
+  roomSseLog.delete(roomId);
+  roomSseSeq.delete(roomId);
+  roomLastSeen.delete(roomId);
+  try { botService.setBotConfig(roomId, { enabled: false }); } catch (_) {}
+  try { botService.rooms.delete(roomId); } catch (_) {}
+  seatAuthManager.resetSeats(roomId);
+  const del = referee.deleteRoomFiles(roomId);
+  return { roomId, plies: desc.plies, gameOver: desc.gameOver, archived: archive.archived, archiveId: archive.id || null, archiveReason: archive.reason || null, removed: del.removed.length };
+}
+
+/**
+ * One GC sweep. Safe to call from the scheduler, the admin route, and tests.
+ * Never touches the default room.
+ * @param {{now?:number, idleMs?:number, maxRooms?:number, minIdleMs?:number, log?:boolean}} opts
+ */
+function gcRooms(opts = {}) {
+  const startedAt = Date.now();
+  const now = typeof opts.now === 'number' ? opts.now : startedAt;
+  const idleMs = typeof opts.idleMs === 'number' ? opts.idleMs : ROOM_GC_CONFIG.idleMs;
+  const maxRooms = typeof opts.maxRooms === 'number' ? opts.maxRooms : ROOM_GC_CONFIG.maxRooms;
+  const minIdleMs = typeof opts.minIdleMs === 'number' ? opts.minIdleMs : ROOM_GC_CONFIG.minIdleMs;
+  const rooms = listRooms(now).filter(r => r.roomId !== 'default');
+  const collected = [];
+  const errors = [];
+  const eligible = rooms.filter(r => r.eligible && r.idleMs !== null);
+  const pick = new Map();
+  for (const r of eligible) if (r.idleMs >= idleMs) pick.set(r.roomId, r);
+  // Cap: oldest eligible rooms first until the total fits under maxRooms.
+  let remaining = rooms.length - pick.size;
+  if (remaining > maxRooms) {
+    const extra = eligible.filter(r => !pick.has(r.roomId) && r.idleMs >= minIdleMs).sort((a, b) => b.idleMs - a.idleMs);
+    for (const r of extra) {
+      if (remaining <= maxRooms) break;
+      pick.set(r.roomId, r);
+      remaining--;
+    }
+  }
+  let archived = 0;
+  for (const r of pick.values()) {
+    try {
+      const c = collectRoom(r);
+      if (c.archived) archived++;
+      collected.push(c);
+    } catch (err) {
+      errors.push({ roomId: r.roomId, error: String(err && err.message || err) });
+    }
+  }
+  const summary = {
+    ok: true,
+    scanned: rooms.length,
+    collected: collected.length,
+    archived,
+    kept: rooms.length - collected.length,
+    keptBusy: rooms.filter(r => !r.eligible).length,
+    keptRecent: eligible.length - pick.size,
+    overCap: Math.max(0, rooms.length - collected.length - maxRooms),
+    errors,
+    rooms: collected,
+    durationMs: Date.now() - startedAt,
+    config: { idleMs, maxRooms, minIdleMs }
+  };
+  if (opts.log !== false) {
+    console.log(`[room-gc] scanned=${summary.scanned} collected=${summary.collected} archived=${summary.archived} kept=${summary.kept} (busy=${summary.keptBusy} recent=${summary.keptRecent}) overCap=${summary.overCap} errors=${errors.length} in ${summary.durationMs}ms`);
+  }
+  return summary;
+}
+
+let roomGcTimer = null;
+function startRoomGc() {
+  if (!ROOM_GC_CONFIG.enabled) {
+    console.log('[room-gc] disabled (CHESS_ROOM_GC=0)');
+    return null;
+  }
+  try { gcRooms(); } catch (err) { console.error('[room-gc] boot sweep failed:', err && err.message); }
+  roomGcTimer = setInterval(() => {
+    try { gcRooms(); } catch (err) { console.error('[room-gc] sweep failed:', err && err.message); }
+  }, ROOM_GC_CONFIG.intervalMs);
+  if (typeof roomGcTimer.unref === 'function') roomGcTimer.unref();
+  return roomGcTimer;
+}
+
+function stopRoomGc() {
+  if (roomGcTimer) { clearInterval(roomGcTimer); roomGcTimer = null; }
+}
+
+function checkAdminToken(req, res) {
+  const expected = process.env.CHESS_ADMIN_TOKEN;
+  if (!expected) { sendJsonError(res, 404, 'not found'); return false; }
+  const given = req.headers['x-admin-token'];
+  const a = Buffer.from(String(given || ''));
+  const b = Buffer.from(String(expected));
+  if (typeof given !== 'string' || a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    sendJsonError(res, 401, 'invalid admin token');
+    return false;
+  }
+  return true;
+}
+
+function handleAdminRoomsRoute(req, res, urlPath) {
+  if (urlPath === '/api/admin/rooms' && req.method === 'GET') {
+    if (!checkAdminToken(req, res)) return true;
+    const rooms = listRooms().map(publicRoom);
+    sendJson(res, 200, { ok: true, count: rooms.length, config: Object.assign({}, ROOM_GC_CONFIG), rooms });
+    return true;
+  }
+  if (urlPath === '/api/admin/rooms/gc' && req.method === 'POST') {
+    if (!checkAdminToken(req, res)) return true;
+    sendJson(res, 200, gcRooms());
+    return true;
+  }
+  return false;
+}
+
 const MIME = {
   '.html': 'text/html',
   '.js': 'application/javascript',
@@ -364,6 +602,7 @@ const ALLOWED_FILES = new Set([
   'src/ui-library.js',
   'src/ui-retention.js',
   'src/ui-insights.js',
+  'src/sw-register.js',
   'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'
@@ -472,8 +711,9 @@ function isBehindTls(req) {
 
 function buildCsp() {
   if (process.env.CHESS_CSP) return process.env.CHESS_CSP;
-  // The app is a no-build-step vanilla JS SPA with one inline <script> (SW reg)
-  // and an inline <style> block, WebAssembly (vendored Stockfish 19 lite, see
+  // The app is a no-build-step vanilla JS SPA: every script is a <script src>
+  // (no inline scripts, no on*= handlers), one inline <style> block plus many
+  // style="" attributes, WebAssembly (vendored Stockfish 19 lite, see
   // vendor/stockfish/), and Google Identity Services.
   //
   // D4 (Wave 1): 'wasm-unsafe-eval' replaces 'unsafe-eval'. The engine loader
@@ -481,13 +721,18 @@ function buildCsp() {
   // only — no eval()/new Function — so plain JS eval stays blocked. Dedicated
   // Workers take their CSP from their own script response, and this header is
   // sent on every response, so the Worker gets the same policy.
-  // Still 'unsafe-inline' in script-src: index.html keeps one inline SW-
-  // registration <script>. Remaining D4 step: hash it ('sha256-…' computed
-  // from index.html at startup) or externalise it — not done this wave.
+  // D4 (Wave 3): script-src no longer carries 'unsafe-inline'. The last inline
+  // block (service-worker registration) moved to src/sw-register.js. The GSI
+  // client is loaded by ui-auth.js as an external <script src> from the
+  // allowlisted origin and needs no inline allowance.
+  // style-src keeps 'unsafe-inline' on purpose: index.html has an inline
+  // <style>, ui-analysis.js injects one, and hundreds of style="" attributes
+  // remain (ui.js/ui-archive.js set element.style too). Hashing every block is
+  // not worth it while those exist; an inline-style-free UI is a follow-up.
   // D5: tablebase.js probes https://tablebase.lichess.ovh (7-piece Syzygy).
   return [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://accounts.google.com/gsi/client",
+    "script-src 'self' 'wasm-unsafe-eval' https://accounts.google.com/gsi/client",
     "style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style",
     "img-src 'self' data: https://*.googleusercontent.com",
     "font-src 'self' data:",
@@ -1205,11 +1450,14 @@ function createServer() {
         return;
       }
 
+      if (urlPath.startsWith('/api/admin/rooms') && handleAdminRoomsRoute(req, res, urlPath)) return; // Wave 3: room GC operator routes
+
       const roomId = extractRoomId(req);
       if (!isValidRoomId(roomId)) {
         sendJsonError(res, 400, 'invalid room id');
         return;
       }
+      touchRoom(roomId); // Wave 3 GC: any request naming a room counts as activity
 
       if (req.method === 'GET' && urlPath === '/api/state') {
         const state = readRoomStateJson(roomId);
@@ -1478,6 +1726,8 @@ function createServer() {
         handleGetGameEndpoint(req, res, decodeURIComponent(gameIdMatch[1]));
         return;
       }
+      if (require('./src/routes-review.js').handleReviewRoute(req, res, urlPath, { sendJson, sendJsonError, readJsonBody, gameArchive, referee })) return; // Wave 3 N1.3: /api/games/:id/missed-tactics, /api/review/missed-tactics
+
       if (require('./src/routes-openings.js').handleOpeningsRoute(req, res, urlPath, { sendJson, sendJsonError, readJsonBody })) return; // Wave 2 E3: /api/openings/*, /api/fen/validate
 
       if (require('./src/routes-puzzles.js').handlePuzzleRoute(req, res, urlPath, { sendJson, sendJsonError, readJsonBody, getAuthUser, parseCookies, gameArchive })) return; // Wave 2 E4: /api/puzzle/*
@@ -1603,7 +1853,14 @@ module.exports = {
   accountsManager,
   Accounts,
   ratingHook,
-  SocialRoutes
+  SocialRoutes,
+  // Wave 3 room GC
+  gcRooms,
+  listRooms: () => listRooms().map(publicRoom),
+  startRoomGc,
+  stopRoomGc,
+  touchRoom,
+  ROOM_GC_CONFIG
 };
 
 if (require.main === module) {
@@ -1611,5 +1868,6 @@ if (require.main === module) {
   const host = process.env.HOST || '0.0.0.0';
   createServer().listen(port, host, () => {
     console.log(`Chess server running at http://${host}:${port}`);
+    startRoomGc(); // Wave 3: boot sweep + periodic auto-room GC (CHESS_ROOM_GC=0 disables)
   });
 }
