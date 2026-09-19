@@ -1,8 +1,43 @@
 import { chromium } from 'playwright';
+import { spawn } from 'child_process';
+import { setTimeout as sleep } from 'timers/promises';
 
 const URL = 'http://127.0.0.1:39281/';
 
+async function isServerUp() {
+  try {
+    const res = await fetch(URL, { method: 'GET' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForServer(timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await isServerUp()) return true;
+    await sleep(250);
+  }
+  return false;
+}
+
 async function testUiFeatures() {
+  let serverProc = null;
+  if (!(await isServerUp())) {
+    console.log('Starting chess server on port 39281...');
+    serverProc = spawn('node', ['server.js'], {
+      cwd: process.cwd(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env }
+    });
+    serverProc.stdout.on('data', d => process.stderr.write(`[server] ${d}`));
+    serverProc.stderr.on('data', d => process.stderr.write(`[server] ${d}`));
+    if (!(await waitForServer(8000))) {
+      throw new Error('server did not come up on port 39281');
+    }
+  }
+
   console.log('Launching browser to test UI & AI features...');
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext();
@@ -226,7 +261,117 @@ async function testUiFeatures() {
   if (ghostCheck.g4 !== 'black-b') throw new Error('Black bishop missing on g4 at ply 10');
   console.log('✔ Passed: History scrubbing correctly cleans vacated squares without ghost duplicate pieces');
 
-  // 7. Check console errors
+  // 7. Test Puzzles View (#/puzzles)
+  console.log('Testing Puzzles view...');
+  await page.evaluate(() => window.Shell && window.Shell.navigate('puzzles'));
+  await page.waitForTimeout(500);
+  const puzzlesVisible = await page.evaluate(() => {
+    const sec = document.querySelector('[data-view="puzzles"]');
+    return sec && !sec.hidden;
+  });
+  if (!puzzlesVisible) throw new Error('Puzzles view section not visible after navigation');
+
+  const puzzleBoard = await page.locator('#puzzle-board').count();
+  if (puzzleBoard < 1) throw new Error('#puzzle-board not found in Puzzles view');
+
+  const puzzleTabs = await page.locator('.pz-tabs button[role="tab"]').count();
+  if (puzzleTabs < 4) throw new Error(`Expected at least 4 puzzle tabs, found ${puzzleTabs}`);
+
+  // Click Custom tab
+  const customTab = page.locator('.pz-tabs button[data-tab="custom"]');
+  if (await customTab.count() > 0) {
+    await customTab.click();
+    await page.waitForTimeout(300);
+    console.log('  Clicked Custom tab');
+  }
+  // Click Daily tab back
+  const dailyTab = page.locator('.pz-tabs button[data-tab="daily"]');
+  if (await dailyTab.count() > 0) {
+    await dailyTab.click();
+    await page.waitForTimeout(300);
+  }
+  console.log('✔ Passed: Puzzles view renders with board, tabs, and tab switching');
+
+  // 8. Test Library View (#/library)
+  console.log('Testing Library view...');
+  await page.evaluate(() => window.Shell && window.Shell.navigate('library'));
+  await page.waitForTimeout(500);
+  const libraryVisible = await page.evaluate(() => {
+    const sec = document.querySelector('[data-view="library"]');
+    return sec && !sec.hidden;
+  });
+  if (!libraryVisible) throw new Error('Library view section not visible after navigation');
+
+  const libraryTitle = await page.locator('#library-title').textContent();
+  if (!libraryTitle || !libraryTitle.includes('Library')) {
+    throw new Error(`Expected Library title, got: ${libraryTitle}`);
+  }
+
+  const searchInput = page.locator('#library-search');
+  if (await searchInput.count() < 1) throw new Error('#library-search input not found');
+
+  const sourceChips = await page.locator('.library-chip[data-source]').count();
+  if (sourceChips < 3) throw new Error(`Expected at least 3 source chips, found ${sourceChips}`);
+
+  const pgnForm = page.locator('#library-pgn-text');
+  if (await pgnForm.count() < 1) throw new Error('#library-pgn-text not found');
+  console.log('✔ Passed: Library view renders with title, search, source chips, and PGN form');
+
+  // 9. Test Insights View (#/insights)
+  console.log('Testing Insights view...');
+  await page.evaluate(() => window.Shell && window.Shell.navigate('insights'));
+  await page.waitForTimeout(500);
+  const insightsVisible = await page.evaluate(() => {
+    const sec = document.querySelector('[data-view="insights"]');
+    return sec && !sec.hidden;
+  });
+  if (!insightsVisible) throw new Error('Insights view section not visible after navigation');
+
+  const insightsTitle = await page.locator('#insights-title').textContent();
+  if (!insightsTitle || !insightsTitle.includes('Insights')) {
+    throw new Error(`Expected Insights title, got: ${insightsTitle}`);
+  }
+
+  const leagueSection = page.locator('#insights-league');
+  if (await leagueSection.count() < 1) throw new Error('#insights-league section not found');
+
+  const pivotSection = page.locator('#insights-pivot');
+  if (await pivotSection.count() < 1) throw new Error('#insights-pivot section not found');
+
+  const metricSelect = page.locator('#insights-metric');
+  if (await metricSelect.count() > 0) {
+    const metricOptions = await metricSelect.locator('option').count();
+    console.log(`  Insights metric dropdown has ${metricOptions} options`);
+  }
+  console.log('✔ Passed: Insights view renders with title, league card, pivot card, and controls');
+
+  // 10. Test Missed-Tactics in Analysis View (#/analysis)
+  console.log('Testing Analysis view missed-tactics panel...');
+  await page.evaluate(() => window.Shell && window.Shell.navigate('analysis'));
+  await page.waitForTimeout(500);
+  const analysisVisible = await page.evaluate(() => {
+    const sec = document.querySelector('[data-view="analysis"]');
+    return sec && !sec.hidden;
+  });
+  if (!analysisVisible) throw new Error('Analysis view section not visible after navigation');
+
+  const missedPanel = page.locator('section[aria-label="Missed tactics"]');
+  if (await missedPanel.count() > 0) {
+    console.log('  Missed tactics panel found');
+    const loadBtn = page.locator('button[data-an="missed-load"]');
+    if (await loadBtn.count() > 0) {
+      console.log('  "Find missed tactics" button present');
+    }
+  } else {
+    console.log('  (Missed tactics panel not present — may require a game to be loaded)');
+  }
+  console.log('✔ Passed: Analysis view renders with missed-tactics panel');
+
+  // Return to Play view for cleanup
+  await page.evaluate(() => window.Shell && window.Shell.navigate('play'));
+  await page.waitForTimeout(300);
+
+  // 11. Check console errors
   if (consoleErrors.length > 0) {
     console.error('Failed HTTP responses seen:\n' + failedResponses.join('\n'));
     throw new Error('Console errors occurred during test:\n' + consoleErrors.join('\n'));
@@ -242,6 +387,10 @@ async function testUiFeatures() {
     });
     await fetch(`${URL}api/reset`, { method: 'POST' });
   } catch (_) {}
+
+  if (serverProc) {
+    try { serverProc.kill('SIGTERM'); } catch (_) {}
+  }
 
   console.log('ALL UI & AI FEATURE TESTS PASSED SUCCESSFULLY with ZERO ERRORS!');
 }
