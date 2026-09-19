@@ -42,6 +42,7 @@ const rulesEngine = require('./rules-engine.js');
 const tablebase = require('./tablebase.js');
 const repertoireTrainer = require('./repertoire-trainer.js');
 const endgamesTrainer = require('./endgames-trainer.js');
+const practiceCurriculum = require('./practice-curriculum.js');
 let gameArchive = null;
 try { gameArchive = require('./game-archive.js'); } catch (_) { gameArchive = null; }
 
@@ -219,6 +220,43 @@ function handleOpeningsRoute(req, res, urlPath, ctx) {
   if (req.method === 'GET' && urlPath === '/api/endgames/leaderboard') {
     const cat = queryOf(req).get('category') || 'all';
     sendJson(res, 200, { ok: true, leaderboard: endgamesTrainer.getLeaderboard(cat) });
+    return true;
+  }
+
+  // Practice Curriculum routes
+  if (req.method === 'GET' && urlPath === '/api/practice/tracks') {
+    sendJson(res, 200, { ok: true, tracks: practiceCurriculum.getTracks() });
+    return true;
+  }
+
+  if (req.method === 'GET' && urlPath === '/api/practice/lessons') {
+    const track = queryOf(req).get('track') || 'all';
+    sendJson(res, 200, { ok: true, lessons: practiceCurriculum.getLessons(track) });
+    return true;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/practice/verify') {
+    const readJsonBody = ctx.readJsonBody;
+    if (typeof readJsonBody !== 'function') {
+      sendJsonError(res, 500, 'body reader unavailable');
+      return true;
+    }
+    readJsonBody(req).then(body => {
+      if (!body || !body.lessonId || !body.playedMove) {
+        sendJsonError(res, 400, 'lessonId and playedMove are required');
+        return;
+      }
+      const lesson = practiceCurriculum.getLessonById(body.lessonId);
+      if (!lesson) {
+        sendJsonError(res, 404, 'lesson not found: ' + body.lessonId);
+        return;
+      }
+      const stepIndex = typeof body.stepIndex === 'number' ? body.stepIndex : 0;
+      const result = practiceCurriculum.verifyPracticeMove(lesson, stepIndex, body.playedMove, { reveal: !!body.reveal });
+      sendJson(res, 200, Object.assign({ ok: true }, result));
+    }).catch(() => {
+      if (!res.headersSent) sendJsonError(res, 413, 'request body too large');
+    });
     return true;
   }
 
