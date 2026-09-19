@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'chess-ui-v2';
+const CACHE_NAME = 'chess-ui-v3';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
@@ -50,6 +50,7 @@ const PRECACHE_ASSETS = [
   '/src/ui-insights.js',
   '/src/coordinates-trainer.js',
   '/src/ui-coordinates.js',
+  '/src/ui-about.js',
   '/src/ui.js',
   '/src/sw-register.js',
   '/manifest.webmanifest',
