@@ -600,6 +600,7 @@ const ALLOWED_FILES = new Set([
   'src/ui-profile.js',
   'src/ui-analysis.js',
   'src/ui-library.js',
+  'src/ui-study.js',
   'src/ui-retention.js',
   'src/ui-insights.js',
   'src/coordinates-trainer.js',
@@ -1846,6 +1847,7 @@ function createServer() {
       if (require('./src/routes-library.js').handleLibraryRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readBody, maxBodyBytes: MAX_BODY_BYTES, gameArchive })) return; // Wave 3: /api/library, /api/library/claim, /api/import/*
       if (RetentionRoutes.handleRetentionRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readJsonBody, gameArchive, referee, accountsManager })) return; // Wave 3 N2: /api/streak, /api/activity, /api/achievements
       if (require('./src/routes-insights.js').handleInsightsRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readBody, maxBodyBytes: MAX_BODY_BYTES, gameArchive })) return; // Wave 3 N2.8/N3.15: /api/insights*, /api/league*
+      if (require('./src/routes-study.js').handleStudyRoute(req, res, urlPath, { getAuthUser, parseCookies, sendJson, sendJsonError, readBody, gameArchive })) return; // Wave 4 A2.2: /api/study/*
 
       sendJsonError(res, 404, 'not found');
       return;

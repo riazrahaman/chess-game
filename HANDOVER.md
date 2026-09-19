@@ -301,3 +301,37 @@ timeout can never silently downgrade a human-vs-human room to unilateral undo.
 `state.gameOver` is set, covering request / respond / the legacy unilateral path. Game-ending transitions
 (draw-claim, draw-accept, resignation, timeout, a move) all null `state.undoRequest` so no pending request can
 outlive the game (`src/referee-service.js`).
+
+## 10. WAVE 4 — Study chapters (branch `feat/a2-study-chapters`, 2026-09-20)
+
+Kanban card `a2-study-chapters` (round 6). Implements A2.2 from `RECOMMENDATIONS.md:117`
+("Study chapters: PGN/FEN/game-import chapters, hidden-move 'quiz' chapters — reuses the puzzle
+input loop. PGN export with $1–$9 NAG glyphs for downstream tool interop.").
+
+| Card | Owner | Commit | What landed | Tests |
+|---|---|---|---|---|
+| `a2-study-chapters` | builder | (uncommitted) | `#/study` view (`ui-study.js`, nav order 42 between Library and Compete) plus a server-side chapters API. Three chapter kinds — **PGN** (parsed by the previously-dark `study-tree.fromPGN`, so RAV variations and NAGs are preserved), **FEN** (server-validated start position + a recorded SAN/UCI line), **Game** (an archived game imported by id via `game-archive.getGame`). **Hidden-move quiz mode**: upcoming moves are concealed, the viewer guesses two-click on the Study board and `POST /api/study/:id/guess` validates server-side against the stored line (alternate mates accepted, wrong guesses never leak the solution, scripted replies auto-play). **PGN export** is server-rendered by `study-tree.toPGN`, emitting `$1`–`$9` NAG tokens that round-trip through `fromPGN`. | `test/study-chapters-selftest.js` — 17 tests; `test/study-tree-selftest.js` (49) wired into `test:unit` + `lint` |
+
+**What was reused, not reinvented:** `study-tree.js` (548 lines) is the whole move-tree/PGN engine — it is now
+required by `routes-study.js` so it moved out of `test/reachability-selftest.js` `KNOWN_DARK` (list may only
+shrink: 11 → 10). `study-store.js` clones the `social-store.js` shape (`createStudyStore` tries
+`SqliteStudyAdapter` then falls back to `JsonStudyAdapter`, `getDefaultStudyStore`/`resetDefaultStudyStore`,
+atomic temp-file JSON writes) with `CHESS_STUDY_DB_PATH` / `CHESS_STUDY_JSON_PATH`. The quiz loop mirrors
+`routes-puzzles.js` `presentPuzzle`/`replayPrefix`/`/:id/try` exactly: solution-free public view, stateless
+replay from the stored line per request, only a checkmate may differ from the solution.
+
+**Scope (round-2 hardening):** every chapter is owned by a per-visitor identity, mirroring
+`routes-puzzles.playerIdFor` — `user:<accountId>` when signed in, else `anon:<study_player cookie>`
+(minted on first contact). `GET /api/study` lists only the current viewer's chapters; a chapter owned by
+another account OR another anon cookie is a 404 on read/mutate, so one guest can never delete another
+guest's chapter or un-quiz it to expose the solution. A concealed quiz's solution is guarded in three
+places: the public `GET /api/study/:id` view omits it, `GET /api/study/:id/pgn` returns 403 until *that
+viewer* has completed or explicitly revealed the chapter (server-side per-viewer `study_reveals` state,
+never a query param), and the client hides the Export PGN button until reveal/completion.
+`state.positions[] = {fen,san,lastMove}` is built server-side so the client never replays a move (Gate 4);
+the Study view owns `#study-board` and never touches `#board`.
+
+**Open after Wave 4:** quiz *progress* is not persisted across reload (only reveal/completion state is);
+chapters are flat (no folder/collection grouping); `service-worker.js` `CACHE_NAME` bumped to
+`chess-ui-v4` for the new nav entry; `study.db` is gitignored via `*.db` and `.study.json` via an explicit
+rule. Interactive-lesson per-move prompts (N3 item 21) remain open.

@@ -514,11 +514,69 @@ async function testUiFeatures() {
   await page.waitForTimeout(300);
   console.log('✔ Passed: Coordinates trainer renders 64 squares, starts timed sprint, and scores clicks');
 
+  // 12. Test Study chapters view (#/study)
+  console.log('Testing Study chapters view...');
+  await page.evaluate(() => window.Shell && window.Shell.navigate('study'));
+  await page.waitForTimeout(500);
+  const studyVisible = await page.evaluate(() => {
+    const sec = document.querySelector('[data-view="study"]');
+    return sec && !sec.hidden;
+  });
+  if (!studyVisible) throw new Error('Study view section not visible after navigation');
+
+  const studyTitle = await page.locator('[id="study-title"]').textContent();
+  if (!studyTitle || !studyTitle.includes('Study')) {
+    throw new Error(`Expected Study title, got: ${studyTitle}`);
+  }
+  const studyBoard = await page.locator('[id="study-board"]').count();
+  if (studyBoard < 1) throw new Error('study-board not found in Study view');
+  const kindTabs = await page.locator('[id="study-kind-tabs"] button[data-kind]').count();
+  if (kindTabs !== 3) throw new Error(`Expected 3 chapter-kind tabs, found ${kindTabs}`);
+
+  // Create a FEN quiz chapter through the UI.
+  await page.locator('[id="study-kind-tabs"] button[data-kind="fen"]').click();
+  await page.locator('[id="study-fen-title"]').fill('UI smoke: queen\'s pawn');
+  await page.locator('[id="study-fen"]').fill('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+  await page.locator('[id="study-fen-line"]').fill('1. d4 d5');
+  await page.locator('[id="study-quiz-toggle"]').check();
+  await page.locator('[id="study-create-btn"]').click();
+  await page.waitForTimeout(700);
+
+  const studyRows = await page.locator('[id="study-list"] li button').count();
+  if (studyRows < 1) throw new Error('created Study chapter did not appear in the list');
+
+  const viewerVisible = await page.evaluate(() => {
+    const p = document.getElementById('study-viewer-panel');
+    return p && !p.hidden;
+  });
+  if (!viewerVisible) throw new Error('Study viewer did not open after creating a chapter');
+
+  // Guess the correct first move (d2d4) on the quiz board — server-validated.
+  const quizFenBefore = await page.evaluate(() => window.UIStudy && window.UIStudy.state.quizFen);
+  await page.locator('[id="study-board"] [data-square="d2"]').click();
+  await page.locator('[id="study-board"] [data-square="d4"]').click();
+  await page.waitForTimeout(600);
+  // Positive assertion: the correct guess advanced the line — one committed
+  // guess recorded, the position changed, and the quiz is still concealed.
+  const afterGuess = await page.evaluate(() => {
+    const s = window.UIStudy && window.UIStudy.state;
+    return s ? { moves: s.guessMoves.length, fen: s.quizFen, revealed: s.revealed, status: (s.message || '') } : null;
+  });
+  if (!afterGuess) throw new Error('window.UIStudy.state unavailable');
+  if (afterGuess.moves !== 1) throw new Error(`correct guess did not advance the line (guessMoves=${afterGuess.moves})`);
+  if (afterGuess.fen === quizFenBefore) throw new Error('server reply did not advance the position');
+  if (afterGuess.revealed) throw new Error('quiz auto-revealed before completion');
+  const studyStatus = (await page.locator('[id="study-status"]').textContent()) || '';
+  if (afterGuess.status && /not the move|error/i.test(afterGuess.status)) {
+    throw new Error(`Unexpected Study quiz status after a correct guess: ${studyStatus}`);
+  }
+  console.log('✔ Passed: Study view renders, creates a FEN quiz chapter, and the board guess advances the line');
+
   // Return to Play view for cleanup
   await page.evaluate(() => window.Shell && window.Shell.navigate('play'));
   await page.waitForTimeout(300);
 
-  // 12. Check console errors
+  // 13. Check console errors
   if (consoleErrors.length > 0) {
     console.error('Failed HTTP responses seen:\n' + failedResponses.join('\n'));
     throw new Error('Console errors occurred during test:\n' + consoleErrors.join('\n'));

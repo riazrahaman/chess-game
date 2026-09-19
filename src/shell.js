@@ -29,6 +29,7 @@
     { id: 'puzzles', title: 'Puzzles', order: 30 },
     { id: 'coordinates', title: 'Coordinates', order: 35 },
     { id: 'library', title: 'Library', order: 40 },
+    { id: 'study', title: 'Study', order: 42 },
     { id: 'compete', title: 'Compete', order: 50 },
     { id: 'me', title: 'Profile', order: 60 },
     { id: 'about', title: 'About', order: 90 }
