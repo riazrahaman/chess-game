@@ -63,8 +63,8 @@ ui-sound, ui-theme, ui-annotations, ui-archive, eval-graph, ui.js.
 voice-intents, chess960, tablebase, arena, social-graph, chat-upgrades, correspondence, personality-bots,
 pov-export, embed-viewer, variants, i18n (+ time-control browser copy).
 
-**DARK, never loaded (10):** rating, ratings-pool, lobby, puzzle-service, puzzle-rating, puzzle-storm,
-daily-puzzle, study-tree, openings-explorer, puzzle-repetition.
+**DARK, never loaded (9):** rating, ratings-pool, lobby, puzzle-service, puzzle-rating, puzzle-storm,
+daily-puzzle, openings-explorer, puzzle-repetition. *(study-tree wired in Wave 4 — required by `routes-study.js`.)*
 
 **Doc/code contradictions:** `fen-setup.js` is DARK — the referee's `_cmdSetup` uses `rulesEngine.fenToBoard`,
 not this module (CLAUDE.md says otherwise). `game-archive.js:23` defaults the DB to `src/games.db`, so the
@@ -185,11 +185,11 @@ Structural changes that make this cheap:
 - Split `ui.js` along view boundaries (`ui-play.js`, `ui-analysis.js`, `ui-transport.js`) and lazy-load per-view scripts with `document.createElement('script')` on first route entry — drops ~200 KB from first paint, no bundler.
 - **Stop shipping server-only modules to the browser** (`game-archive.js`, `arena.js`, `social-graph.js`, `correspondence.js`) — these need routes, not script tags.
 
-### R2 Server routes + tables for the dark server modules `[server]` — M each — **accounts/ratings/lobby/arena/social done (Wave 2); correspondence + studies still open**
+### R2 Server routes + tables for the dark server modules `[server]` — M each — **accounts/ratings/lobby/arena/social done (Wave 2); studies done (Wave 4); correspondence still open**
 `accounts.js` → **done server-side in `0b25073`** (`/api/auth/*`, `/api/profile`, SQLite `accounts`/`sessions`); remaining: B11 + profile view; `ratings-pool.js` → rate every
 human-vs-human result on game end (referee `onGameEnd` hook) + `/api/leaderboard/:tc`; `lobby.js` →
 `/api/lobby/seek|challenge|accept` + SSE lobby channel; `arena.js` → `/api/arena/*`; `social-graph.js` →
-`/api/social/*` + table; `correspondence.js` → referee day-clock mode; `study-tree.js` → `/api/studies/*`.
+`/api/social/*` + table; `correspondence.js` → referee day-clock mode; `study-tree.js` → **done (Wave 4, `a2-study-chapters`): `/api/study/*` + `#/study` view + `study-store.js`**.
 Each is 1–3 days because the library and its tests already exist.
 
 ### R3 First-run onboarding `[display]` — S — **done (Home cards, Wave 2)**
@@ -259,7 +259,7 @@ transparent pricing.
 18. **Puzzle dashboard by theme** (strengths / improvement areas over N days) + **Custom Puzzles** picker (theme + rating band) + **Rated vs unrated**. `[display]` **S/M** — lichess `/api/puzzle/dashboard/{days}`
 19. **Practice curriculum** — Checkmates (piece checkmates, patterns I–IV) → Fundamental tactics (pin, skewer, fork, discovered, overload, zwischenzug, x-ray) → Advanced (zugzwang, deflection, attraction, Greek gift…) → Pawn & Rook endgames. The onboarding ladder that converts beginners. `[display]` **M** (content) — https://lichess.org/practice
 20. **Endgames trainer** — themed drills from real 3–7-piece positions, practice vs timed challenge with leaderboard, graded by `tablebase.js` ground truth. `[server + display]` **M** — https://www.chess.com/endgames
-21. **Interactive-lesson study mode** — author writes per-move prompts/hints/feedback; wrong moves branch to feedback (lichess). Extends A2.2. `[display]` **M**
+21. **Interactive-lesson study mode** — author writes per-move prompts/hints/feedback; wrong moves branch to feedback (lichess). Extends A2.2 (the A2.2 chapter/quiz layer ships in Wave 4; this per-move prompt authoring is still open). `[display]` **M**
 22. **Guess-the-Move** on master games (ChessTempo / lichess "hide next moves") — reuses puzzle input loop + masters data. `[display]` **S**
 23. **Vision / speed drills** ("play the named move" under time) — extends G5. `[display]` **S**
 

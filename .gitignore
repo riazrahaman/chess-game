@@ -8,6 +8,8 @@ games.db
 accounts.db
 .accounts.json
 *.db
+.study.json
+.social.json
 *.log
 
 # server runtime log

@@ -57,7 +57,6 @@ function assert(cond, msg) {
 // ---------------------------------------------------------------------------
 const KNOWN_DARK = {
   // --- DARK, never loaded by index.html nor required from server.js (§1: 11) ---
-  'study-tree.js':        'roadmap §1 DARK-never-loaded; Phase 2 studies shell (P2)',
   'fen-setup.js':         'roadmap §1 doc/code contradiction: referee _cmdSetup uses rulesEngine.fenToBoard, not this module (P2 setup UI)',
 
   // --- DARK, shipped to browser with zero call sites (§1 lists 18: these 17 +

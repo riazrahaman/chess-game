@@ -178,7 +178,7 @@ test('mounted output contains the expected heading and all six feature entries',
 
 test('mounted stats match the distinct suites wired into test:unit', () => {
   const expected = countUnitSuites();
-  assert(expected === 73, 'reviewed test:unit suite count changed; expected 73, got ' + expected);
+  assert(expected === 74, 'reviewed test:unit suite count changed; expected 74, got ' + expected);
   const stat = new RegExp('<span class="about-stat-value">' + expected + '<\\/span><span class="about-stat-label">Unit suites run<\\/span><span class="about-stat-detail">In the full unit check<\\/span>');
   assert(stat.test(runtime.rendered), 'rendered unit-suite statistic does not match package.json test:unit (' + expected + ')');
 });
