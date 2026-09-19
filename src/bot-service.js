@@ -16,6 +16,7 @@ const rulesEngine = require('./rules-engine.js');
 const openingsExplorer = require('./openings-explorer.js');
 const BOOK_LOADED = openingsExplorer.ensureDefaultLoaded();
 const maiaBot = require('./maia-bot.js');
+const playCoach = require('./play-coach.js');
 let engineServer = null;
 try {
   engineServer = require('./engine-server.js');
@@ -318,5 +319,6 @@ class BotService {
 module.exports = {
   BotService,
   BOT_LEVELS,
-  PST_FALLBACK_DEPTH
+  PST_FALLBACK_DEPTH,
+  PlayCoach: playCoach
 };
