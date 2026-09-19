@@ -15,6 +15,7 @@ const rulesEngine = require('./rules-engine.js');
 // the server pays the ~1 s SAN→UCI conversion at boot, not on the first move.
 const openingsExplorer = require('./openings-explorer.js');
 const BOOK_LOADED = openingsExplorer.ensureDefaultLoaded();
+const maiaBot = require('./maia-bot.js');
 let engineServer = null;
 try {
   engineServer = require('./engine-server.js');
@@ -50,7 +51,11 @@ const BOT_LEVELS = {
   5: { level: 5, name: 'Tactician Bot', rating: 1600, skill: null, elo: 1600, depth: null, movetime: 400, blunderRate: 0, useBook: false, greeting: 'Solid openings and steady calculation.' },
   6: { level: 6, name: 'Strong Club Bot', rating: 1800, skill: null, elo: 1800, depth: null, movetime: 500, blunderRate: 0, useBook: false, greeting: 'Preparing a positional plan.' },
   7: { level: 7, name: 'Advanced Bot', rating: 2000, skill: null, elo: 2000, depth: null, movetime: 600, blunderRate: 0, useBook: false, greeting: 'Calculation initiated. Every tempo counts.' },
-  8: { level: 8, name: 'Expert Bot', rating: 2300, skill: null, elo: 2300, depth: null, movetime: 600, blunderRate: 0, useBook: false, greeting: 'Maximum precision. Stockfish 19 at ~2300.' }
+  8: { level: 8, name: 'Expert Bot', rating: 2300, skill: null, elo: 2300, depth: null, movetime: 600, blunderRate: 0, useBook: false, greeting: 'Maximum precision. Stockfish 19 at ~2300.' },
+  // Wave 4: Maia rating-matched human-like bots
+  'maia-1100': { level: 'maia-1100', name: 'Maia 1100', rating: 1100, maiaRating: 1100, isMaia: true, blunderRate: 0, useBook: true, greeting: 'Hello! I am Maia 1100, calibrated to human beginner play.' },
+  'maia-1500': { level: 'maia-1500', name: 'Maia 1500', rating: 1500, maiaRating: 1500, isMaia: true, blunderRate: 0, useBook: true, greeting: 'Hello! I am Maia 1500, calibrated to club player human play.' },
+  'maia-1900': { level: 'maia-1900', name: 'Maia 1900', rating: 1900, maiaRating: 1900, isMaia: true, blunderRate: 0, useBook: true, greeting: 'Hello! I am Maia 1900, calibrated to advanced human play.' }
 };
 // Search cap for the legacy PST fallback engine (`stockfish-worker.js`), used
 // only when the real engine is unavailable or rejects.
@@ -186,6 +191,15 @@ class BotService {
     // 2. Blunder roll (L1–L2): a uniformly random legal move.
     if (profile.blunderRate > 0 && Math.random() < profile.blunderRate && candidateMoves.length > 1) {
       return candidateMoves[Math.floor(Math.random() * candidateMoves.length)].uci;
+    }
+
+    // 2.5 Maia Human-Like Bot: evaluate move probabilities according to learned human policy
+    if (profile.isMaia) {
+      const legalUcis = candidateMoves.map(m => m.uci);
+      const chosen = maiaBot.selectMaiaMove(legalUcis, profile.maiaRating);
+      if (chosen && chosen.move && isLegal(chosen.move)) {
+        return chosen.move;
+      }
     }
 
     // 3. Real engine. Any rejection (missing vendor files, crash, timeout)
