@@ -1383,7 +1383,27 @@ class GameArchive {
     }
 
     if (!this.storage) {
-      const jsonPath = typeof options === 'string' ? options : (options.jsonPath || DEFAULT_JSON_PATH);
+      // Node < 22.5 has no node:sqlite, so the JSON fallback must NOT collapse
+      // a caller's explicit dbPath/jsonPath onto the one shared DEFAULT_JSON_PATH
+      // — otherwise two archives built with different dbPaths silently share a
+      // single file and cross-contaminate state. Honour the caller's intent:
+      //   - string options             → that string is the JSON path
+      //   - explicit options.jsonPath  → use it verbatim
+      //   - dbPath ':memory:'          → keep the adapter in memory (no file)
+      //   - explicit options.dbPath    → derive a distinct "<dbPath>.json" file
+      //   - no explicit path           → DEFAULT_JSON_PATH (production default)
+      let jsonPath;
+      if (typeof options === 'string') {
+        jsonPath = options;
+      } else if (options.jsonPath) {
+        jsonPath = options.jsonPath;
+      } else if (dbPath === ':memory:') {
+        jsonPath = ':memory:';
+      } else if (options.dbPath) {
+        jsonPath = dbPath + '.json';
+      } else {
+        jsonPath = DEFAULT_JSON_PATH;
+      }
       this.storage = new JsonFileStorageAdapter(jsonPath);
       this.backendType = 'json';
     }

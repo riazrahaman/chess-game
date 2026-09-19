@@ -21,6 +21,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'chess-wave3-library-'));
 process.env.CHESS_STATE_FILE = path.join(TMP, '.referee-state.json');
 process.env.CHESS_JOURNAL_FILE = path.join(TMP, '.referee-journal.jsonl');
 process.env.CHESS_DB_FILE = path.join(TMP, 'games.db');
+process.env.CHESS_JSON_ARCHIVE_FILE = path.join(TMP, '.games-archive.json');
 process.env.CHESS_ACCOUNTS_DB_FILE = path.join(TMP, 'accounts.db');
 process.env.CHESS_SOCIAL_DB_PATH = path.join(TMP, 'social.db');
 process.env.CHESS_LEAGUES_DB_PATH = path.join(TMP, 'leagues.db');
@@ -39,6 +40,12 @@ async function test(name, fn) {
   passed++;
   console.log(`PASS: ${name}`);
 }
+
+const hasSqlite = (() => {
+  if (process.env.CHESS_ARCHIVE_FORCE_JSON === '1') return false;
+  try { const { DatabaseSync } = require('node:sqlite'); return typeof DatabaseSync === 'function'; }
+  catch (_) { return false; }
+})();
 
 // ---------------------------------------------------------------------------
 // fixtures: real-looking upstream payloads
@@ -184,29 +191,33 @@ async function run() {
   console.log('=== Wave 3 library / ownership / external import self-test ===\n');
 
   // ------------------------------------------------------------ 1. schema
-  await test('schema migration: pre-Wave-3 games.db gains owner/source/external/room columns, data intact', async () => {
-    const { DatabaseSync } = require('node:sqlite');
-    const dbPath = path.join(TMP, 'legacy.db');
-    const legacy = new DatabaseSync(dbPath);
-    legacy.exec(`CREATE TABLE games (id TEXT PRIMARY KEY, white TEXT, black TEXT, date TEXT, result TEXT, eco TEXT, pgn TEXT, moves TEXT, created_at INTEGER);
-      INSERT INTO games VALUES ('legacy-1', 'Ann', 'Ben', '2024.01.01', '1-0', 'C20', '[Result "1-0"]\n\n1. e4 e5 1-0', 'e2e4 e7e5', 1000);`);
-    legacy.close();
-    const archive = GameArchive.createGameArchive({ dbPath });
-    assert.strictEqual(archive.backendType, 'sqlite');
-    const cols = archive.storage.gamesColumns();
-    for (const c of ['owner_id', 'source', 'external_id', 'room_id']) assert(cols.includes(c), 'column ' + c);
-    const row = archive.getGame('legacy-1');
-    assert.strictEqual(row.white, 'Ann');
-    assert.strictEqual(row.moves, 'e2e4 e7e5');
-    assert.strictEqual(row.owner_id, null);
-    assert.strictEqual(row.source, null);
-    archive.close();
-    // Re-open: idempotent (no duplicate-column error), data still there.
-    const again = GameArchive.createGameArchive({ dbPath });
-    assert.strictEqual(again.listGames().length, 1);
-    assert.strictEqual(again.storage.gamesColumns().length, 13);
-    again.close();
-  });
+  if (hasSqlite) {
+    await test('schema migration: pre-Wave-3 games.db gains owner/source/external/room columns, data intact', async () => {
+      const { DatabaseSync } = require('node:sqlite');
+      const dbPath = path.join(TMP, 'legacy.db');
+      const legacy = new DatabaseSync(dbPath);
+      legacy.exec(`CREATE TABLE games (id TEXT PRIMARY KEY, white TEXT, black TEXT, date TEXT, result TEXT, eco TEXT, pgn TEXT, moves TEXT, created_at INTEGER);
+        INSERT INTO games VALUES ('legacy-1', 'Ann', 'Ben', '2024.01.01', '1-0', 'C20', '[Result "1-0"]\n\n1. e4 e5 1-0', 'e2e4 e7e5', 1000);`);
+      legacy.close();
+      const archive = GameArchive.createGameArchive({ dbPath });
+      assert.strictEqual(archive.backendType, 'sqlite');
+      const cols = archive.storage.gamesColumns();
+      for (const c of ['owner_id', 'source', 'external_id', 'room_id']) assert(cols.includes(c), 'column ' + c);
+      const row = archive.getGame('legacy-1');
+      assert.strictEqual(row.white, 'Ann');
+      assert.strictEqual(row.moves, 'e2e4 e7e5');
+      assert.strictEqual(row.owner_id, null);
+      assert.strictEqual(row.source, null);
+      archive.close();
+      // Re-open: idempotent (no duplicate-column error), data still there.
+      const again = GameArchive.createGameArchive({ dbPath });
+      assert.strictEqual(again.listGames().length, 1);
+      assert.strictEqual(again.storage.gamesColumns().length, 13);
+      again.close();
+    });
+  } else {
+    console.log('SKIP: schema migration: pre-Wave-3 games.db gains owner/source/external/room columns, data intact (node:sqlite unavailable on Node < 22.5)');
+  }
 
   await test('owner filters: absent = all, id = that account, null = unowned; source + room filters', async () => {
     const archive = GameArchive.createGameArchive({ dbPath: path.join(TMP, 'filters.db') });
