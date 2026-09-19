@@ -360,6 +360,7 @@ const ALLOWED_FILES = new Set([
   'src/ui-compete.js',
   'src/ui-profile.js',
   'src/ui-analysis.js',
+  'src/ui-library.js',
   'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'
@@ -926,6 +927,15 @@ function handlePostGameEndpoint(req, res) {
       return;
     }
     try {
+      // Wave 3: ownership is server-attached from the session, never trusted
+      // from the client body (a guest could otherwise claim/poison rows).
+      delete parsed.owner_id; delete parsed.source; delete parsed.external_id; delete parsed.room_id;
+      const session = getAuthUser(req);
+      parsed.owner_id = session && session.userId ? String(session.userId) : null;
+      // auto-save posts the referee's UCI `moves` array; the Library/archive PGN paste posts only `pgn`.
+      parsed.source = Array.isArray(parsed.moves) && parsed.moves.length > 0 ? 'local' : 'pgn';
+      const room = extractRoomId(req);
+      parsed.room_id = room && room !== 'default' && isValidRoomId(room) ? room : null;
       const saved = gameArchive.saveGame(parsed);
       const origin = req.headers.origin;
       if (origin && isOriginAllowed(origin)) {
@@ -1469,6 +1479,7 @@ function createServer() {
 
       if (require('./src/routes-puzzles.js').handlePuzzleRoute(req, res, urlPath, { sendJson, sendJsonError, readJsonBody, getAuthUser, parseCookies, gameArchive })) return; // Wave 2 E4: /api/puzzle/*
       if (SocialRoutes.handleSocialRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readBody, maxBodyBytes: MAX_BODY_BYTES, referee, seatAuth: seatAuthManager, isValidRoomId, accountsManager, gameArchive, ratingsStore: ratingHook.store, botService })) return; // Wave 2 R2: lobby/leaderboard/arena/social routes
+      if (require('./src/routes-library.js').handleLibraryRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readBody, maxBodyBytes: MAX_BODY_BYTES, gameArchive })) return; // Wave 3: /api/library, /api/library/claim, /api/import/*
 
       sendJsonError(res, 404, 'not found');
       return;
