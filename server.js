@@ -12,7 +12,7 @@ const Accounts = require('./src/accounts.js');
 const { Chess } = require('chess.js');
 const accountsManager = Accounts.getDefaultManager();
 const botService = new BotService(seatAuthManager);
-const ratingHook = require('./src/rating-hook.js').installRatingHook({ referee, seatAuth: seatAuthManager, archive: gameArchive, isBotRoom: roomId => botService.getBotConfig(roomId).enabled, onRated: event => SocialRoutes.onRatedGame(event), logger: console }); // Wave 2 R2: rate human-vs-human games on game end
+const ratingHook = require('./src/rating-hook.js').installRatingHook({ referee, seatAuth: seatAuthManager, archive: gameArchive, isBotRoom: roomId => botService.getBotConfig(roomId).enabled, onRated: event => { SocialRoutes.onRatedGame(event); require('./src/routes-insights.js').onRatedGame(event); }, logger: console }); // Wave 2 R2: rate human-vs-human games on game end
 const SocialRoutes = require('./src/routes-social.js');
 const RetentionRoutes = require('./src/routes-retention.js'); // Wave 3 N2: loaded at boot so its rating-hook onGameOver listener sees every finished game
 
@@ -363,6 +363,7 @@ const ALLOWED_FILES = new Set([
   'src/ui-analysis.js',
   'src/ui-library.js',
   'src/ui-retention.js',
+  'src/ui-insights.js',
   'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'
@@ -1483,6 +1484,7 @@ function createServer() {
       if (SocialRoutes.handleSocialRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readBody, maxBodyBytes: MAX_BODY_BYTES, referee, seatAuth: seatAuthManager, isValidRoomId, accountsManager, gameArchive, ratingsStore: ratingHook.store, botService })) return; // Wave 2 R2: lobby/leaderboard/arena/social routes
       if (require('./src/routes-library.js').handleLibraryRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readBody, maxBodyBytes: MAX_BODY_BYTES, gameArchive })) return; // Wave 3: /api/library, /api/library/claim, /api/import/*
       if (RetentionRoutes.handleRetentionRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readJsonBody, gameArchive, referee, accountsManager })) return; // Wave 3 N2: /api/streak, /api/activity, /api/achievements
+      if (require('./src/routes-insights.js').handleInsightsRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readBody, maxBodyBytes: MAX_BODY_BYTES, gameArchive })) return; // Wave 3 N2.8/N3.15: /api/insights*, /api/league*
 
       sendJsonError(res, 404, 'not found');
       return;
