@@ -926,6 +926,15 @@ function handlePostGameEndpoint(req, res) {
       return;
     }
     try {
+      // Wave 3: ownership is server-attached from the session, never trusted
+      // from the client body (a guest could otherwise claim/poison rows).
+      delete parsed.owner_id; delete parsed.source; delete parsed.external_id; delete parsed.room_id;
+      const session = getAuthUser(req);
+      parsed.owner_id = session && session.userId ? String(session.userId) : null;
+      // auto-save posts the referee's UCI `moves` array; the Library/archive PGN paste posts only `pgn`.
+      parsed.source = Array.isArray(parsed.moves) && parsed.moves.length > 0 ? 'local' : 'pgn';
+      const room = extractRoomId(req);
+      parsed.room_id = room && room !== 'default' && isValidRoomId(room) ? room : null;
       const saved = gameArchive.saveGame(parsed);
       const origin = req.headers.origin;
       if (origin && isOriginAllowed(origin)) {

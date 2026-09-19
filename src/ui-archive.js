@@ -23,7 +23,10 @@ async function autoSaveFinishedGame(state) {
   const pgnText = buildPgn(sanList, resultToken);
 
   try {
-    await fetch('/api/games', {
+    // Room id rides on the URL so the server can bind the saved game to this
+    // room (Library "claim my guest games" matches on it); ownership itself
+    // is attached server-side from the session cookie.
+    await fetch(withRoomParam('/api/games'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

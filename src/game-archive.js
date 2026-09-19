@@ -264,6 +264,68 @@ function exportPgn(game) {
   return `${headerLines.join('\n')}\n\n${movetext ? movetext + ' ' : ''}${result}`.trim();
 }
 
+// Wave 3 ownership columns added to `games` (migration order matters for the
+// PRAGMA-guarded ALTER loop; never remove an entry).
+const GAMES_OWNERSHIP_COLUMNS = [
+  ['owner_id', 'TEXT'],
+  ['source', 'TEXT'],
+  ['external_id', 'TEXT'],
+  ['room_id', 'TEXT']
+];
+const GAME_SOURCES = ['local', 'lichess', 'chesscom', 'pgn'];
+
+/**
+ * Ownership scope shared by list()/search(). Three distinct states for `owner`:
+ *   key absent      -> all games (legacy behaviour; accounts.playerProfile,
+ *                      openings-explorer and insights rely on this)
+ *   owner: '<id>'   -> that account's games only
+ *   owner: null     -> unowned (guest/local) games only
+ * `source` filters by GAME_SOURCES value; 'local' also matches legacy NULL rows.
+ */
+function ownershipSqlClauses(options = {}) {
+  const clauses = [];
+  const params = [];
+  if (Object.prototype.hasOwnProperty.call(options, 'owner')) {
+    if (options.owner == null) clauses.push('owner_id IS NULL');
+    else { clauses.push('owner_id = ?'); params.push(String(options.owner)); }
+  }
+  if (options.source) {
+    if (options.source === 'local') clauses.push("(source IS NULL OR source = 'local')");
+    else { clauses.push('source = ?'); params.push(String(options.source)); }
+  }
+  if (options.roomId) { clauses.push('room_id = ?'); params.push(String(options.roomId)); }
+  return { clauses, params };
+}
+
+function ownershipMatches(game, options = {}) {
+  if (Object.prototype.hasOwnProperty.call(options, 'owner')) {
+    const owner = game.owner_id == null ? null : String(game.owner_id);
+    if (options.owner == null) { if (owner !== null) return false; }
+    else if (owner !== String(options.owner)) return false;
+  }
+  if (options.source) {
+    const src = game.source == null ? 'local' : String(game.source);
+    if (src !== String(options.source)) return false;
+  }
+  if (options.roomId && String(game.room_id || '') !== String(options.roomId)) return false;
+  return true;
+}
+
+function importFromRow(row) {
+  if (!row) return null;
+  return {
+    ownerId: row.owner_id,
+    source: row.source,
+    username: row.username || '',
+    lastRunAt: row.last_run_at,
+    imported: row.imported || 0,
+    skipped: row.skipped || 0,
+    total: row.total || 0,
+    nextSince: row.next_since == null ? null : row.next_since,
+    error: row.error || null
+  };
+}
+
 /**
  * SqliteStorageAdapter: backed by Node.js native `node:sqlite` DatabaseSync
  */
@@ -286,9 +348,25 @@ class SqliteStorageAdapter {
         eco TEXT,
         pgn TEXT,
         moves TEXT,
-        created_at INTEGER
+        created_at INTEGER,
+        owner_id TEXT,
+        source TEXT,
+        external_id TEXT,
+        room_id TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_games_created_at ON games(created_at DESC);
+      CREATE TABLE IF NOT EXISTS imports (
+        owner_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        username TEXT NOT NULL DEFAULT '',
+        last_run_at INTEGER NOT NULL,
+        imported INTEGER NOT NULL DEFAULT 0,
+        skipped INTEGER NOT NULL DEFAULT 0,
+        total INTEGER NOT NULL DEFAULT 0,
+        next_since INTEGER,
+        error TEXT,
+        PRIMARY KEY (owner_id, source)
+      );
       CREATE TABLE IF NOT EXISTS eval_cache (
         fen TEXT PRIMARY KEY,
         cp REAL,
@@ -362,12 +440,39 @@ class SqliteStorageAdapter {
       );
       CREATE INDEX IF NOT EXISTS idx_puzzle_attempts_player ON puzzle_attempts(player_id, created_at DESC);
     `);
+    this._migrateGamesColumns();
+  }
+
+  /**
+   * Wave 3: bind archived games to accounts + external sources. Existing
+   * databases created before these columns existed are upgraded in place with
+   * ALTER TABLE ... ADD COLUMN, guarded by PRAGMA table_info so the migration
+   * is idempotent. Indexes are plain (not UNIQUE): save() uses INSERT OR
+   * REPLACE and a unique index would silently swap game ids on conflict, so
+   * duplicate detection is done explicitly via findByExternal().
+   */
+  _migrateGamesColumns() {
+    const cols = new Set(this.db.prepare('PRAGMA table_info(games)').all().map(r => r.name));
+    for (const [name, type] of GAMES_OWNERSHIP_COLUMNS) {
+      if (!cols.has(name)) {
+        this.db.exec(`ALTER TABLE games ADD COLUMN ${name} ${type}`);
+      }
+    }
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_games_owner ON games(owner_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_games_external ON games(source, external_id);
+      CREATE INDEX IF NOT EXISTS idx_games_room ON games(room_id);
+    `);
+  }
+
+  gamesColumns() {
+    return this.db.prepare('PRAGMA table_info(games)').all().map(r => r.name);
   }
 
   save(record) {
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO games (id, white, black, date, result, eco, pgn, moves, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO games (id, white, black, date, result, eco, pgn, moves, created_at, owner_id, source, external_id, room_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       record.id,
@@ -378,9 +483,53 @@ class SqliteStorageAdapter {
       record.eco,
       record.pgn,
       record.moves,
-      record.created_at
+      record.created_at,
+      record.owner_id == null ? null : String(record.owner_id),
+      record.source == null ? null : String(record.source),
+      record.external_id == null ? null : String(record.external_id),
+      record.room_id == null ? null : String(record.room_id)
     );
     return record;
+  }
+
+  findByExternal(source, externalId) {
+    if (!source || !externalId) return null;
+    const row = this.db.prepare('SELECT * FROM games WHERE source = ? AND external_id = ? LIMIT 1').get(String(source), String(externalId));
+    return row ? Object.assign({}, row) : null;
+  }
+
+  /** Assign unowned games (by id or room_id) to an owner. Returns claimed ids. */
+  claimGames(ownerId, { ids = [], roomIds = [] } = {}) {
+    if (!ownerId) return [];
+    const claimed = [];
+    const byId = this.db.prepare('SELECT id FROM games WHERE id = ? AND owner_id IS NULL');
+    const byRoom = this.db.prepare('SELECT id FROM games WHERE room_id = ? AND owner_id IS NULL');
+    const upd = this.db.prepare('UPDATE games SET owner_id = ? WHERE id = ? AND owner_id IS NULL');
+    const targets = new Set();
+    for (const id of ids) { const r = byId.get(String(id)); if (r) targets.add(r.id); }
+    for (const room of roomIds) { for (const r of byRoom.all(String(room))) targets.add(r.id); }
+    for (const id of targets) {
+      const res = upd.run(String(ownerId), id);
+      if (res && res.changes > 0) claimed.push(id);
+    }
+    return claimed;
+  }
+
+  saveImport(record) {
+    this.db.prepare(`
+      INSERT OR REPLACE INTO imports (owner_id, source, username, last_run_at, imported, skipped, total, next_since, error)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      String(record.ownerId), String(record.source), String(record.username || ''),
+      Number(record.lastRunAt || Date.now()), Number(record.imported || 0), Number(record.skipped || 0),
+      Number(record.total || 0), record.nextSince == null ? null : Number(record.nextSince), record.error == null ? null : String(record.error)
+    );
+    return record;
+  }
+
+  listImports(ownerId) {
+    if (!ownerId) return [];
+    return this.db.prepare('SELECT * FROM imports WHERE owner_id = ? ORDER BY source').all(String(ownerId)).map(importFromRow);
   }
 
   get(id) {
@@ -393,24 +542,36 @@ class SqliteStorageAdapter {
     const limit = typeof options.limit === 'number' && options.limit > 0 ? options.limit : 50;
     const offset = typeof options.offset === 'number' && options.offset >= 0 ? options.offset : 0;
     const order = options.sort && String(options.sort).toUpperCase().includes('ASC') ? 'ASC' : 'DESC';
-    const stmt = this.db.prepare(`SELECT * FROM games ORDER BY created_at ${order}, rowid ${order} LIMIT ? OFFSET ?`);
-    const rows = stmt.all(limit, offset);
+    const scope = ownershipSqlClauses(options);
+    const where = scope.clauses.length ? `WHERE ${scope.clauses.join(' AND ')}` : '';
+    const stmt = this.db.prepare(`SELECT * FROM games ${where} ORDER BY created_at ${order}, rowid ${order} LIMIT ? OFFSET ?`);
+    const rows = stmt.all(...scope.params, limit, offset);
     return rows.map(r => Object.assign({}, r));
+  }
+
+  count(options = {}) {
+    const scope = ownershipSqlClauses(options);
+    const where = scope.clauses.length ? `WHERE ${scope.clauses.join(' AND ')}` : '';
+    const row = this.db.prepare(`SELECT COUNT(*) AS n FROM games ${where}`).get(...scope.params);
+    return row ? Number(row.n) : 0;
   }
 
   search(query, options = {}) {
     const limit = typeof options.limit === 'number' && options.limit > 0 ? options.limit : 50;
     const offset = typeof options.offset === 'number' && options.offset >= 0 ? options.offset : 0;
 
+    const scope = ownershipSqlClauses(options);
+    const scopeSql = scope.clauses.length ? ' AND ' + scope.clauses.join(' AND ') : '';
+
     if (typeof query === 'string') {
       const pattern = `%${query.trim()}%`;
       const stmt = this.db.prepare(`
         SELECT * FROM games
-        WHERE white LIKE ? OR black LIKE ? OR eco LIKE ? OR result LIKE ? OR moves LIKE ? OR id LIKE ?
+        WHERE (white LIKE ? OR black LIKE ? OR eco LIKE ? OR result LIKE ? OR moves LIKE ? OR id LIKE ?)${scopeSql}
         ORDER BY created_at DESC, rowid DESC
         LIMIT ? OFFSET ?
       `);
-      const rows = stmt.all(pattern, pattern, pattern, pattern, pattern, pattern, limit, offset);
+      const rows = stmt.all(pattern, pattern, pattern, pattern, pattern, pattern, ...scope.params, limit, offset);
       return rows.map(r => Object.assign({}, r));
     }
 
@@ -422,6 +583,8 @@ class SqliteStorageAdapter {
       if (query.eco) { clauses.push('eco LIKE ?'); params.push(`%${query.eco}%`); }
       if (query.result) { clauses.push('result = ?'); params.push(query.result); }
       if (query.id) { clauses.push('id = ?'); params.push(query.id); }
+      clauses.push(...scope.clauses);
+      params.push(...scope.params);
 
       const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
       params.push(limit, offset);
@@ -768,6 +931,7 @@ class JsonFileStorageAdapter {
     this.rateLimits = new Map();
     this.puzzles = new Map();
     this.puzzleAttempts = [];
+    this.imports = new Map();
     this._load();
   }
 
@@ -830,6 +994,9 @@ class JsonFileStorageAdapter {
           if (Array.isArray(parsed.puzzleAttempts)) {
             this.puzzleAttempts = parsed.puzzleAttempts.filter(a => a && a.playerId && a.puzzleId);
           }
+          if (parsed.imports && typeof parsed.imports === 'object') {
+            for (const [k, v] of Object.entries(parsed.imports)) this.imports.set(k, v);
+          }
         }
       }
     } catch (_) {
@@ -869,7 +1036,9 @@ class JsonFileStorageAdapter {
         rateLimitsObj[k] = v;
       }
       const puzzles = Array.from(this.puzzles.values());
-      const payload = JSON.stringify({ games, evalCache: evalCacheObj, puzzleRatings: puzzleRatingsObj, ratingsPool: ratingsPoolObj, puzzleReviews: puzzleReviewsObj, rateLimits: rateLimitsObj, puzzles, puzzleAttempts: this.puzzleAttempts }, null, 2);
+      const importsObj = {};
+      for (const [k, v] of (this.imports || new Map())) importsObj[k] = v;
+      const payload = JSON.stringify({ games, evalCache: evalCacheObj, puzzleRatings: puzzleRatingsObj, ratingsPool: ratingsPoolObj, puzzleReviews: puzzleReviewsObj, rateLimits: rateLimitsObj, puzzles, puzzleAttempts: this.puzzleAttempts, imports: importsObj }, null, 2);
       const tempPath = `${this.filePath}.tmp.${Date.now()}`;
       fs.writeFileSync(tempPath, payload, 'utf8');
       fs.renameSync(tempPath, this.filePath);
@@ -879,7 +1048,12 @@ class JsonFileStorageAdapter {
   }
 
   save(record) {
-    this.games.set(record.id, Object.assign({}, record));
+    const stored = Object.assign({}, record);
+    // JSON fallback mirrors the SQLite columns so rows are shape-compatible.
+    for (const [name] of GAMES_OWNERSHIP_COLUMNS) {
+      if (stored[name] === undefined) stored[name] = null;
+    }
+    this.games.set(record.id, stored);
     this._saveToDisk();
     return record;
   }
@@ -889,12 +1063,59 @@ class JsonFileStorageAdapter {
     return item ? Object.assign({}, item) : null;
   }
 
+  findByExternal(source, externalId) {
+    if (!source || !externalId) return null;
+    for (const g of this.games.values()) {
+      if (g.source === String(source) && g.external_id === String(externalId)) return Object.assign({}, g);
+    }
+    return null;
+  }
+
+  claimGames(ownerId, { ids = [], roomIds = [] } = {}) {
+    if (!ownerId) return [];
+    const idSet = new Set(ids.map(String));
+    const roomSet = new Set(roomIds.map(String));
+    const claimed = [];
+    for (const g of this.games.values()) {
+      if (g.owner_id != null) continue;
+      if (idSet.has(String(g.id)) || (g.room_id && roomSet.has(String(g.room_id)))) {
+        g.owner_id = String(ownerId);
+        claimed.push(g.id);
+      }
+    }
+    if (claimed.length) this._saveToDisk();
+    return claimed;
+  }
+
+  count(options = {}) {
+    let n = 0;
+    for (const g of this.games.values()) if (ownershipMatches(g, options)) n++;
+    return n;
+  }
+
+  saveImport(record) {
+    const rec = {
+      ownerId: String(record.ownerId), source: String(record.source), username: String(record.username || ''),
+      lastRunAt: Number(record.lastRunAt || Date.now()), imported: Number(record.imported || 0),
+      skipped: Number(record.skipped || 0), total: Number(record.total || 0),
+      nextSince: record.nextSince == null ? null : Number(record.nextSince), error: record.error == null ? null : String(record.error)
+    };
+    this.imports.set(`${rec.ownerId}:${rec.source}`, rec);
+    this._saveToDisk();
+    return rec;
+  }
+
+  listImports(ownerId) {
+    if (!ownerId) return [];
+    return Array.from(this.imports.values()).filter(r => r.ownerId === String(ownerId)).sort((a, b) => a.source.localeCompare(b.source));
+  }
+
   list(options = {}) {
     const limit = typeof options.limit === 'number' && options.limit > 0 ? options.limit : 50;
     const offset = typeof options.offset === 'number' && options.offset >= 0 ? options.offset : 0;
     const order = options.sort && String(options.sort).toUpperCase().includes('ASC') ? 'ASC' : 'DESC';
 
-    const list = Array.from(this.games.values()).sort((a, b) => {
+    const list = Array.from(this.games.values()).filter(g => ownershipMatches(g, options)).sort((a, b) => {
       const diff = (a.created_at || 0) - (b.created_at || 0);
       return order === 'ASC' ? diff : -diff;
     });
@@ -906,7 +1127,7 @@ class JsonFileStorageAdapter {
     const limit = typeof options.limit === 'number' && options.limit > 0 ? options.limit : 50;
     const offset = typeof options.offset === 'number' && options.offset >= 0 ? options.offset : 0;
 
-    let filtered = Array.from(this.games.values());
+    let filtered = Array.from(this.games.values()).filter(g => ownershipMatches(g, options));
 
     if (typeof query === 'string') {
       const q = query.trim().toLowerCase();
@@ -1216,6 +1437,11 @@ class GameArchive {
       game.pgn = exportPgn(game);
     }
 
+    const source = game.source == null ? null : String(game.source);
+    if (source !== null && !GAME_SOURCES.includes(source)) {
+      throw new Error(`saveGame: unknown source "${source}"`);
+    }
+
     const record = {
       id: String(game.id),
       white: String(game.white),
@@ -1225,10 +1451,41 @@ class GameArchive {
       eco: String(game.eco || ''),
       pgn: String(game.pgn),
       moves: movesStr,
-      created_at: Number(game.created_at || getNextCreatedAt())
+      created_at: Number(game.created_at || getNextCreatedAt()),
+      owner_id: game.owner_id == null ? null : String(game.owner_id),
+      source,
+      external_id: game.external_id == null ? null : String(game.external_id),
+      room_id: game.room_id == null ? null : String(game.room_id)
     };
 
     return this.storage.save(record);
+  }
+
+  /** Find an imported game by (source, external_id); null if absent. */
+  findGameByExternal(source, externalId) {
+    return this._storageCall('findByExternal', null, source, externalId);
+  }
+
+  /**
+   * Assign unowned games to `ownerId`. `targets` may be an array of room ids
+   * (legacy call shape) or `{ ids, roomIds }`. Returns the claimed game ids.
+   */
+  claimGames(ownerId, targets = {}) {
+    const opts = Array.isArray(targets) ? { roomIds: targets } : (targets || {});
+    return this._storageCall('claimGames', [], ownerId, opts);
+  }
+
+  countGames(options = {}) {
+    return this._storageCall('count', 0, options);
+  }
+
+  saveImport(record) {
+    if (!record || !record.ownerId || !record.source) return null;
+    return this._storageCall('saveImport', null, record);
+  }
+
+  listImports(ownerId) {
+    return this._storageCall('listImports', [], ownerId);
   }
 
   getGame(id) {
@@ -1408,6 +1665,11 @@ if (typeof module !== 'undefined' && module.exports) {
     getGame: (id) => getArchive().getGame(id),
     listGames: (options) => getArchive().listGames(options),
     searchGames: (query, options) => getArchive().searchGames(query, options),
+    countGames: (options) => getArchive().countGames(options),
+    findGameByExternal: (source, externalId) => getArchive().findGameByExternal(source, externalId),
+    claimGames: (ownerId, targets) => getArchive().claimGames(ownerId, targets),
+    saveImport: (record) => getArchive().saveImport(record),
+    listImports: (ownerId) => getArchive().listImports(ownerId),
     saveEval: (fen, evalData) => getArchive().saveEval(fen, evalData),
     getEval: (fen) => getArchive().getEval(fen),
     savePuzzleRating: (kind, id, ratingData) => getArchive().savePuzzleRating(kind, id, ratingData),
@@ -1432,6 +1694,8 @@ if (typeof module !== 'undefined' && module.exports) {
     exportPgn,
     parsePgn,
     detectEco,
+    GAME_SOURCES,
+    GAMES_OWNERSHIP_COLUMNS,
     DEFAULT_DB_PATH,
     DEFAULT_JSON_PATH
   };
