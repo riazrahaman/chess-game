@@ -7,7 +7,7 @@ reachability (loaded / allowlisted / precached / called) is enforced by `test/re
 | Module | Role |
 |---|---|
 | `server.js` | HTTP API, SSE, static allowlist (`ALLOWED_FILES`), CSP/HSTS/CORS, gzip + ETag, rate limiting, auth routes, room router, idle-room GC, admin routes |
-| `src/referee-service.js` | authoritative per-room game state: FIFO command queue, journal + snapshot, per-ply positions, claimable draws, room inspection/deletion for GC |
+| `src/referee-service.js` | authoritative per-room game state: FIFO command queue, journal + snapshot, per-ply positions, claimable draws, human-vs-human undo requests (`state.undoRequest`), room inspection/deletion for GC |
 | `src/rules-engine.js`, `src/engine.js` | chess.js adapter (legality, FEN, SAN, automatic vs claimable draws) and in-house move generator/PGN builder |
 | `src/seat-auth.js` | seat tokens per room; claims may carry the signed-in account |
 | `src/bot-service.js`, `src/engine-server.js` | Play-vs-Computer ladder over Stockfish in a worker thread; TSV opening book for L1–L4; PST fallback |
@@ -52,7 +52,7 @@ reachability (loaded / allowlisted / precached / called) is enforced by `test/re
 - `data/openings.tsv`, `data/puzzles-sample.csv` (+ READMEs with provenance/licence)
 - `vendor/stockfish/` — engine loader + WASM + `Copying.txt` + upgrade notes
 - `scripts/smoke-test.mjs`, `scripts/test-ui-features.mjs` (Playwright), `scripts/engine-probe.js`, `scripts/import-puzzles.mjs`, `scripts/kanban-sync.mjs`
-- `test/*-selftest.js` — one standalone script per area; `wave0`–`wave3` suites cover the audited work; `reachability` and `t0-deadcode` are the structural guards
+- `test/*-selftest.js` — one standalone script per area; `wave0`–`wave3` suites cover the audited work; `reachability` and `t0-deadcode` are the structural guards; `g4-undo-request-selftest.js` covers the consent-gated undo (76 assertions)
 
 ## Runtime artifacts (gitignored)
 `.referee-state.json` / `.referee-journal.jsonl` (default room) and `.referee-state-<room>.json` /

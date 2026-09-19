@@ -422,6 +422,14 @@
       "title": "Play-Coach adaptive sparring opponent",
       "description": "Bot + coach combined: adapts strength, warns of threats, asks guiding questions, allows hints/takebacks. Combines bot-service + ai-coach + engine.",
       "depends_on": ["w4-maia-opponents"]
+    },
+    {
+      "id": "g4-undo-request",
+      "round": 1,
+      "status": "DONE",
+      "priority": "high",
+      "title": "G4 Undo as a request with opponent consent",
+      "description": "Human-vs-human: POST /api/undo records state.undoRequest instead of mutating; POST /api/undo/respond {consent} from the opponent applies/clears it. Consent holds for the whole game (both seats occupied by humans, expiry-independent). A finished game rejects all undo actions 409 'game over'; draw-claim/draw-accept/timeout clear the pending request. Solo/bot/unseated undo unchanged. g4-undo-request-selftest (76 assertions)."
     }
   ]
 }

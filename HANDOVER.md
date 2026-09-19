@@ -283,3 +283,21 @@ games are visible to any visitor; `service-worker.js` `CACHE_NAME` is still `che
 installs to refetch `index.html`); brilliant/tablebase achievement events can only be owner-verified once archived
 games carry real player names; `scripts/test-ui-features.mjs` has no Puzzles/Library/Insights/Missed-tactics steps
 yet (DoD item 4); a 300-ply first missed-tactics request can take ~60 s (serial engine).
+
+## 9. POST-WAVE 3 — Gameplay correctness (branch `feat/g4-undo-request`, 2026-09-19)
+
+| Card | Owner | Commit | What landed | Tests |
+|---|---|---|---|---|
+| `g4-undo-request` | builder | (uncommitted) | Undo in a human-vs-human room becomes an opponent-consent request: `POST /api/undo` sets `state.undoRequest` without touching the board, `POST /api/undo/respond` (alias `/api/undo-respond`) takes `{consent:true|false}`, only the non-requester may answer. Solo/local/bot/unseated undo is unchanged. UI mirrors the draw-offer banner (`#undo-request-banner`). Journal replay handles the new `undo` args (`request`/`respond`) so crash recovery cannot resurrect a stale request or double-undo. A finished game rejects every undo action with 409 `game over` (the handler guards on `gameOver` first, so a dangling request cannot resurrect the board), and draw-claim / draw-accept / timeout all clear `state.undoRequest`. | `g4-undo-request-selftest.js` — 76 assertions |
+
+**Design note:** the referee stays seat-agnostic. `server.js` derives `bothSeatsHuman` from
+`seatAuthManager.getSeatAccounts(roomId)` and passes it, plus the caller's colour from `validateMutation`, into
+the `undo` command args — the same pattern `_cmdDraw` uses for `isSeated`. Product decision: consent is keyed on
+both seats being **occupied by humans for the whole game**, *not* on both being currently active — the predicate
+requires only that both seats exist and are non-bot, deliberately ignoring idle-seat expiry, so a ~5-minute idle
+timeout can never silently downgrade a human-vs-human room to unilateral undo.
+
+**Game-over guard:** `_cmdUndo` returns `{ok:false, error:'game over', httpStatus:409}` at the top whenever
+`state.gameOver` is set, covering request / respond / the legacy unilateral path. Game-ending transitions
+(draw-claim, draw-accept, resignation, timeout, a move) all null `state.undoRequest` so no pending request can
+outlive the game (`src/referee-service.js`).

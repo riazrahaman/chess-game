@@ -261,6 +261,121 @@ async function testUiFeatures() {
   if (ghostCheck.g4 !== 'black-b') throw new Error('Black bishop missing on g4 at ply 10');
   console.log('✔ Passed: History scrubbing correctly cleans vacated squares without ghost duplicate pieces');
 
+  // 6b. Test G4 Undo-as-a-request banner (#undo-request-banner).
+  //
+  // Consent needs BOTH seats occupied by non-bot humans, and a seated room then
+  // requires a seat token for every move/mutation. The page (a single browser
+  // context) can hold only one seat, so we seat it as BLACK and claim WHITE out
+  // of band; white requests the undo via a direct token-authenticated call, and
+  // the page — now the opponent — must render the banner with a clickable
+  // Accept/Decline. This exercises the real UI wiring, not a stubbed state.
+  console.log('Testing G4 undo-request banner...');
+  const undoRoomId = await page.evaluate(() => (typeof getCurrentRoomId === 'function' ? getCurrentRoomId() : 'default'));
+  // Fresh start so the 10 plies from the scrub test don't linger.
+  await page.evaluate(async () => {
+    const q = (typeof getCurrentRoomId === 'function' && getCurrentRoomId() !== 'default') ? `?room=${encodeURIComponent(getCurrentRoomId())}` : '';
+    await fetch('/api/reset' + q, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  });
+  await page.waitForTimeout(200);
+
+  // Page claims black through its own helper so the UI holds that seat token.
+  const pageSeated = await page.evaluate(() => window.claimSeat('black'));
+  if (!pageSeated) throw new Error('Page failed to claim the black seat for the undo test');
+  // Claim white out of band and keep its token.
+  const undoSeats = await page.evaluate(async (room) => {
+    const res = await fetch('/api/seat/claim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'white', room })
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, token: data.token || null };
+  }, undoRoomId);
+  if (!undoSeats.ok || !undoSeats.token) {
+    throw new Error(`Could not claim the white seat for the undo test: ${JSON.stringify(undoSeats)}`);
+  }
+  const whiteToken = undoSeats.token;
+  const blackToken = await page.evaluate(() => window.getCurrentSeatToken());
+
+  // Two token-authenticated plies (white then black).
+  await page.evaluate(async ({ room, whiteToken, blackToken }) => {
+    const q = room && room !== 'default' ? `?room=${encodeURIComponent(room)}` : '';
+    const send = (move, token) => fetch('/api/move' + q, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Seat-Token': token },
+      body: JSON.stringify({ move })
+    });
+    await send('e2e4', whiteToken);
+    await send('e7e5', blackToken);
+  }, { room: undoRoomId, whiteToken, blackToken });
+  await page.waitForTimeout(300);
+  const undoPlyBefore = await page.evaluate(() => window.getLivePly());
+  if (undoPlyBefore !== 2) throw new Error(`Expected 2 plies before undo request, got ${undoPlyBefore}`);
+
+  // White requests an undo out of band; the board must not change.
+  await page.evaluate(async ({ room, token }) => {
+    const q = room && room !== 'default' ? `?room=${encodeURIComponent(room)}` : '';
+    await fetch('/api/undo' + q, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Seat-Token': token },
+      body: JSON.stringify({})
+    });
+  }, { room: undoRoomId, token: whiteToken });
+
+  // The page is the opponent, so the banner and its actions must appear.
+  const banner = page.locator('#undo-request-banner');
+  await banner.waitFor({ state: 'visible', timeout: 5000 });
+  const undoPlyAfterRequest = await page.evaluate(() => window.getLivePly());
+  if (undoPlyAfterRequest !== 2) throw new Error(`Undo request must not change the board (got ${undoPlyAfterRequest} plies)`);
+  const bannerText = await page.locator('#undo-request-text').textContent();
+  if (!/white/i.test(bannerText || '')) throw new Error(`Undo banner should name the white requester, got: ${bannerText}`);
+  const acceptUndo = page.locator('#accept-undo');
+  const declineUndo = page.locator('#decline-undo');
+  if (await acceptUndo.count() < 1) throw new Error('#accept-undo control missing from undo-request banner');
+  if (!(await acceptUndo.isVisible())) throw new Error('#accept-undo is not visible to the opponent');
+  if (await acceptUndo.isDisabled()) throw new Error('#accept-undo should be clickable');
+  if (await declineUndo.count() < 1) throw new Error('#decline-undo control missing from undo-request banner');
+  if (await declineUndo.isDisabled()) throw new Error('#decline-undo should be clickable');
+  console.log('✔ Passed: undo request renders the consent banner with clickable Accept/Decline');
+
+  // Declining clears the banner and leaves the board alone (clickable path).
+  await declineUndo.click();
+  await page.waitForTimeout(500);
+  await banner.waitFor({ state: 'hidden', timeout: 5000 });
+  const undoPlyAfterDecline = await page.evaluate(() => window.getLivePly());
+  if (undoPlyAfterDecline !== 2) throw new Error(`Declining undo must not change the board (got ${undoPlyAfterDecline} plies)`);
+
+  // Re-request from white and accept: the board drops exactly one ply.
+  await page.evaluate(async ({ room, token }) => {
+    const q = room && room !== 'default' ? `?room=${encodeURIComponent(room)}` : '';
+    await fetch('/api/undo' + q, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Seat-Token': token },
+      body: JSON.stringify({})
+    });
+  }, { room: undoRoomId, token: whiteToken });
+  await banner.waitFor({ state: 'visible', timeout: 5000 });
+  await acceptUndo.click();
+  await page.waitForTimeout(600);
+  await banner.waitFor({ state: 'hidden', timeout: 5000 });
+  const undoPlyAfterAccept = await page.evaluate(() => window.getLivePly());
+  if (undoPlyAfterAccept !== 1) throw new Error(`Accepting undo should remove one ply (got ${undoPlyAfterAccept})`);
+  console.log('✔ Passed: declining and accepting undo through the banner both work (accept removes one ply)');
+
+  // Release both seats so later steps see the auto-room as unseated again.
+  // Black is held by the page, so its own leaveSeat() releases it; white was
+  // claimed out of band and is released here. (blackToken is intentionally not
+  // released directly — leaveSeat() already does it.)
+  await page.evaluate(async ({ room, token }) => {
+    await fetch('/api/seat/release', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Seat-Token': token },
+      body: JSON.stringify({ room, token })
+    }).catch(() => {});
+  }, { room: undoRoomId, token: whiteToken });
+  await page.evaluate(() => window.leaveSeat && window.leaveSeat());
+  await page.waitForTimeout(200);
+
   // 7. Test Puzzles View
   console.log('Testing Puzzles view...');
   await page.evaluate(() => window.Shell && window.Shell.navigate('puzzles'));
