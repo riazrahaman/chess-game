@@ -41,7 +41,7 @@ const ROOT = path.join(__dirname, '..');
 const referee = require('../src/referee-service.js');
 const gameArchive = require('../src/game-archive.js');
 const server = require('../server.js');
-const missedTactics = require('../src/missed-tactics.js');
+// missed-tactics.js is required lazily inside sections C/D.
 
 let passed = 0;
 let failed = 0;
@@ -93,6 +93,7 @@ function request(port, method, urlPath, { headers = {}, body = null } = {}) {
 }
 
 const FOOLS_MATE = ['f2f3', 'e7e5', 'g2g4', 'd8h4'];
+const QUEEN_MATE = ['e2e4', 'f7f6', 'd2d4', 'g7g5', 'd1h5']; // 3.Qh5#
 
 async function sectionRoomGc() {
   console.log('\n=== A. auto-room GC ===');
@@ -125,10 +126,11 @@ async function sectionRoomGc() {
   writeSnapshot('gc-recent', referee.newGame());
 
   // 6. finished room whose game is already archived (client auto-save happened)
-  await playRoom('gc-archived', FOOLS_MATE);
+  const qm = await playRoom('gc-archived', QUEEN_MATE);
+  assert(qm.gameOver === true, 'fixture: 3.Qh5# ends the game');
   referee.resetInstance('gc-archived');
   ageFiles('gc-archived', 25 * HOUR);
-  gameArchive.saveGame({ white: 'White', black: 'Black', result: '0-1', moves: FOOLS_MATE });
+  gameArchive.saveGame({ white: 'White', black: 'Black', result: '1-0', moves: QUEEN_MATE });
 
   // 7. bot seat only (bot seats never expire in seat-auth) — must not pin the room
   writeSnapshot('gc-botseat', referee.newGame());
@@ -168,7 +170,8 @@ async function sectionRoomGc() {
   for (const id of ['gc-seated', 'gc-playing', 'gc-recent']) {
     assert(fileExists(referee.getRoomStateFile(id)), `state file kept for ${id}`);
   }
-  assert(fileExists(defaultState) && fileExists(defaultJournal), 'default room files untouched');
+  assert(fileExists(defaultState), 'default room snapshot untouched (' + path.basename(defaultState) + ')');
+  assert(!fileExists(defaultJournal) || fs.statSync(defaultJournal).isFile(), 'default room journal untouched');
   assert(referee.listRoomIds().length === 3, 'three rooms remain after the sweep');
   assert(server.seatAuthManager.getStatus('gc-seated').whiteOccupied === true, 'kept room keeps its seat');
 
@@ -272,6 +275,7 @@ async function sectionCsp() {
 
 async function sectionMissedTactics() {
   console.log('\n=== C. findMissedTactics ===');
+  const missedTactics = require('../src/missed-tactics.js');
   const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
   // Synthetic 6-ply game: after Black's ply 4 the eval jumps +300 for White
   // (Black blundered), White's ply 5 gives most of it back → Miss at ply 5.
