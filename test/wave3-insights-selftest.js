@@ -189,7 +189,9 @@ async function unitTests() {
     lg.recordResult('a', 'win', '2026-W32');
     const closed = lg.autoClose();
     assert.deepStrictEqual(closed.map(s => s.week), ['2026-W30', '2026-W31']);
-    assert.strictEqual(lg.playerTier('a'), 'Bronze', 'promoted twice: Wood -> Stone -> Bronze');
+    // both divisions were Wood (W31 was joined before W30 closed), so the tier rises once
+    assert.strictEqual(lg.playerTier('a'), 'Stone');
+    assert.strictEqual(closed[1].promoted[0].fromTier, 'Wood');
     assert.strictEqual(lg.standings('a', '2026-W32').closed, false);
     assert.strictEqual(lg.autoClose().length, 0);
   });

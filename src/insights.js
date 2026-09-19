@@ -24,7 +24,9 @@
  * unknown), method (mate | draw | other — buildPgn writes no [Termination]
  * tag, so resign vs flag is indistinguishable; imported PGNs with the tag are
  * honoured), weekday and hour (UTC, from created_at).
- * Filters: from/to (date or ms), color, tc, opponent (human/bot/unknown).
+ * Filters: from/to (date or ms), color, tc, opponent (human/bot/unknown —
+ * bot from a Stockfish/bot-like opponent name, human from a real opponent name
+ * when the player's side is known, else unknown).
  *
  * Player binding: archived games are not yet bound to an account (Worker C is
  * adding owner_id). loadGames() honours an injected selectGames(playerId) or
@@ -110,6 +112,11 @@ function normalizeResult(result) {
   return '*';
 }
 
+function isPlaceholderName(name) {
+  const v = String(name || '').trim().toLowerCase();
+  return !v || v === 'white' || v === 'black' || v === '?' || v === 'unknown';
+}
+
 function isBotName(name) {
   return /stockfish|computer|\bbot\b|engine|maia|level\s*\d/i.test(String(name || ''));
 }
@@ -152,6 +159,7 @@ function normalizeGame(row, ctx = {}) {
     const opp = color === 'white' ? row.black : color === 'black' ? row.white : null;
     if (opp && isBotName(opp)) opponentType = 'bot';
     else if (isBotName(row.white) || isBotName(row.black)) opponentType = 'bot';
+    else if (opp && !isPlaceholderName(opp)) opponentType = 'human';
   }
 
   // --- result method
