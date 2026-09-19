@@ -27,6 +27,7 @@
     { id: 'play', title: 'Play', order: 10 },
     { id: 'analysis', title: 'Analysis', order: 20 },
     { id: 'puzzles', title: 'Puzzles', order: 30 },
+    { id: 'coordinates', title: 'Coordinates', order: 35 },
     { id: 'library', title: 'Library', order: 40 },
     { id: 'compete', title: 'Compete', order: 50 },
     { id: 'me', title: 'Profile', order: 60 }
