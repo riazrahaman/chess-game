@@ -938,6 +938,22 @@
             .settings-row { flex-wrap: wrap; }
             .settings-row-control, .settings-row-control button, .settings-row-control select { width: 100%; }
         }
+        /* G6: Zen Mode - Distraction-free live play */
+        body.zen-mode .app-header { opacity: 0.2; transition: opacity 0.2s ease; }
+        body.zen-mode .app-header:hover { opacity: 1; }
+        body.zen-mode #eval-bar-container,
+        body.zen-mode #multipv-container,
+        body.zen-mode #assist-block,
+        body.zen-mode #spectator-badge,
+        body.zen-mode #chat-panel,
+        body.zen-mode #why-explanation-section,
+        body.zen-mode #game-report-section,
+        body.zen-mode #retry-mistakes-section,
+        body.zen-mode .pz-rating,
+        body.zen-mode #theme-bar,
+        body.zen-mode #graph-panel { display: none !important; }
+        #zen-pill { display: none; }
+        body.zen-mode #zen-pill { display: inline-block; font-size: 0.75rem; color: var(--muted); margin-left: 6px; }
     </style>
 </head>
 <body>
@@ -989,7 +1005,7 @@
         <p class="section-label">Your board</p>
         <p id="board-instructions" class="visually-hidden">Use the arrow keys to move between squares. Press Enter or Space to select a piece or move it.</p>
         <div id="info">Turn: White</div>
-        <div id="status" aria-live="polite">Status: Ongoing</div>
+        <div id="status" aria-live="polite">Status: Ongoing<span id="zen-pill"> [Zen mode: Z to exit]</span></div>
         <div id="connection-status" role="status" aria-live="polite" data-state="connecting">Connecting to referee…</div>
         <div id="command-status" role="status" aria-live="assertive" data-state="idle"></div>
         <button id="retry-command" class="hidden" type="button">Retry last action</button>
@@ -1055,7 +1071,8 @@
             <button id="resign" type="button">Resign</button>
             <button id="offer-draw" type="button">Draw</button>
             <button id="undo" type="button">Undo</button>
-            <button id="flip-board" type="button">Flip</button>
+            <button id="flip-board" type="button" title="Flip Board (Shortcut: F)">Flip</button>
+            <button id="zen-mode-toggle" type="button" title="Toggle Zen Mode (Shortcut: Z)">Zen</button>
             <button id="copy-pgn" type="button">Copy PGN</button>
             <button id="game-archive-btn" type="button">Game Archive</button>
             <button id="game-review-btn" type="button">Game Review</button>

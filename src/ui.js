@@ -966,6 +966,17 @@ function handleGlobalScrubberKeydown(event) {
 
   if (!event.altKey && !event.ctrlKey && !event.metaKey && typeof event.key === 'string') {
     const k = event.key.toLowerCase();
+    if (k === 'f') {
+      if (event.preventDefault) event.preventDefault();
+      const btn = document.getElementById('flip-board');
+      if (btn) btn.click();
+      return;
+    }
+    if (k === 'z') {
+      if (event.preventDefault) event.preventDefault();
+      toggleZenMode();
+      return;
+    }
     if (k === 'v') {
       if (event.preventDefault) event.preventDefault();
       const btn = document.getElementById('voice-toggle');
@@ -1969,6 +1980,50 @@ if (flipBoardButton) flipBoardButton.onclick = () => {
   boardFlipped = !boardFlipped;
   renderBoard();
 };
+
+// G6: Zen Mode (distraction-free live play)
+let zenModeActive = false;
+
+function isZenModeActive() {
+  return zenModeActive;
+}
+
+function applyZenModeUI() {
+  if (typeof document === 'undefined') return;
+  document.body.classList.toggle('zen-mode', zenModeActive);
+  const zenBtn = document.getElementById('zen-mode-toggle');
+  if (zenBtn) {
+    zenBtn.textContent = zenModeActive ? 'Zen: On' : 'Zen';
+    zenBtn.setAttribute('aria-pressed', zenModeActive ? 'true' : 'false');
+    zenBtn.classList.toggle('active', zenModeActive);
+  }
+}
+
+function setZenMode(enabled) {
+  zenModeActive = Boolean(enabled);
+  try {
+    localStorage.setItem('chess_zen_mode', zenModeActive ? '1' : '0');
+  } catch (_) {}
+  applyZenModeUI();
+  if (typeof accessibilityController !== 'undefined' && accessibilityController && accessibilityController.announceLive) {
+    accessibilityController.announceLive(zenModeActive ? 'Zen mode enabled. Press Z to exit.' : 'Zen mode disabled.');
+  }
+}
+
+function toggleZenMode() {
+  setZenMode(!zenModeActive);
+}
+
+const zenModeToggleBtn = document.getElementById('zen-mode-toggle');
+if (zenModeToggleBtn) {
+  zenModeToggleBtn.onclick = toggleZenMode;
+}
+
+try {
+  if (typeof localStorage !== 'undefined' && localStorage.getItem('chess_zen_mode') === '1') {
+    setZenMode(true);
+  }
+} catch (_) {}
 const resignButton = document.getElementById('resign');
 if (resignButton) resignButton.onclick = async () => {
   const resignRole = currentSeatRole || (turn === 'white' ? 'white' : 'black');
@@ -3546,6 +3601,9 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.handleTypedCommand = handleTypedCommand;
   window.dispatchA11yAction = dispatchA11yAction;
   window.buildLegalMoveCandidates = buildLegalMoveCandidates;
+  window.toggleZenMode = toggleZenMode;
+  window.isZenModeActive = isZenModeActive;
+  window.setZenMode = setZenMode;
 }
 
 function initRoomRouting() {
