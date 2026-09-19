@@ -40,6 +40,7 @@ const path = require('path');
 const explorer = require('./openings-explorer.js');
 const rulesEngine = require('./rules-engine.js');
 const tablebase = require('./tablebase.js');
+const repertoireTrainer = require('./repertoire-trainer.js');
 let gameArchive = null;
 try { gameArchive = require('./game-archive.js'); } catch (_) { gameArchive = null; }
 
@@ -150,6 +151,33 @@ function handleOpeningsRoute(req, res, urlPath, ctx) {
       }
       const result = validateFen(body.fen);
       sendJson(res, 200, result); // a rejected FEN is a normal answer, not an HTTP error
+    }).catch(() => {
+      if (!res.headersSent) sendJsonError(res, 413, 'request body too large');
+    });
+    return true;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/openings/repertoire/deviation') {
+    const readJsonBody = ctx.readJsonBody;
+    if (typeof readJsonBody !== 'function') {
+      sendJsonError(res, 500, 'body reader unavailable');
+      return true;
+    }
+    readJsonBody(req).then(body => {
+      if (!body || !body.moves) {
+        sendJsonError(res, 400, 'moves array is required');
+        return;
+      }
+      let rep = body.repertoire;
+      if (rep && !rep.cards) {
+        try { rep = repertoireTrainer.fromJSON(rep); } catch (_) { rep = null; }
+      }
+      if (!rep) {
+        sendJsonError(res, 400, 'valid repertoire is required');
+        return;
+      }
+      const result = repertoireTrainer.detectDeviation(rep, body.moves);
+      sendJson(res, 200, Object.assign({ ok: true }, result));
     }).catch(() => {
       if (!res.headersSent) sendJsonError(res, 413, 'request body too large');
     });
