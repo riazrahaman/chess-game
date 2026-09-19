@@ -34,6 +34,10 @@ const MAX_PIECES_TABLEBASE = 7;
 const PROVISIONAL_RD = 110;
 const DEFAULT_PLAYER_NAMES = new Set(['white', 'black', '', '?']);
 
+function safeRequireArchive() {
+  try { return require('./game-archive.js'); } catch (_) { return null; }
+}
+
 let state = null;
 function getState() {
   if (state) return state;
@@ -42,7 +46,9 @@ function getState() {
     store,
     tracker: new Streaks.StreakTracker({ store }),
     achievements: new Achievements.AchievementService({ store }),
-    archive: null,
+    // Read-only puzzle_ratings lookups (game-archive.js, same as ratings-pool.js);
+    // handleRetentionRoute overrides it with ctx.gameArchive when given.
+    archive: safeRequireArchive(),
     onLeaguePromotion: null
   };
   return state;
@@ -254,7 +260,7 @@ function handleRetentionRoute(req, res, urlPath, ctx = {}) {
   const { sendJson, sendJsonError, readJsonBody } = ctx;
   if (typeof sendJson !== 'function' || typeof sendJsonError !== 'function') return false;
   const s = getState();
-  if (ctx.gameArchive && !s.archive) s.archive = ctx.gameArchive;
+  if (ctx.gameArchive && s.archive !== ctx.gameArchive) s.archive = ctx.gameArchive;
 
   const path = String(urlPath || '').replace(/\/+$/, '');
   const segments = path.split('/').filter(Boolean); // ['api', 'streak', ...]

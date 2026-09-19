@@ -14,6 +14,7 @@ const accountsManager = Accounts.getDefaultManager();
 const botService = new BotService(seatAuthManager);
 const ratingHook = require('./src/rating-hook.js').installRatingHook({ referee, seatAuth: seatAuthManager, archive: gameArchive, isBotRoom: roomId => botService.getBotConfig(roomId).enabled, onRated: event => SocialRoutes.onRatedGame(event), logger: console }); // Wave 2 R2: rate human-vs-human games on game end
 const SocialRoutes = require('./src/routes-social.js');
+const RetentionRoutes = require('./src/routes-retention.js'); // Wave 3 N2: loaded at boot so its rating-hook onGameOver listener sees every finished game
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : (process.env.CHESS_PORT ? Number(process.env.CHESS_PORT) : 39281);
 const DIR = __dirname;
@@ -1470,7 +1471,7 @@ function createServer() {
 
       if (require('./src/routes-puzzles.js').handlePuzzleRoute(req, res, urlPath, { sendJson, sendJsonError, readJsonBody, getAuthUser, parseCookies, gameArchive })) return; // Wave 2 E4: /api/puzzle/*
       if (SocialRoutes.handleSocialRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readBody, maxBodyBytes: MAX_BODY_BYTES, referee, seatAuth: seatAuthManager, isValidRoomId, accountsManager, gameArchive, ratingsStore: ratingHook.store, botService })) return; // Wave 2 R2: lobby/leaderboard/arena/social routes
-      if (require('./src/routes-retention.js').handleRetentionRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readJsonBody, gameArchive, referee, accountsManager })) return; // Wave 3 N2: /api/streak, /api/activity, /api/achievements
+      if (RetentionRoutes.handleRetentionRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readJsonBody, gameArchive, referee, accountsManager })) return; // Wave 3 N2: /api/streak, /api/activity, /api/achievements
 
       sendJsonError(res, 404, 'not found');
       return;

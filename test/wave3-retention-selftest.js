@@ -443,7 +443,8 @@ async function run() {
       assert(html.includes('id="home-streak"'));
       assert(sw.includes('src/ui-retention.js'));
       assert(srv.includes("'src/ui-retention.js'"));
-      assert(srv.includes("require('./src/routes-retention.js').handleRetentionRoute"));
+      assert(srv.includes("const RetentionRoutes = require('./src/routes-retention.js')"), 'loaded at boot, not lazily');
+      assert(srv.includes('RetentionRoutes.handleRetentionRoute(req, res, urlPath'));
       const ui = fs.readFileSync(path.join(root, 'src', 'ui-retention.js'), 'utf8');
       assert(ui.includes('#streak-badge') || ui.includes("'streak-badge'"));
       assert(ui.includes('profile-retention'));
