@@ -16,11 +16,12 @@
  *                (how much the opponent's move just handed over)  >= 150 cp
  *   giveBackCp = eval(i)   - eval(i+1)   from the player's point of view
  *                (how much the reply gave back relative to the best move) >= 100 cp
- *   and the reply is NOT a Blunder in win-probability terms
- *                (calculateDeltaWinProb(eval(i), eval(i+1)) <= 35, the
- *                move-review.js Blunder threshold) — a reply that loses the
- *                game outright stays a Blunder; a Miss is "still fine, but you
- *                had much better".
+ *   and the reply did not make things WORSE than before the opponent's gift:
+ *                eval(i+1) >= eval(i-1) - 50 cp (player's view). A reply that
+ *                also throws away what the player had before is a Blunder in
+ *                move-review.js terms; a Miss is "still fine, but you had much
+ *                better" (this is why a missed mate-in-1 in an otherwise level
+ *                game is a Miss, not a Blunder — Chess.com semantics).
  *
  * Win-probability deltas for both quantities are reported alongside, computed
  * with move-review.js's logistic, so callers can rank misses by how much they
@@ -33,7 +34,7 @@ const MoveReview = require('./move-review.js');
 
 const MISS_SWING_CP = 150;
 const MISS_GIVEBACK_CP = 100;
-const BLUNDER_DELTA_W = 35; // move-review.js: deltaW > 35 → Blunder
+const MISS_TOLERANCE_CP = 50; // reply may end at most this much below the pre-gift eval
 const MATE_CP = 10000;
 const UCI_RE = /^[a-h][1-8][a-h][1-8][qrbn]?$/;
 
@@ -128,9 +129,9 @@ function findMissedTactics(positions, evals, opts = {}) {
     const swingCp = sign * (at.cp - before.cp);
     const giveBackCp = sign * (at.cp - after.cp);
     if (swingCp < swingMin || giveBackCp < giveBackMin) continue;
+    if (sign * (after.cp - before.cp) < -MISS_TOLERANCE_CP) continue; // worse than before the gift → Blunder, not Miss
     const isWhite = color === 'white';
     const giveBackWinProb = MoveReview.calculateDeltaWinProb(at.cp, after.cp, isWhite);
-    if (giveBackWinProb > BLUNDER_DELTA_W) continue; // a Blunder, not a Miss
     const swingWinProb = MoveReview.calculateDeltaWinProb(before.cp, at.cp, !isWhite); // opponent's loss = our gain
     out.push({
       ply: i + 1,
@@ -159,6 +160,6 @@ module.exports = {
   pieceAt,
   MISS_SWING_CP,
   MISS_GIVEBACK_CP,
-  BLUNDER_DELTA_W,
+  MISS_TOLERANCE_CP,
   MATE_CP
 };

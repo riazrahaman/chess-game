@@ -313,7 +313,7 @@ async function sectionMissedTactics() {
   const kept = evals.slice(); kept[5] = { cp: 300, bestmove: 'x' };
   assert(missedTactics.findMissedTactics(positions, kept).length === 0, 'punishing the blunder (keeping the swing) is not a miss');
   // A full-blown blunder stays a blunder, not a miss.
-  const blunder = evals.slice(); blunder[5] = { cp: -600, bestmove: 'x' };
+  const blunder = evals.slice(); blunder[5] = { cp: -600, bestmove: 'x' }; blunder[6] = { cp: -580, bestmove: 'x' }; // Black then keeps the win
   const bl = missedTactics.findMissedTactics(positions, blunder);
   assert(bl.length === 0, 'a reply that loses the game outright is a Blunder, not a Miss');
   // move-review integration: applyMissLabels reclassifies the ply in a reviewGame() result.
