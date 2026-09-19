@@ -341,6 +341,87 @@
       "title": "Keep the kanban board in sync each wave (scripts/kanban-sync.mjs)",
       "description": "Manifest docs/kanban-tasks.json is the source of truth; run the sync after each merge to main.",
       "depends_on": []
+    },
+    {
+      "id": "fix-games-scoping",
+      "round": 6,
+      "status": "DONE",
+      "priority": "high",
+      "title": "Fix GET /api/games ownership scoping",
+      "description": "Add owner_id filtering to handleGetGamesEndpoint. Signed-in users see only their games; guests see unowned. Security fix.",
+      "depends_on": []
+    },
+    {
+      "id": "fix-sw-cache-bump",
+      "round": 6,
+      "status": "DONE",
+      "priority": "high",
+      "title": "Bump service-worker.js CACHE_NAME to v2",
+      "description": "Change chess-ui-v1 to chess-ui-v2 so existing installs refetch index.html and new scripts.",
+      "depends_on": []
+    },
+    {
+      "id": "fix-social-db-residue",
+      "round": 6,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "Fix social.db residue in repo root from test suites",
+      "description": "Set CHESS_SOCIAL_DB_PATH in p3-multiroom, t0-draw-flagfall, p3-social-timecontrol selftests. Make social-store.js use dynamic path resolution.",
+      "depends_on": []
+    },
+    {
+      "id": "fix-ui-test-coverage",
+      "round": 6,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "Add Puzzles/Library/Insights/Missed-tactics to test-ui-features.mjs",
+      "description": "Extend Playwright UI test with navigation and DOM checks for #/puzzles, #/library, #/insights, and Analysis missed-tactics panel.",
+      "depends_on": []
+    },
+    {
+      "id": "w4-repertoire-trainer",
+      "round": 6,
+      "status": "BACKLOG",
+      "priority": "high",
+      "title": "Opening repertoire trainer with MoveTrainer SRS",
+      "description": "Upload PGN or pick study as repertoire; app plays opponent side; each move is an SRS card with Chessable ladder (4h,1d,3d,7d,14d,30d,90d,180d). Post-game deviation detection.",
+      "depends_on": ["fix-games-scoping", "fix-sw-cache-bump", "fix-social-db-residue", "fix-ui-test-coverage"]
+    },
+    {
+      "id": "w4-endgames-trainer",
+      "round": 6,
+      "status": "BACKLOG",
+      "priority": "high",
+      "title": "Endgames trainer — themed drills from 3-7 piece positions",
+      "description": "Curated positions (K+P, Lucena, Philidor, Q vs P, opposite bishops), practice vs tablebase.js ground truth, timed challenge with leaderboard.",
+      "depends_on": ["fix-games-scoping"]
+    },
+    {
+      "id": "w4-practice-curriculum",
+      "round": 6,
+      "status": "BACKLOG",
+      "priority": "medium",
+      "title": "Practice curriculum — progressive instructional ladder",
+      "description": "Checkmates → Fundamental tactics → Advanced tactics → Pawn/Rook endgames. Curated positions with retry-before-reveal pedagogy.",
+      "depends_on": ["w4-endgames-trainer"]
+    },
+    {
+      "id": "w4-maia-opponents",
+      "round": 6,
+      "status": "BACKLOG",
+      "priority": "medium",
+      "title": "Maia human-like opponents",
+      "description": "Rating-matched human-like bot using learned move distributions. Distinct from personality-bots heuristic biases. Levels at 1100/1500/1900.",
+      "depends_on": ["w4-repertoire-trainer"]
+    },
+    {
+      "id": "w4-play-coach",
+      "round": 6,
+      "status": "BACKLOG",
+      "priority": "medium",
+      "title": "Play-Coach adaptive sparring opponent",
+      "description": "Bot + coach combined: adapts strength, warns of threats, asks guiding questions, allows hints/takebacks. Combines bot-service + ai-coach + engine.",
+      "depends_on": ["w4-maia-opponents"]
     }
   ]
 }
