@@ -19,3 +19,4 @@ client_secret*.json
 # agent-orchestration residue (B9) — never commit
 brief.html
 game-log.md
+.claude/
