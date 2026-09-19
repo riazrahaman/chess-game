@@ -1170,12 +1170,63 @@ function handleFlagEndpoint(req, res, roomId = 'default') {
   }
 }
 
+// G4: in a human-vs-human room, undo needs opponent consent. The referee is
+// seat-agnostic, so the server derives `bothSeatsHuman` from seat-auth.js and
+// passes it (plus the caller's colour and the consent flag) into the command.
+//
+// Product decision: consent is keyed on both seats being occupied by humans for
+// the whole game, NOT on both seats being currently active. Idle expiry (~5 min)
+// must not silently downgrade a human-vs-human room to unilateral undo, so we
+// deliberately ignore `expired` and require only that both seats exist, non-bot.
+function undoSeatsAreHuman(roomId) {
+  const accounts = seatAuthManager.getSeatAccounts(roomId);
+  const human = seat => !!(seat && !seat.isBot);
+  return human(accounts.white) && human(accounts.black);
+}
+
+// The room always arrives pre-resolved from extractRoomId(req) at the router
+// (never empty — it falls back to 'default'), matching handleQueueCommand's own
+// `roomId || …` resolution, so both-seats-human is measured against the room the
+// command will actually run in. Query/body fallbacks here would be unreachable.
+function roomIdForRequest(roomId) {
+  return roomId || 'default';
+}
+
 function handleUndoEndpoint(req, res, roomId = 'default') {
-  handleQueueCommand(req, res, 'undo', (parsed) => ({
-    args: {},
-    cmdId: parsed.id !== undefined ? parsed.id : null,
-    expectedRevision: parsed.expectedRevision !== undefined ? Number(parsed.expectedRevision) : undefined
-  }), roomId);
+  handleQueueCommand(req, res, 'undo', (parsed, req, authCheck) => {
+    const targetRoom = roomIdForRequest(roomId);
+    const color = (authCheck && authCheck.role && authCheck.role !== 'unseated') ? authCheck.role : null;
+    return {
+      args: {
+        action: null,
+        color,
+        isSeated: !!(authCheck && authCheck.role && authCheck.role !== 'unseated'),
+        bothSeatsHuman: undoSeatsAreHuman(targetRoom)
+      },
+      cmdId: parsed.id !== undefined ? parsed.id : null,
+      expectedRevision: parsed.expectedRevision !== undefined ? Number(parsed.expectedRevision) : undefined
+    };
+  }, roomId);
+}
+
+// POST /api/undo/respond (alias /api/undo-respond) body { consent: true|false }
+function handleUndoRespondEndpoint(req, res, roomId = 'default') {
+  handleQueueCommand(req, res, 'undo', (parsed, req, authCheck) => {
+    const targetRoom = roomIdForRequest(roomId);
+    const color = (authCheck && authCheck.role && authCheck.role !== 'unseated') ? authCheck.role : null;
+    const consent = parsed.consent === true || parsed.accept === true;
+    return {
+      args: {
+        action: 'respond',
+        color,
+        isSeated: !!(authCheck && authCheck.role && authCheck.role !== 'unseated'),
+        bothSeatsHuman: undoSeatsAreHuman(targetRoom),
+        consent
+      },
+      cmdId: parsed.id !== undefined ? parsed.id : null,
+      expectedRevision: parsed.expectedRevision !== undefined ? Number(parsed.expectedRevision) : undefined
+    };
+  }, roomId);
 }
 
 const MAX_GAME_BODY_BYTES = 1024 * 1024;
@@ -1575,6 +1626,10 @@ function createServer() {
       }
       if (req.method === 'POST' && urlPath === '/api/undo') {
         handleUndoEndpoint(req, res, roomId);
+        return;
+      }
+      if (req.method === 'POST' && (urlPath === '/api/undo/respond' || urlPath === '/api/undo-respond')) {
+        handleUndoRespondEndpoint(req, res, roomId);
         return;
       }
       if (req.method === 'POST' && urlPath === '/api/seat/claim') {

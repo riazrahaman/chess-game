@@ -52,6 +52,7 @@ function ensureClocks(s) {
   if (!Object.prototype.hasOwnProperty.call(s, 'draw')) s.draw = false;
   if (!Object.prototype.hasOwnProperty.call(s, 'drawReason')) s.drawReason = null;
   if (!Object.prototype.hasOwnProperty.call(s, 'drawOffer')) s.drawOffer = null;
+  if (!Object.prototype.hasOwnProperty.call(s, 'undoRequest')) s.undoRequest = null;
   if (!Object.prototype.hasOwnProperty.call(s, 'rematchOffer')) s.rematchOffer = null;
   if (!s.timeControl) {
     s.timeControl = { preset: 'rapid_10_15', baseSeconds: CLOCK_START_SECONDS, incrementSeconds: CLOCK_INCREMENT_SECONDS, name: 'Rapid 10+15' };
@@ -147,6 +148,7 @@ function newGame(timeControl) {
     draw: false,
     drawReason: null,
     drawOffer: null,
+    undoRequest: null,
     rematchOffer: null,
     timeControl: tc,
     fen: rulesEngine.boardToFen(board),
@@ -410,6 +412,7 @@ function stateView(s) {
     draw: s.draw,
     drawReason: s.drawReason || null,
     drawOffer: s.drawOffer || null,
+    undoRequest: s.undoRequest || null,
     rematchOffer: s.rematchOffer || null,
     timeControl: s.timeControl || null,
     clocks: s.clocks,
@@ -514,10 +517,32 @@ class RefereeService {
       const moves = allLegalMoves(this.state.board, this.state.board.turn);
       if (moves.includes(normalized) && !this.state.gameOver) {
         applyMove(this.state, normalized, entry.ts);
+        this.state.drawOffer = null;
+        this.state.undoRequest = null;
       }
     } else if (entry.type === 'undo') {
-      if (this.state.history.length > 0) {
-        this.state = rebuildState(this.state.history.slice(0, -1), this.state.moveTimestamps.slice(0, -1));
+      // Mirror _cmdUndo: every undo action is a no-op once the game is over,
+      // so a replayed request cannot reappear in a finished game.
+      if (!this.state.gameOver) {
+        const args = entry.args || {};
+        const action = args.action || null;
+        if (action === 'request') {
+          this.state.undoRequest = args.color || this.state.board.turn;
+        } else if (action === 'respond') {
+          if (args.consent === true) {
+            if (this.state.history.length > 0) {
+              this.state = rebuildState(this.state.history.slice(0, -1), this.state.moveTimestamps.slice(0, -1));
+            }
+          }
+          // decline / rejected: board unchanged, just drop the pending request
+          this.state.undoRequest = null;
+        } else {
+          // Legacy unilateral undo (solo/bot): always apply.
+          if (this.state.history.length > 0) {
+            this.state = rebuildState(this.state.history.slice(0, -1), this.state.moveTimestamps.slice(0, -1));
+          }
+          this.state.undoRequest = null;
+        }
       }
     } else if (entry.type === 'timeout') {
       const color = entry.args && entry.args.color;
@@ -528,6 +553,7 @@ class RefereeService {
         this.state.result = color === 'white' ? '0-1 on time' : '1-0 on time';
         this.state.clocks[color] = 0;
         this.state.moveStartTs = 0;
+        this.state.undoRequest = null;
       }
     } else if (entry.type === 'resign') {
       const color = entry.args.color;
@@ -536,6 +562,7 @@ class RefereeService {
         this.state.status = 'resigned';
         this.state.resigned = color;
         this.state.result = color === 'white' ? '0-1' : '1-0';
+        this.state.undoRequest = null;
       }
     } else if (entry.type === 'draw') {
       const args = entry.args || {};
@@ -546,11 +573,14 @@ class RefereeService {
         this.state.drawReason = args.reason || 'claim';
         this.state.result = '½-½';
         this.state.drawOffer = null;
+        this.state.undoRequest = null;
       } else if (args.action === 'offer') {
         this.state.drawOffer = args.color;
+        this.state.undoRequest = null;
       } else if (args.action === 'decline') {
         this.state.drawOffer = null;
       } else {
+        // Default / accept: the game ends in a draw.
         if (!this.state.gameOver) {
           this.state.gameOver = true;
           this.state.status = 'draw';
@@ -559,6 +589,7 @@ class RefereeService {
           this.state.result = '½-½';
           this.state.drawOffer = null;
         }
+        this.state.undoRequest = null;
       }
       } else if (entry.type === 'time-control') {
         const tc = entry.args || {};
@@ -602,6 +633,7 @@ class RefereeService {
             draw: false,
             drawReason: null,
             drawOffer: null,
+            undoRequest: null,
             rematchOffer: null,
             timeControl: tc,
             fen: rulesEngine.boardToFen(board)
@@ -673,7 +705,7 @@ class RefereeService {
   _dispatch(command) {
     switch (command.type) {
       case 'move': return this._cmdMove(command.args || {});
-      case 'undo': return this._cmdUndo();
+      case 'undo': return this._cmdUndo(command.args || {});
       case 'resign': return this._cmdResign((command.args || {}).color);
       case 'draw': return this._cmdDraw(command.args || {});
       case 'time-control': return this._cmdSetTimeControl(command.args || {});
@@ -708,6 +740,7 @@ class RefereeService {
     const lagCompMs = args.transitDelayMs || (args.clientSentAt ? Math.max(0, Math.min(1000, moveTs - args.clientSentAt)) : 0);
     const r = applyMove(s, normalized, moveTs, lagCompMs);
     s.drawOffer = null;
+    s.undoRequest = null; // G4: a move voids any pending undo request
     this._journalAndSnapshot('move', { move: normalized }, moveTs);
     if (r.flagged) {
       return Object.assign({ ok: false, error: 'flagged', httpStatus: 409 }, stateView(s));
@@ -715,12 +748,68 @@ class RefereeService {
     return Object.assign({ ok: true, applied: normalized, nextTurn: s.board.turn }, stateView(s));
   }
 
-  _cmdUndo() {
+  // G4: undo is unilateral in solo/bot/unseated play (unchanged), but in a
+  // human-vs-human room it becomes a request the OPPONENT must consent to.
+  // The referee never inspects seats itself — the server passes `bothSeatsHuman`
+  // (from seat-auth.js) and the requester's `color` in the command args, exactly
+  // as `_cmdDraw` receives `isSeated`.
+  _cmdUndo(args = {}) {
     const s = this.state;
+    if (s.gameOver) {
+      // A finished game must reject every undo action (request, respond, legacy)
+      // so a dangling pending request cannot resurrect the board.
+      return Object.assign({ ok: false, error: 'game over', httpStatus: 409 }, stateView(s));
+    }
+    const action = args.action || null;
+
+    if (action === 'respond') {
+      const requester = s.undoRequest || null;
+      const responder = args.color || null;
+      if (!requester) {
+        return Object.assign({ ok: false, error: 'no pending undo request', httpStatus: 409 }, stateView(s));
+      }
+      // Only the opponent (the colour that did not request) may respond.
+      if (responder && responder === requester) {
+        return Object.assign({ ok: false, error: 'requester cannot respond to their own undo request', httpStatus: 403 }, stateView(s));
+      }
+      if (args.consent === true) {
+        if (s.history.length === 0) {
+          s.undoRequest = null;
+          this._journalAndSnapshot('undo', { action: 'respond', consent: true, color: responder, requestedBy: requester });
+          return Object.assign({ ok: true, undone: false, noOp: true }, stateView(s));
+        }
+        this.state = rebuildState(s.history.slice(0, -1), s.moveTimestamps.slice(0, -1));
+        this.state.undoRequest = null;
+        this._journalAndSnapshot('undo', { action: 'respond', consent: true, color: responder, requestedBy: requester });
+        return Object.assign({ ok: true, undone: true, consent: true }, stateView(this.state));
+      }
+      s.undoRequest = null;
+      this._journalAndSnapshot('undo', { action: 'respond', consent: false, color: responder, requestedBy: requester });
+      return Object.assign({ ok: true, undone: false, consent: false }, stateView(s));
+    }
+
+    // Human-vs-human: a request (or a re-request) never mutates the board.
+    if (args.bothSeatsHuman === true) {
+      const color = args.color || s.board.turn;
+      if (s.history.length === 0) {
+        return Object.assign({ ok: true, undone: false, noOp: true, undoRequest: s.undoRequest || null }, stateView(s));
+      }
+      if (s.undoRequest === color) {
+        // Idempotent re-request: return the existing pending request.
+        return Object.assign({ ok: true, requested: true, pending: true }, stateView(s));
+      }
+      // A fresh request from either colour supersedes any stale pending request.
+      s.undoRequest = color;
+      this._journalAndSnapshot('undo', { action: 'request', color });
+      return Object.assign({ ok: true, requested: true, undoRequest: color }, stateView(s));
+    }
+
+    // Solo / local / bot / unseated: unilateral undo, exactly as before.
     if (s.history.length === 0) {
       return Object.assign({ ok: true, undone: false, noOp: true }, stateView(s));
     }
     this.state = rebuildState(s.history.slice(0, -1), s.moveTimestamps.slice(0, -1));
+    this.state.undoRequest = null;
     this._journalAndSnapshot('undo', {});
     return Object.assign({ ok: true, undone: true }, stateView(this.state));
   }
@@ -737,6 +826,7 @@ class RefereeService {
     s.status = 'resigned';
     s.resigned = color;
     s.result = color === 'white' ? '0-1' : '1-0';
+    s.undoRequest = null; // G4: a resignation voids any pending undo request
     this._journalAndSnapshot('resign', { color });
     return Object.assign({ ok: true, resigned: color }, stateView(s));
   }
@@ -761,6 +851,7 @@ class RefereeService {
       s.drawReason = claim.reason;
       s.result = '½-½';
       s.drawOffer = null;
+      s.undoRequest = null; // G4: a claim ends the game; no pending undo may outlive it
       this._journalAndSnapshot('draw', { action: 'claim', reason: claim.reason });
       return Object.assign({ ok: true, draw: true, drawReason: claim.reason }, stateView(s));
     }
@@ -773,6 +864,7 @@ class RefereeService {
 
     if (action === 'offer') {
       s.drawOffer = color || s.board.turn;
+      s.undoRequest = null; // G4: a new draw offer voids any pending undo request
       this._journalAndSnapshot('draw', { action: 'offer', color: s.drawOffer });
       return Object.assign({ ok: true, offer: s.drawOffer }, stateView(s));
     }
@@ -784,6 +876,7 @@ class RefereeService {
       s.drawReason = 'agreement';
       s.result = '½-½';
       s.drawOffer = null;
+      s.undoRequest = null; // G4: a draw ends the game; no pending undo may outlive it
       this._journalAndSnapshot('draw', { action: 'accept' });
       return Object.assign({ ok: true, draw: true, drawReason: 'agreement' }, stateView(s));
     }
@@ -796,6 +889,7 @@ class RefereeService {
       s.drawReason = 'agreement';
       s.result = '½-½';
       s.drawOffer = null;
+      s.undoRequest = null; // G4: a draw ends the game; no pending undo may outlive it
       this._journalAndSnapshot('draw', { action: 'accept' });
       return Object.assign({ ok: true, draw: true, drawReason: 'agreement' }, stateView(s));
     }
@@ -812,6 +906,7 @@ class RefereeService {
     s.drawReason = 'agreement';
     s.result = '½-½';
     s.drawOffer = null;
+    s.undoRequest = null; // G4: a draw ends the game; no pending undo may outlive it
     this._journalAndSnapshot('draw', {});
     return Object.assign({ ok: true, draw: true, drawReason: 'agreement' }, stateView(s));
   }
@@ -861,6 +956,7 @@ class RefereeService {
       draw: false,
       drawReason: null,
       drawOffer: null,
+      undoRequest: null,
       rematchOffer: null,
       timeControl: tc,
       fen: rulesEngine.boardToFen(board),
@@ -934,6 +1030,7 @@ class RefereeService {
       s.clocks[turn] = 0;
       s.elapsed[turn] = s.elapsed[turn] + elapsedSinceStart;
       s.moveStartTs = 0;
+      s.undoRequest = null; // G4: flag fall ends the game; no pending undo may outlive it
       this._journalAndSnapshot('timeout', { color: turn });
       return { flagged: true, color: turn };
     }

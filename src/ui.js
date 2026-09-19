@@ -1401,6 +1401,7 @@ function applyRefereeState(state) {
   updateHistoryUI();
   if (typeof updateMatchgradeSocialUI === 'function') updateMatchgradeSocialUI(state);
   if (typeof updateDrawNegotiationUI === 'function') updateDrawNegotiationUI(state);
+  if (typeof updateUndoRequestUI === 'function') updateUndoRequestUI(state);
   return true;
 }
 
@@ -2042,7 +2043,28 @@ const drawOfferText = document.getElementById('draw-offer-text');
 const drawOfferActions = document.getElementById('draw-offer-actions');
 const acceptDrawButton = document.getElementById('accept-draw');
 const declineDrawButton = document.getElementById('decline-draw');
+// G4: undo-as-a-request banner (human-vs-human only).
+const undoRequestBanner = document.getElementById('undo-request-banner');
+const undoRequestText = document.getElementById('undo-request-text');
+const undoRequestActions = document.getElementById('undo-request-actions');
+const acceptUndoButton = document.getElementById('accept-undo');
+const declineUndoButton = document.getElementById('decline-undo');
 let drawCmdSeq = 0;
+let undoCmdSeq = 0;
+
+function undoCmdId(action) {
+  undoCmdSeq += 1;
+  return `undo-${action}:${currentSeatRole || 'unseated'}:${Date.now()}:${undoCmdSeq}`;
+}
+
+function postUndoRespondCommand(label, consent) {
+  const cmdId = undoCmdId(consent ? 'accept' : 'decline');
+  return runRefereeCommand(label, () => fetch(withRoomParam('/api/undo/respond'), {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ id: cmdId, consent })
+  }));
+}
 
 function drawCmdId(action) {
   drawCmdSeq += 1;
@@ -2102,10 +2124,43 @@ function updateDrawNegotiationUI(state) {
   }
 }
 
+// G4: render the opponent-consent undo request. Mirrors the draw-offer banner:
+// show Accept/Decline only to the seat that did NOT request; the requester sees
+// a "waiting for opponent" state and cannot re-request.
+function updateUndoRequestUI(state) {
+  const request = state && !state.gameOver && (state.undoRequest === 'white' || state.undoRequest === 'black') ? state.undoRequest : null;
+  const seated = currentSeatRole === 'white' || currentSeatRole === 'black';
+  const capitalize = (c) => c.charAt(0).toUpperCase() + c.slice(1);
+  if (undoRequestBanner) {
+    if (!request) {
+      undoRequestBanner.classList.add('hidden');
+    } else {
+      undoRequestBanner.classList.remove('hidden');
+      const incoming = seated && request !== currentSeatRole;
+      if (undoRequestText) {
+        undoRequestText.textContent = incoming
+          ? `${capitalize(request)} requests an undo.`
+          : request === currentSeatRole
+            ? 'Undo requested. Waiting for your opponent…'
+            : `${capitalize(request)} has requested an undo.`;
+      }
+      if (undoRequestActions) undoRequestActions.classList.toggle('hidden', !incoming);
+    }
+  }
+  if (undoButton) {
+    const mine = request !== null && request === currentSeatRole;
+    undoButton.textContent = mine ? 'Undo requested…' : 'Undo';
+    undoButton.dataset.locked = mine ? 'true' : 'false';
+    undoButton.disabled = mine || commandPending;
+  }
+}
+
 if (drawButton) drawButton.onclick = () => postDrawCommand('Offering draw', 'offer');
 if (acceptDrawButton) acceptDrawButton.onclick = () => postDrawCommand('Accepting draw', 'accept');
 if (declineDrawButton) declineDrawButton.onclick = () => postDrawCommand('Declining draw', 'decline');
 if (claimDrawButton) claimDrawButton.onclick = () => postDrawCommand('Claiming draw', 'claim');
+if (acceptUndoButton) acceptUndoButton.onclick = () => postUndoRespondCommand('Accepting undo', true);
+if (declineUndoButton) declineUndoButton.onclick = () => postUndoRespondCommand('Declining undo', false);
 if (undoButton) undoButton.onclick = async () => {
   const cmdId = 'undo:' + Date.now() + ':' + Math.random().toString(36).slice(2);
   await runRefereeCommand('Requesting undo', () => fetch(withRoomParam('/api/undo'), { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ id: cmdId }) }));
@@ -2387,6 +2442,10 @@ function updateSeatUI() {
   // referee state whenever the seat changes.
   if (previousRefereeState && typeof updateDrawNegotiationUI === 'function') {
     updateDrawNegotiationUI(previousRefereeState);
+  }
+  // G4: the undo-request banner is seat-relative too.
+  if (previousRefereeState && typeof updateUndoRequestUI === 'function') {
+    updateUndoRequestUI(previousRefereeState);
   }
 }
 
@@ -3266,6 +3325,14 @@ function dispatchA11yAction(action) {
     case 'decline_draw':
       if (clickIfActionable('decline-draw')) { a11yFeedback('Draw declined.', 'ok'); return true; }
       a11yFeedback('There is no draw offer to decline.', 'error');
+      return false;
+    case 'accept_undo':
+      if (clickIfActionable('accept-undo')) { a11yFeedback('Undo accepted.', 'ok'); return true; }
+      a11yFeedback('There is no undo request to accept.', 'error');
+      return false;
+    case 'decline_undo':
+      if (clickIfActionable('decline-undo')) { a11yFeedback('Undo declined.', 'ok'); return true; }
+      a11yFeedback('There is no undo request to decline.', 'error');
       return false;
     case 'undo':
       if (clickIfActionable('undo')) { a11yFeedback('Undo requested.', 'ok'); return true; }
