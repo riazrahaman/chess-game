@@ -2076,6 +2076,20 @@ function runGameReview() {
   latestGameReview = reviewModule.reviewGame(moves, evalHistory);
   renderReviewPanel();
   updateHistoryUI();
+  // Wave 3 (N1.3): ask the server for missed tactics (engine-verified) and
+  // relabel those plies as Miss. Display-only; the referee is never touched.
+  if (moves.length >= 2 && typeof reviewModule.applyMissLabels === 'function' && typeof fetch === 'function') {
+    const reviewedMoves = moves.slice();
+    fetch('/api/review/missed-tactics', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ moves: reviewedMoves })
+    }).then(r => (r.ok ? r.json() : null)).then(data => {
+      if (!data || !Array.isArray(data.misses) || !latestGameReview) return;
+      if ((liveHistory || []).join(' ') !== reviewedMoves.join(' ')) return; // stale
+      reviewModule.applyMissLabels(latestGameReview, data.misses);
+      renderReviewPanel();
+      updateHistoryUI();
+    }).catch(() => {});
+  }
   return latestGameReview;
 }
 
@@ -2111,6 +2125,7 @@ function renderReviewPanel() {
       { key: 'good', label: 'Good', color: '#7ea43b' },
       { key: 'inaccuracy', label: 'Inaccuracy (?!)', color: '#e69d00' },
       { key: 'mistake', label: 'Mistake (?)', color: '#e58f2a' },
+      { key: 'miss', label: 'Miss (✕)', color: '#ff7769' },
       { key: 'blunder', label: 'Blunder (??)', color: '#ca3431' }
     ];
 
