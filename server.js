@@ -1713,6 +1713,8 @@ function createServer() {
         handleGetGameEndpoint(req, res, decodeURIComponent(gameIdMatch[1]));
         return;
       }
+      if (require('./src/routes-review.js').handleReviewRoute(req, res, urlPath, { sendJson, sendJsonError, readJsonBody, gameArchive, referee })) return; // Wave 3 N1.3: /api/games/:id/missed-tactics, /api/review/missed-tactics
+
       if (require('./src/routes-openings.js').handleOpeningsRoute(req, res, urlPath, { sendJson, sendJsonError, readJsonBody })) return; // Wave 2 E3: /api/openings/*, /api/fen/validate
 
       if (require('./src/routes-puzzles.js').handlePuzzleRoute(req, res, urlPath, { sendJson, sendJsonError, readJsonBody, getAuthUser, parseCookies, gameArchive })) return; // Wave 2 E4: /api/puzzle/*

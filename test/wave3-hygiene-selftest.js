@@ -322,7 +322,7 @@ async function sectionMissedTactics() {
   const review = MoveReview.reviewGame(positions.slice(1).map(p => p.lastMove.from + p.lastMove.to), evals.map(e => e.cp));
   assert(review.counts.white.miss === 0 && review.counts.black.miss === 0, 'reviewGame counts carry a miss slot (0 before labelling)');
   const labelled = MoveReview.applyMissLabels(review, misses);
-  assert(labelled.moves[4].key === 'miss' && labelled.counts.white.miss === 1 && labelled.counts.white.mistake + labelled.counts.white.inaccuracy + labelled.counts.white.good + labelled.counts.white.blunder === 2,
+  assert(labelled.moves[4].key === 'miss' && labelled.counts.white.miss === 1 && Object.keys(labelled.counts.white).filter(k => k !== 'miss').reduce((a, k) => a + labelled.counts.white[k], 0) === 2,
     'applyMissLabels relabels ply 5 as Miss and moves its count: ' + JSON.stringify(labelled.counts.white));
   assert(missedTactics.MISS_SWING_CP === 150 && missedTactics.MISS_GIVEBACK_CP === 100, 'thresholds: swing ≥150 cp, give-back ≥100 cp');
 }

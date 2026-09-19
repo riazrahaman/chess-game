@@ -26,8 +26,16 @@ const CLASSIFICATIONS = {
   GOOD: { key: 'good', symbol: '✓', label: 'Good', color: '#7ea43b', badgeClass: 'badge-good' },
   INACCURACY: { key: 'inaccuracy', symbol: '?!', label: 'Inaccuracy', color: '#e69d00', badgeClass: 'badge-inaccuracy' },
   MISTAKE: { key: 'mistake', symbol: '?', label: 'Mistake', color: '#e58f2a', badgeClass: 'badge-mistake' },
-  BLUNDER: { key: 'blunder', symbol: '??', label: 'Blunder', color: '#ca3431', badgeClass: 'badge-blunder' }
+  BLUNDER: { key: 'blunder', symbol: '??', label: 'Blunder', color: '#ca3431', badgeClass: 'badge-blunder' },
+  // Wave 3 (N1.3): Chess.com-style "Miss" — the opponent blundered and this
+  // reply failed to punish it. Never produced by classifyMove(); applied after
+  // the fact via applyMissLabels() from missed-tactics.js findMissedTactics().
+  MISS: { key: 'miss', symbol: '✕', label: 'Miss', color: '#ff7769', badgeClass: 'badge-miss' }
 };
+
+function emptyCounts() {
+  return { brilliant: 0, best: 0, excellent: 0, good: 0, inaccuracy: 0, mistake: 0, blunder: 0, miss: 0 };
+}
 
 /**
  * Calculates winning probability (0 to 100%) from centipawns eval from White's perspective.
@@ -129,10 +137,7 @@ function reviewGame(moveHistory, evalHistory) {
       whiteAccuracy: 100,
       blackAccuracy: 100,
       moves: [],
-      counts: {
-        white: { brilliant: 0, best: 0, excellent: 0, good: 0, inaccuracy: 0, mistake: 0, blunder: 0 },
-        black: { brilliant: 0, best: 0, excellent: 0, good: 0, inaccuracy: 0, mistake: 0, blunder: 0 }
-      }
+      counts: { white: emptyCounts(), black: emptyCounts() }
     };
   }
 
@@ -141,10 +146,7 @@ function reviewGame(moveHistory, evalHistory) {
     : [0, ...moveHistory.map((_, i) => (i % 2 === 0 ? 30 : -20))];
 
   const reviewedMoves = [];
-  const counts = {
-    white: { brilliant: 0, best: 0, excellent: 0, good: 0, inaccuracy: 0, mistake: 0, blunder: 0 },
-    black: { brilliant: 0, best: 0, excellent: 0, good: 0, inaccuracy: 0, mistake: 0, blunder: 0 }
-  };
+  const counts = { white: emptyCounts(), black: emptyCounts() };
 
   const whiteAccuracies = [];
   const blackAccuracies = [];
@@ -245,8 +247,41 @@ function generateMistakePuzzles(moveHistory, evalHistory, fenHistory) {
   return puzzles;
 }
 
+/**
+ * Wave 3 (N1.3): relabels reviewGame() moves as Miss from a findMissedTactics()
+ * result (missed-tactics.js, server-side; the Analysis view fetches it from
+ * GET /api/games/:id/missed-tactics or POST /api/review/missed-tactics).
+ * Returns the same review object, mutated: moves[ply-1] takes the MISS
+ * classification (deltaW / accuracy are kept) and counts move accordingly.
+ * A Blunder is never downgraded to a Miss.
+ */
+function applyMissLabels(review, misses) {
+  if (!review || !Array.isArray(review.moves) || !Array.isArray(misses)) return review;
+  if (!review.counts) review.counts = { white: emptyCounts(), black: emptyCounts() };
+  for (const side of ['white', 'black']) {
+    if (!review.counts[side]) review.counts[side] = emptyCounts();
+    if (typeof review.counts[side].miss !== 'number') review.counts[side].miss = 0;
+  }
+  for (const miss of misses) {
+    if (!miss || typeof miss.ply !== 'number') continue;
+    const m = review.moves[miss.ply - 1];
+    if (!m || m.key === 'miss' || m.key === 'blunder') continue;
+    const side = m.color || (miss.ply % 2 === 1 ? 'white' : 'black');
+    const counts = review.counts[side];
+    if (counts && typeof counts[m.key] === 'number' && counts[m.key] > 0) counts[m.key]--;
+    Object.assign(m, CLASSIFICATIONS.MISS, {
+      missedBestMove: miss.bestMove || null,
+      swingCp: miss.swingCp,
+      giveBackCp: miss.giveBackCp
+    });
+    if (counts) counts.miss++;
+  }
+  return review;
+}
+
 const MoveReviewModule = {
   CLASSIFICATIONS,
+  applyMissLabels,
   calculateWinProbability,
   cpToWinProbability,
   calculateDeltaWinProb,
