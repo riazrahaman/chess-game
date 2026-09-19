@@ -342,6 +342,7 @@ async function run() {
       assert(before.body.streak.current <= after.body.streak.current);
       const mine = await request(server, { path: '/api/achievements', token: alice.token });
       assert(mine.body.awarded.some(a => a.id === 'first_mate_in_one_solved'), JSON.stringify(mine.body.awarded));
+      assert(!mine.body.awarded.some(a => a.id.startsWith('puzzle_rating_')), 'a provisional puzzle rating (RD > 110) must not unlock rating badges: ' + JSON.stringify(mine.body.awarded));
       // anonymous solvers leave no ledger
       const anonNext = await request(server, { path: '/api/puzzle/next?theme=mateIn1&rating=1200' });
       const anonSol = gameArchive.getPuzzle(anonNext.body.puzzle.id).moves.split(' ').filter((_, i) => i % 2 === 1);

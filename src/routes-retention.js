@@ -31,6 +31,7 @@ const RatingHook = require('./rating-hook.js');
 const SocialStore = require('./social-store.js');
 
 const MAX_PIECES_TABLEBASE = 7;
+const PROVISIONAL_RD = 110;
 const DEFAULT_PLAYER_NAMES = new Set(['white', 'black', '', '?']);
 
 let state = null;
@@ -90,7 +91,12 @@ function puzzleRatingFor(playerId) {
   if (!archive || typeof archive.getPuzzleRating !== 'function') return null;
   try {
     const row = archive.getPuzzleRating('solver', 'user:' + playerId);
-    return row && Number.isFinite(Number(row.rating)) ? Number(row.rating) : null;
+    if (!row || !Number.isFinite(Number(row.rating))) return null;
+    // Provisional ratings (RD > 110, same threshold as ratings-pool / the
+    // Profile view) never unlock a rating badge: one lucky solve from the
+    // 1500 ± 350 start would otherwise award "Sharp eye" immediately.
+    if (Number.isFinite(Number(row.rd)) && Number(row.rd) > PROVISIONAL_RD) return null;
+    return Number(row.rating);
   } catch (_) { return null; }
 }
 
