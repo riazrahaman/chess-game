@@ -128,7 +128,7 @@ What follows is the next-generation roadmap.
 - ~~**G3 Time-control completeness:**~~ **Done.** New `time-control.js` — per-color clocks, delay/Bronstein, odds, lichess TC label formula. Verified in `time-control-selftest.js` (20/20).
 - **G4 Undo as a *request* with opponent consent** (not unilateral) when both seats are human; keep unilateral solo mode.
 - **G5 Coordinates trainer** mini-game (click the named square) — lichess's most-used beginner tool, trivially buildable.
-- **G6 Zen mode** (`z` key: hide ratings/eval during play) and flip-board shortcut parity.
+- ~~**G6 Zen mode**~~ — **Done.** Zen mode (`z` key / button) hides ratings, eval bar, spectator badge, assist block, and chat panel during play. `f` key flip-board keyboard shortcut parity. Documented in shortcuts help. Verified in `test/zen-mode-selftest.js` (7/7).
 
 ## TIER S — Social & platform layer (the biggest gap; biggest scope)
 
