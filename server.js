@@ -604,6 +604,7 @@ const ALLOWED_FILES = new Set([
   'src/ui-insights.js',
   'src/coordinates-trainer.js',
   'src/ui-coordinates.js',
+  'src/ui-about.js',
   'src/sw-register.js',
   'manifest.webmanifest',
   'service-worker.js',

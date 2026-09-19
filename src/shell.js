@@ -30,7 +30,8 @@
     { id: 'coordinates', title: 'Coordinates', order: 35 },
     { id: 'library', title: 'Library', order: 40 },
     { id: 'compete', title: 'Compete', order: 50 },
-    { id: 'me', title: 'Profile', order: 60 }
+    { id: 'me', title: 'Profile', order: 60 },
+    { id: 'about', title: 'About', order: 90 }
   ];
 
   // Captured before ui.js rewrites "/" to "/game/<room>" via replaceState, so a
