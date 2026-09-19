@@ -598,6 +598,7 @@ const ALLOWED_FILES = new Set([
   'src/ui-compete.js',
   'src/ui-profile.js',
   'src/ui-analysis.js',
+  'src/sw-register.js',
   'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'
@@ -706,8 +707,9 @@ function isBehindTls(req) {
 
 function buildCsp() {
   if (process.env.CHESS_CSP) return process.env.CHESS_CSP;
-  // The app is a no-build-step vanilla JS SPA with one inline <script> (SW reg)
-  // and an inline <style> block, WebAssembly (vendored Stockfish 19 lite, see
+  // The app is a no-build-step vanilla JS SPA: every script is a <script src>
+  // (no inline scripts, no on*= handlers), one inline <style> block plus many
+  // style="" attributes, WebAssembly (vendored Stockfish 19 lite, see
   // vendor/stockfish/), and Google Identity Services.
   //
   // D4 (Wave 1): 'wasm-unsafe-eval' replaces 'unsafe-eval'. The engine loader
@@ -715,13 +717,18 @@ function buildCsp() {
   // only — no eval()/new Function — so plain JS eval stays blocked. Dedicated
   // Workers take their CSP from their own script response, and this header is
   // sent on every response, so the Worker gets the same policy.
-  // Still 'unsafe-inline' in script-src: index.html keeps one inline SW-
-  // registration <script>. Remaining D4 step: hash it ('sha256-…' computed
-  // from index.html at startup) or externalise it — not done this wave.
+  // D4 (Wave 3): script-src no longer carries 'unsafe-inline'. The last inline
+  // block (service-worker registration) moved to src/sw-register.js. The GSI
+  // client is loaded by ui-auth.js as an external <script src> from the
+  // allowlisted origin and needs no inline allowance.
+  // style-src keeps 'unsafe-inline' on purpose: index.html has an inline
+  // <style>, ui-analysis.js injects one, and hundreds of style="" attributes
+  // remain (ui.js/ui-archive.js set element.style too). Hashing every block is
+  // not worth it while those exist; an inline-style-free UI is a follow-up.
   // D5: tablebase.js probes https://tablebase.lichess.ovh (7-piece Syzygy).
   return [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://accounts.google.com/gsi/client",
+    "script-src 'self' 'wasm-unsafe-eval' https://accounts.google.com/gsi/client",
     "style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style",
     "img-src 'self' data: https://*.googleusercontent.com",
     "font-src 'self' data:",

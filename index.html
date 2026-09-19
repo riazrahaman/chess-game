@@ -1436,12 +1436,6 @@
        <script src="src/ui-profile.js"></script>
        <script src="src/ui-analysis.js"></script>
        <script src="src/ui.js"></script>
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/service-worker.js').catch(() => {});
-            });
-        }
-    </script>
+       <script src="src/sw-register.js"></script>
 </body>
 </html>
