@@ -437,6 +437,8 @@ class RefereeService {
     this._idempotency = new Map();
     this._journalSeq = 0;
     this._lastSnapshotMtime = 0;
+    this.lastActivityMs = Date.now(); // Wave 3 GC: last command / boot time
+    this._pending = 0;                // Wave 3 GC: in-flight commands
     this._boot();
   }
 
@@ -618,6 +620,8 @@ class RefereeService {
       return Promise.resolve(this._idempotency.get(id));
     }
     const expectedRevision = command.expectedRevision;
+    this.lastActivityMs = Date.now();
+    this._pending = (this._pending || 0) + 1;
     this._tail = this._tail.then(() => {
       if (this._idempotency.has(id)) {
         return this._idempotency.get(id);
@@ -650,6 +654,10 @@ class RefereeService {
       const result = { ok: false, error: String(err && err.message || err), httpStatus: 500, revision: this.revision };
       this._setIdempotency(id, result);
       return result;
+    }).finally(() => {
+      // Wave 3 GC: a room with in-flight commands is never collected.
+      this._pending = Math.max(0, (this._pending || 1) - 1);
+      this.lastActivityMs = Date.now();
     });
     return this._tail;
   }
@@ -960,11 +968,166 @@ function resetInstance(roomId) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Wave 3 (w3-room-file-gc): auto-room state-file retention / GC helpers.
+//
+// Every `/game/<room>` visit creates `.referee-state-<room>.json` +
+// `.referee-journal-<room>.jsonl` next to the default room's files and an
+// in-memory RefereeService. These helpers let server.js inspect rooms WITHOUT
+// instantiating a referee (constructing one writes a snapshot, which would
+// reset the very idle clock being measured) and drop the ones nobody needs.
+//
+// The referee is still the only writer of game state: the GC never mutates a
+// game, it only removes whole rooms that are unstarted or already over.
+// ---------------------------------------------------------------------------
+
+const ROOM_STATE_FILE_RE = /^\.referee-state-([a-zA-Z0-9_-]+)\.json$/;
+
+function getRoomStateDir() {
+  return process.env.CHESS_STATE_FILE ? path.dirname(process.env.CHESS_STATE_FILE) : DIR;
+}
+
+/**
+ * Lists non-default rooms that have a snapshot on disk, plus in-memory rooms
+ * (which always have a snapshot, but are listed even if the file vanished so
+ * the instance can still be dropped). Never creates or touches files.
+ * @returns {string[]} room ids (never 'default')
+ */
+function listRoomIds() {
+  const ids = new Set();
+  try {
+    for (const name of fs.readdirSync(getRoomStateDir())) {
+      const m = ROOM_STATE_FILE_RE.exec(name);
+      if (m && m[1] !== 'default') ids.add(m[1]);
+    }
+  } catch (_) { /* dir unreadable — fall through to in-memory list */ }
+  for (const id of _instances.keys()) if (id !== 'default') ids.add(id);
+  return [...ids].sort();
+}
+
+/**
+ * Read-only room inspection for the GC / operator listing. Reads the snapshot
+ * file directly (never via getReferee) so inspecting is side-effect free.
+ * @returns {{roomId, exists, inMemory, plies, gameOver, status, result,
+ *            history: string[], positions, fileMtimeMs, lastActivityMs, pendingCommands}}
+ */
+function inspectRoom(roomId) {
+  const stateFile = getRoomStateFile(roomId);
+  const journalFile = getRoomJournalFile(roomId);
+  const inst = _instances.get(roomId) || null;
+  const info = {
+    roomId,
+    exists: false,
+    inMemory: !!inst,
+    plies: 0,
+    gameOver: false,
+    status: null,
+    result: null,
+    history: [],
+    positions: null,
+    fileMtimeMs: 0,
+    lastActivityMs: 0,
+    pendingCommands: inst ? (inst._pending || 0) : 0,
+    stateFile,
+    journalFile
+  };
+  let state = null;
+  if (inst && inst.state) {
+    state = inst.state;
+  } else {
+    try { state = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch (_) { state = null; }
+  }
+  try {
+    info.fileMtimeMs = fs.statSync(stateFile).mtimeMs;
+    info.exists = true;
+  } catch (_) {
+    try { info.fileMtimeMs = fs.statSync(journalFile).mtimeMs; info.exists = true; } catch (_) {}
+  }
+  if (state) {
+    info.exists = true;
+    info.history = Array.isArray(state.history) ? state.history.slice() : [];
+    info.plies = info.history.length;
+    info.gameOver = state.gameOver === true;
+    info.status = state.status || null;
+    info.result = state.result || null;
+    info.positions = Array.isArray(state.positions) ? state.positions : null;
+  }
+  info.lastActivityMs = Math.max(info.fileMtimeMs || 0, inst && inst.lastActivityMs ? inst.lastActivityMs : 0);
+  return info;
+}
+
+/**
+ * Maps the referee's result string to a Seven-Tag-Roster Result token so the
+ * archived record matches what ui-archive.js's auto-save would have written
+ * ('1-0' / '0-1' / '1/2-1/2' / '*'). The referee also emits '½-½' and
+ * '1-0 on time', which are not valid PGN tokens.
+ */
+function pgnResultToken(result) {
+  const r = String(result || '').trim();
+  if (/^1-0/.test(r)) return '1-0';
+  if (/^0-1/.test(r)) return '0-1';
+  if (/^(½-½|1\/2-1\/2)/.test(r)) return '1/2-1/2';
+  return '*';
+}
+
+/**
+ * Builds the POST /api/games payload ui-archive.js's autoSaveFinishedGame()
+ * sends for a finished game (same field names), from an inspected room.
+ * `moves` is the UCI history; PGN is built from the referee's per-ply SAN.
+ * game-archive.saveGame() fills id/date/eco.
+ */
+function archiveRecordForRoom(info) {
+  const history = Array.isArray(info.history) ? info.history : [];
+  const sans = [];
+  if (Array.isArray(info.positions)) {
+    for (let i = 1; i < info.positions.length; i++) sans.push((info.positions[i] && info.positions[i].san) || history[i - 1] || '');
+  }
+  while (sans.length < history.length) sans.push(history[sans.length]);
+  const resultToken = pgnResultToken(info.result);
+  return {
+    white: 'White',
+    black: 'Black',
+    result: resultToken,
+    moves: history,
+    pgn: engine.buildPgn(sans, resultToken)
+  };
+}
+
+/**
+ * Deletes a room's snapshot + journal (and any leftover atomic-write temp
+ * files) and drops its in-memory instance. Refuses the default room.
+ * @returns {{ok:boolean, removed:string[], error?:string}}
+ */
+function deleteRoomFiles(roomId) {
+  if (!roomId || roomId === 'default') return { ok: false, removed: [], error: 'refusing to delete the default room' };
+  const removed = [];
+  const stateFile = getRoomStateFile(roomId);
+  const journalFile = getRoomJournalFile(roomId);
+  resetInstance(roomId);
+  for (const f of [stateFile, journalFile]) {
+    try { fs.unlinkSync(f); removed.push(f); } catch (_) { /* already gone */ }
+  }
+  try {
+    const dir = path.dirname(stateFile);
+    const base = path.basename(stateFile) + '.tmp.';
+    for (const name of fs.readdirSync(dir)) {
+      if (name.startsWith(base)) { try { fs.unlinkSync(path.join(dir, name)); removed.push(path.join(dir, name)); } catch (_) {} }
+    }
+  } catch (_) {}
+  return { ok: true, removed };
+}
+
 module.exports = {
   RefereeService,
   buildPositions,
   getReferee,
   resetInstance,
+  listRoomIds,
+  inspectRoom,
+  archiveRecordForRoom,
+  pgnResultToken,
+  deleteRoomFiles,
+  getRoomStateDir,
   getRoomStateFile,
   getRoomJournalFile,
   atomicSaveSnapshot,
