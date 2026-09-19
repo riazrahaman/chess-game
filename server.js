@@ -360,6 +360,7 @@ const ALLOWED_FILES = new Set([
   'src/ui-compete.js',
   'src/ui-profile.js',
   'src/ui-analysis.js',
+  'src/ui-library.js',
   'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'
