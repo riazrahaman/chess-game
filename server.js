@@ -1144,13 +1144,23 @@ function handleGetGamesEndpoint(req, res) {
   const eco = params.get('eco');
   const result = params.get('result');
 
+  // Ownership scoping: signed-in users see their games; guests see unowned.
+  // Matches the pattern in routes-library.js handleLibraryList.
+  const session = getAuthUser(req);
+  const ownerParam = (params.get('owner') || '').toLowerCase();
+  let owner = null; // default: guest sees unowned games only
+  if (session && session.userId && ownerParam !== 'guest') {
+    owner = String(session.userId);
+  }
+  const scope = { limit, offset, owner };
+
   let games = [];
   if (q) {
-    games = gameArchive.searchGames(q, { limit, offset });
+    games = gameArchive.searchGames(q, scope);
   } else if (white || black || eco || result) {
-    games = gameArchive.searchGames({ white, black, eco, result }, { limit, offset });
+    games = gameArchive.searchGames({ white, black, eco, result }, scope);
   } else {
-    games = gameArchive.listGames({ limit, offset });
+    games = gameArchive.listGames(scope);
   }
 
   const origin = req.headers.origin;

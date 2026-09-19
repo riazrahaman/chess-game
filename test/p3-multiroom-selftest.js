@@ -20,7 +20,13 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const vm = require('vm');
+// Hermetic env: prevent social.db / leagues.db from being created in repo root.
+const MR_TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'chess-p3-multiroom-'));
+process.env.CHESS_SOCIAL_DB_PATH = path.join(MR_TMP_DIR, 'social.db');
+process.env.CHESS_LEAGUES_DB_PATH = path.join(MR_TMP_DIR, 'leagues.db');
+process.on('exit', () => { try { fs.rmSync(MR_TMP_DIR, { recursive: true, force: true }); } catch (_) {} });
 const { createServer, stopStateWatcher, readRoomStateJson, getRoomStateFile } = require('../server.js');
 const referee = require('../src/referee-service.js');
 

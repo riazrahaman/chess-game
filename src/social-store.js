@@ -24,8 +24,12 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
-const DEFAULT_DB_PATH = process.env.CHESS_SOCIAL_DB_PATH || path.join(ROOT, 'social.db');
-const DEFAULT_JSON_PATH = process.env.CHESS_SOCIAL_JSON_PATH || path.join(ROOT, '.social.json');
+function defaultDbPath() {
+  return process.env.CHESS_SOCIAL_DB_PATH || path.join(ROOT, 'social.db');
+}
+function defaultJsonPath() {
+  return process.env.CHESS_SOCIAL_JSON_PATH || path.join(ROOT, '.social.json');
+}
 
 class SqliteSocialAdapter {
   constructor(dbPath) {
@@ -277,10 +281,10 @@ class JsonSocialAdapter {
 function createSocialStore(options = {}) {
   if (options.forceJson !== true) {
     try {
-      return new SqliteSocialAdapter(options.dbPath || DEFAULT_DB_PATH);
+      return new SqliteSocialAdapter(options.dbPath || defaultDbPath());
     } catch (_) { /* fall through */ }
   }
-  return new JsonSocialAdapter(options.jsonPath || DEFAULT_JSON_PATH);
+  return new JsonSocialAdapter(options.jsonPath || defaultJsonPath());
 }
 
 let defaultStore = null;
@@ -300,6 +304,6 @@ module.exports = {
   createSocialStore,
   getDefaultStore,
   resetDefaultStore,
-  DEFAULT_DB_PATH,
-  DEFAULT_JSON_PATH
+  get DEFAULT_DB_PATH() { return defaultDbPath(); },
+  get DEFAULT_JSON_PATH() { return defaultJsonPath(); }
 };
