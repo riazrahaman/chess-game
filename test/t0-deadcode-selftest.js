@@ -115,7 +115,7 @@ async function run() {
       return hits;
     };
     assert(gate4Violations(uiCode).length === 0, `ARCHITECTURAL INVARIANT: ui.js must not reference ${gate4Violations(uiCode).join(', ')}`);
-    for (const mod of ['ui-sound.js', 'ui-theme.js', 'ui-annotations.js', 'ui-archive.js', 'ui-auth.js', 'ui-settings.js', 'ui-puzzles.js', 'ui-compete.js', 'ui-profile.js', 'ui-analysis.js', 'shell.js']) {
+    for (const mod of ['ui-sound.js', 'ui-theme.js', 'ui-annotations.js', 'ui-archive.js', 'ui-auth.js', 'ui-settings.js', 'ui-puzzles.js', 'ui-compete.js', 'ui-profile.js', 'ui-analysis.js', 'ui-retention.js', 'shell.js']) {
       const modCode = fs.readFileSync(path.join(__dirname, '..', 'src', mod), 'utf8');
       assert(gate4Violations(modCode).length === 0, `ARCHITECTURAL INVARIANT: ${mod} must not reference ${gate4Violations(modCode).join(', ')}`);
     }

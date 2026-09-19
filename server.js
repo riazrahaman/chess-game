@@ -360,6 +360,7 @@ const ALLOWED_FILES = new Set([
   'src/ui-compete.js',
   'src/ui-profile.js',
   'src/ui-analysis.js',
+  'src/ui-retention.js',
   'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'
@@ -1469,6 +1470,7 @@ function createServer() {
 
       if (require('./src/routes-puzzles.js').handlePuzzleRoute(req, res, urlPath, { sendJson, sendJsonError, readJsonBody, getAuthUser, parseCookies, gameArchive })) return; // Wave 2 E4: /api/puzzle/*
       if (SocialRoutes.handleSocialRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readBody, maxBodyBytes: MAX_BODY_BYTES, referee, seatAuth: seatAuthManager, isValidRoomId, accountsManager, gameArchive, ratingsStore: ratingHook.store, botService })) return; // Wave 2 R2: lobby/leaderboard/arena/social routes
+      if (require('./src/routes-retention.js').handleRetentionRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readJsonBody, gameArchive, referee, accountsManager })) return; // Wave 3 N2: /api/streak, /api/activity, /api/achievements
 
       sendJsonError(res, 404, 'not found');
       return;

@@ -357,6 +357,7 @@
       if (btn) btn.disabled = false;
       const lbl = $('[data-an="batch-label"]');
       if (lbl) lbl.textContent = 'Done.';
+      fetch('/api/activity', { method: 'POST', credentials: 'include', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'analysis' }) }).then(() => { if (window.Retention) window.Retention.refresh(); }).catch(() => {}); // Wave 3: an analysis batch counts as streak activity (401 for guests is fine)
       renderAccuracy();
       requestEval();
       return;

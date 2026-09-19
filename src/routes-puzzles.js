@@ -464,6 +464,7 @@ function handlePuzzleRoute(req, res, urlPath, ctx) {
       if (store) {
         store.savePuzzleAttempt({ playerId: player.id, puzzleId: active.id, win: result === 'solved', timeMs: Math.round(timeSec * 1000), themes: active.themes.join(' '), puzzleRating: active.rating, ratingAfter: null, mode: 'storm', createdAt: t });
       }
+      if (player.authenticated) { try { require('./routes-retention.js').recordPuzzleAttempt(player.id, { mode: 'storm', solved: result === 'solved', puzzle: active }); } catch (_) { /* Wave 3 streaks/achievements never block a solve */ } }
       const state = stormState(entry, t);
       sendJson(res, 200, { ok: true, recorded: true, timeUp: !!outcome.timeUp, solution: solutionOf(active), storm: state, summary: state.status === 'complete' ? entry.session.finalize(t) : null });
     }).catch(() => sendJsonError(res, 413, 'request body too large'));
@@ -552,6 +553,7 @@ function handlePuzzleRoute(req, res, urlPath, ctx) {
       if (store) {
         store.savePuzzleAttempt({ playerId: player.id, puzzleId: puzzle.id, win: claimedWin, timeMs, themes: puzzle.themes.join(' '), puzzleRating: puzzle.rating, ratingAfter: after.rating, mode, createdAt: Date.now() });
       }
+      if (player.authenticated) { try { require('./routes-retention.js').recordPuzzleAttempt(player.id, { mode, solved: claimedWin, puzzle }); } catch (_) { /* Wave 3 streaks/achievements never block a solve */ } }
       sendJson(res, 200, {
         ok: true,
         win: claimedWin,
