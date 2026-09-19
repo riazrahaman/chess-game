@@ -305,7 +305,7 @@ async function librarySubmitExternal(ev) {
       librarySetStatus('library-import-status', msg, 'error');
     } else {
       const b = res.body;
-      const more = b.total >= 500 ? ' Run again to fetch older games.' : '';
+      const more = b.total >= 500 ? ' Showing your most recent 500 games; later runs pick up new games.' : '';
       librarySetStatus('library-import-status', `${librarySourceLabel(source)}: ${b.imported} imported, ${b.skipped} already in your library.${more}`, 'ok');
       libraryState.page = 1;
       libraryLoad();
