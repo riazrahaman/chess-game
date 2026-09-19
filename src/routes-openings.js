@@ -41,6 +41,7 @@ const explorer = require('./openings-explorer.js');
 const rulesEngine = require('./rules-engine.js');
 const tablebase = require('./tablebase.js');
 const repertoireTrainer = require('./repertoire-trainer.js');
+const endgamesTrainer = require('./endgames-trainer.js');
 let gameArchive = null;
 try { gameArchive = require('./game-archive.js'); } catch (_) { gameArchive = null; }
 
@@ -181,6 +182,43 @@ function handleOpeningsRoute(req, res, urlPath, ctx) {
     }).catch(() => {
       if (!res.headersSent) sendJsonError(res, 413, 'request body too large');
     });
+    return true;
+  }
+
+  // Endgames Trainer routes
+  if (req.method === 'GET' && urlPath === '/api/endgames/drills') {
+    const cat = queryOf(req).get('category') || 'all';
+    sendJson(res, 200, { ok: true, categories: endgamesTrainer.getCategories(), drills: endgamesTrainer.getDrills(cat) });
+    return true;
+  }
+
+  if (req.method === 'POST' && urlPath === '/api/endgames/grade') {
+    const readJsonBody = ctx.readJsonBody;
+    if (typeof readJsonBody !== 'function') {
+      sendJsonError(res, 500, 'body reader unavailable');
+      return true;
+    }
+    readJsonBody(req).then(body => {
+      if (!body || !body.drillId || !body.playedMove) {
+        sendJsonError(res, 400, 'drillId and playedMove are required');
+        return;
+      }
+      const drill = endgamesTrainer.getDrillById(body.drillId);
+      if (!drill) {
+        sendJsonError(res, 404, 'drill not found: ' + body.drillId);
+        return;
+      }
+      const grade = endgamesTrainer.gradeEndgameMove(drill, body.playedMove, body.tablebaseResult);
+      sendJson(res, 200, Object.assign({ ok: true }, grade));
+    }).catch(() => {
+      if (!res.headersSent) sendJsonError(res, 413, 'request body too large');
+    });
+    return true;
+  }
+
+  if (req.method === 'GET' && urlPath === '/api/endgames/leaderboard') {
+    const cat = queryOf(req).get('category') || 'all';
+    sendJson(res, 200, { ok: true, leaderboard: endgamesTrainer.getLeaderboard(cat) });
     return true;
   }
 
