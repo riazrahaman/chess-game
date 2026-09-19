@@ -381,7 +381,7 @@
     {
       "id": "w4-repertoire-trainer",
       "round": 6,
-      "status": "BACKLOG",
+      "status": "DONE",
       "priority": "high",
       "title": "Opening repertoire trainer with MoveTrainer SRS",
       "description": "Upload PGN or pick study as repertoire; app plays opponent side; each move is an SRS card with Chessable ladder (4h,1d,3d,7d,14d,30d,90d,180d). Post-game deviation detection.",
@@ -390,7 +390,7 @@
     {
       "id": "w4-endgames-trainer",
       "round": 6,
-      "status": "BACKLOG",
+      "status": "DONE",
       "priority": "high",
       "title": "Endgames trainer — themed drills from 3-7 piece positions",
       "description": "Curated positions (K+P, Lucena, Philidor, Q vs P, opposite bishops), practice vs tablebase.js ground truth, timed challenge with leaderboard.",
@@ -399,7 +399,7 @@
     {
       "id": "w4-practice-curriculum",
       "round": 6,
-      "status": "BACKLOG",
+      "status": "DONE",
       "priority": "medium",
       "title": "Practice curriculum — progressive instructional ladder",
       "description": "Checkmates → Fundamental tactics → Advanced tactics → Pawn/Rook endgames. Curated positions with retry-before-reveal pedagogy.",
@@ -408,7 +408,7 @@
     {
       "id": "w4-maia-opponents",
       "round": 6,
-      "status": "BACKLOG",
+      "status": "DONE",
       "priority": "medium",
       "title": "Maia human-like opponents",
       "description": "Rating-matched human-like bot using learned move distributions. Distinct from personality-bots heuristic biases. Levels at 1100/1500/1900.",
@@ -417,7 +417,7 @@
     {
       "id": "w4-play-coach",
       "round": 6,
-      "status": "BACKLOG",
+      "status": "DONE",
       "priority": "medium",
       "title": "Play-Coach adaptive sparring opponent",
       "description": "Bot + coach combined: adapts strength, warns of threats, asks guiding questions, allows hints/takebacks. Combines bot-service + ai-coach + engine.",
