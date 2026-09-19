@@ -12,7 +12,7 @@ const Accounts = require('./src/accounts.js');
 const { Chess } = require('chess.js');
 const accountsManager = Accounts.getDefaultManager();
 const botService = new BotService(seatAuthManager);
-const ratingHook = require('./src/rating-hook.js').installRatingHook({ referee, seatAuth: seatAuthManager, archive: gameArchive, isBotRoom: roomId => botService.getBotConfig(roomId).enabled, onRated: event => SocialRoutes.onRatedGame(event), logger: console }); // Wave 2 R2: rate human-vs-human games on game end
+const ratingHook = require('./src/rating-hook.js').installRatingHook({ referee, seatAuth: seatAuthManager, archive: gameArchive, isBotRoom: roomId => botService.getBotConfig(roomId).enabled, onRated: event => { SocialRoutes.onRatedGame(event); require('./src/routes-insights.js').onRatedGame(event); }, logger: console }); // Wave 2 R2: rate human-vs-human games on game end
 const SocialRoutes = require('./src/routes-social.js');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : (process.env.CHESS_PORT ? Number(process.env.CHESS_PORT) : 39281);
@@ -360,6 +360,7 @@ const ALLOWED_FILES = new Set([
   'src/ui-compete.js',
   'src/ui-profile.js',
   'src/ui-analysis.js',
+  'src/ui-insights.js',
   'manifest.webmanifest',
   'service-worker.js',
   'CBURNETT-LICENSE.txt'
@@ -1469,6 +1470,7 @@ function createServer() {
 
       if (require('./src/routes-puzzles.js').handlePuzzleRoute(req, res, urlPath, { sendJson, sendJsonError, readJsonBody, getAuthUser, parseCookies, gameArchive })) return; // Wave 2 E4: /api/puzzle/*
       if (SocialRoutes.handleSocialRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readBody, maxBodyBytes: MAX_BODY_BYTES, referee, seatAuth: seatAuthManager, isValidRoomId, accountsManager, gameArchive, ratingsStore: ratingHook.store, botService })) return; // Wave 2 R2: lobby/leaderboard/arena/social routes
+      if (require('./src/routes-insights.js').handleInsightsRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readBody, maxBodyBytes: MAX_BODY_BYTES, gameArchive })) return; // Wave 3 N2.8/N3.15: /api/insights*, /api/league*
 
       sendJsonError(res, 404, 'not found');
       return;
