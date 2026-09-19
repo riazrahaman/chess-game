@@ -2808,6 +2808,9 @@ function setupBotUI() {
 let puzzleModeActive = false;
 let activeMistakePuzzles = [];
 let currentPuzzleIndex = 0;
+let puzzleAttempts = 0;
+let puzzleRevealed = false;
+let puzzleSolved = false;
 
 function handlePuzzleSquareClick(squareId) {
   if (!activeMistakePuzzles || activeMistakePuzzles.length === 0) return;
@@ -2822,20 +2825,30 @@ function handlePuzzleSquareClick(squareId) {
 
     const feedbackEl = document.getElementById('puzzle-feedback');
     const nextBtn = document.getElementById('puzzle-next-btn');
+    const revealBtn = document.getElementById('puzzle-reveal-btn');
+    puzzleAttempts++;
 
     if (moveAttempt === puzzle.bestMove.slice(0, 4)) {
+      puzzleSolved = true;
       if (feedbackEl) {
-        feedbackEl.textContent = '✓ Best Move! (★) Excellent find!';
+        const attemptLabel = puzzleAttempts === 1 ? 'First try!' : `${puzzleAttempts} attempts`;
+        feedbackEl.textContent = `✓ Best Move! (★) Excellent find! (${attemptLabel})`;
         feedbackEl.style.color = '#16a34a';
       }
       if (nextBtn && currentPuzzleIndex < activeMistakePuzzles.length - 1) {
         nextBtn.classList.remove('hidden');
       }
+      if (revealBtn) revealBtn.classList.add('hidden');
       playSound('move');
     } else {
       if (feedbackEl) {
-        feedbackEl.textContent = `✗ Not the best move (${moveAttempt}). Try again!`;
+        feedbackEl.textContent = `✗ Not the best move (${moveAttempt}). Try again, or reveal solution.`;
         feedbackEl.style.color = '#dc2626';
+      }
+      // P5: Retry-before-reveal pedagogy:
+      // Withhold the solution until user committed an attempt; reveal button is now unlocked
+      if (revealBtn && !puzzleSolved) {
+        revealBtn.classList.remove('hidden');
       }
       playSound('illegal');
     }
@@ -2885,6 +2898,10 @@ function loadCurrentPuzzle() {
   const puzzle = activeMistakePuzzles[currentPuzzleIndex];
   if (!puzzle) return;
 
+  puzzleAttempts = 0;
+  puzzleRevealed = false;
+  puzzleSolved = false;
+
   const puzzleBox = document.getElementById('puzzle-box');
   if (puzzleBox) puzzleBox.classList.remove('hidden');
 
@@ -2900,6 +2917,9 @@ function loadCurrentPuzzle() {
 
   const feedbackEl = document.getElementById('puzzle-feedback');
   if (feedbackEl) feedbackEl.textContent = '';
+
+  const revealBtn = document.getElementById('puzzle-reveal-btn');
+  if (revealBtn) revealBtn.classList.add('hidden');
 
   const nextBtn = document.getElementById('puzzle-next-btn');
   if (nextBtn) nextBtn.classList.add('hidden');
@@ -2919,8 +2939,34 @@ function setupMistakePuzzlesUI() {
       const puzzle = activeMistakePuzzles && activeMistakePuzzles[currentPuzzleIndex];
       const feedbackEl = document.getElementById('puzzle-feedback');
       if (puzzle && feedbackEl) {
-        feedbackEl.textContent = `💡 Hint: Focus on the piece at ${puzzle.bestMove.slice(0, 2)} moving to ${puzzle.bestMove.slice(2, 4)}.`;
+        // P5: Conceptual hint that guides without exposing the exact destination
+        const fromSq = puzzle.bestMove.slice(0, 2);
+        const piece = board && board.pieces && board.pieces[fromSq];
+        const pieceName = piece ? (piece.type || 'piece').toUpperCase() : 'piece';
+        feedbackEl.textContent = `💡 Hint: Consider the ${pieceName} on ${fromSq}. Find its best tactical square.`;
         feedbackEl.style.color = '#2563eb';
+      }
+    };
+  }
+
+  const revealBtn = document.getElementById('puzzle-reveal-btn');
+  if (revealBtn) {
+    revealBtn.onclick = () => {
+      const puzzle = activeMistakePuzzles && activeMistakePuzzles[currentPuzzleIndex];
+      const feedbackEl = document.getElementById('puzzle-feedback');
+      const nextBtn = document.getElementById('puzzle-next-btn');
+      if (puzzle && feedbackEl) {
+        if (puzzleAttempts === 0) {
+          feedbackEl.textContent = 'Please make at least one attempt before revealing the solution!';
+          feedbackEl.style.color = '#d97706';
+          return;
+        }
+        puzzleRevealed = true;
+        feedbackEl.textContent = `Solution: Best move was ${puzzle.bestMove}. (${puzzle.color} had played ${puzzle.playedMove}).`;
+        feedbackEl.style.color = '#2563eb';
+        if (nextBtn && currentPuzzleIndex < activeMistakePuzzles.length - 1) {
+          nextBtn.classList.remove('hidden');
+        }
       }
     };
   }
@@ -3487,6 +3533,9 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.setupMistakePuzzlesUI = setupMistakePuzzlesUI;
   window.getActiveMistakePuzzles = () => activeMistakePuzzles;
   window.isPuzzleModeActive = () => puzzleModeActive;
+  window.getPuzzleAttempts = () => puzzleAttempts;
+  window.isPuzzleRevealed = () => puzzleRevealed;
+  window.isPuzzleSolved = () => puzzleSolved;
   window.explainCurrentlyViewedMove = explainCurrentlyViewedMove;
   window.showCoachHint = showCoachHint;
   window.setupAiCoachUI = setupAiCoachUI;

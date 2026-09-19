@@ -108,7 +108,7 @@ What follows is the next-generation roadmap.
 - ~~**P2 Puzzle rating loop**~~ — **Done.** New `puzzle-rating.js` scores each solve as a Glicko-2 game (X4) between player and puzzle (clamped [400,2400]) with a time bonus; persisted in `game-archive.js`. Verified in `puzzle-rating-selftest.js` (9/9).
 - ~~**P3 Puzzle Storm + Daily Puzzle**~~ — **Done.** New `puzzle-storm.js` (deterministic seeded RNG, no `Math.random`) + `daily-puzzle.js` (date-seeded pick). Verified in `puzzle-storm-selftest.js` (9/9) + `daily-puzzle-selftest.js` (6/6).
 - ~~**P4 Spaced-repetition mistake review**~~ — **Done.** New `puzzle-repetition.js` with a Chessable-style expanding-interval schedule (1→2→4→8→16→32→365d), persisted in `game-archive.js`. Verified in `puzzle-repetition-selftest.js` (24/24).
-- **P5 Retry-before-reveal pedagogy** (already half-built): ensure every mistake puzzle hides the solution until the user's attempt is committed — lichess's "learn from your mistakes" differentiator.
+- ~~**P5 Retry-before-reveal pedagogy**~~ — **Done.** Enforced across mistake puzzles (`ui.js`) and game analysis retry (`ui-analysis.js`). Solutions withheld until an attempt is committed; `#puzzle-reveal-btn` unlocks only after user attempt; pedagogical hints guide piece activity rather than revealing move coordinates. Verified in `test/p5-retry-selftest.js` (7/7).
 - ~~**P6 Puzzle Racer/Battle**~~ — **Done.** New `puzzle-racer.js` — multiplayer puzzle race over a seeded sequence with streak multipliers (×2 capped ×8), shared round progression, and deterministic RNG. Verified in `puzzle-racer-selftest.js` (10/10).
 
 ## TIER A2 — Analysis & learning depth

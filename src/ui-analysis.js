@@ -657,6 +657,11 @@
 
   function revealRetry() {
     if (!state.retry) return;
+    if (state.retry.attempts === 0) {
+      state.retry.message = 'Try at least one move before revealing the best move.';
+      renderRetryBox();
+      return;
+    }
     state.retry.revealed = true;
     state.retry.message = `Best was ${uciToText(state.retry.miss.bestMove)} (engine). You played ${esc(state.retry.miss.playedSan || uciToText(state.retry.miss.playedMove))}.`;
     renderBoard(); renderRetryBox(); requestEval();
@@ -679,7 +684,7 @@
       <div><strong>Retry ply ${m.ply}</strong> · ${colorLabel(m.color)} to move${retryActiveHere() ? '' : ' · <button type="button" data-an="missed-back">back to the position</button>'}</div>
       <div data-an="retry-message" style="margin:4px 0">${retry.message}</div>
       <div class="an-actions">
-        ${retry.solved || retry.revealed ? '' : '<button type="button" data-an="missed-reveal">Reveal best move</button>'}
+        ${retry.solved || retry.revealed ? '' : (retry.attempts > 0 ? '<button type="button" data-an="missed-reveal">Reveal best move</button>' : '')}
         <button type="button" data-an="missed-exit">Done</button>
       </div>`;
   }
