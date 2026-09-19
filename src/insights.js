@@ -129,9 +129,11 @@ function normalizeGame(row, ctx = {}) {
   if (!row || typeof row !== 'object') return null;
   const tags = parsePgnTags(row.pgn);
   const movesStr = typeof row.moves === 'string' ? row.moves.trim() : Array.isArray(row.moves) ? row.moves.join(' ') : '';
-  const split = movesStr ? movesStr.split(/\s+/) : [];
-  const uci = split.length && UCI_RE.test(split[0]) ? split : Array.isArray(row.uci) ? row.uci : [];
-  const san = split.length && !UCI_RE.test(split[0]) ? split : sanMovesFromPgn(row.pgn);
+  // tolerate "1. e2e4 e7e5" style move columns: drop move numbers / result tokens
+  const split = movesStr ? movesStr.split(/\s+/).map(t => t.replace(/^\d+\.+/, '')).filter(t => t && !/^(1-0|0-1|1\/2-1\/2|\*)$/.test(t)) : [];
+  const allUci = split.length > 0 && split.every(t => UCI_RE.test(t));
+  const uci = allUci ? split : Array.isArray(row.uci) ? row.uci : [];
+  const san = split.length && !allUci ? split : sanMovesFromPgn(row.pgn);
   const plies = Math.max(uci.length, san.length);
   const result = normalizeResult(row.result || tags.Result);
 
