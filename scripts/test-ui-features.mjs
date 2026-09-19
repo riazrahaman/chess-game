@@ -261,7 +261,7 @@ async function testUiFeatures() {
   if (ghostCheck.g4 !== 'black-b') throw new Error('Black bishop missing on g4 at ply 10');
   console.log('✔ Passed: History scrubbing correctly cleans vacated squares without ghost duplicate pieces');
 
-  // 7. Test Puzzles View (#/puzzles)
+  // 7. Test Puzzles View
   console.log('Testing Puzzles view...');
   await page.evaluate(() => window.Shell && window.Shell.navigate('puzzles'));
   await page.waitForTimeout(500);
@@ -271,8 +271,8 @@ async function testUiFeatures() {
   });
   if (!puzzlesVisible) throw new Error('Puzzles view section not visible after navigation');
 
-  const puzzleBoard = await page.locator('#puzzle-board').count();
-  if (puzzleBoard < 1) throw new Error('#puzzle-board not found in Puzzles view');
+  const puzzleBoard = await page.locator('[id="puzzle-board"]').count();
+  if (puzzleBoard < 1) throw new Error('puzzle-board not found in Puzzles view');
 
   const puzzleTabs = await page.locator('.pz-tabs button[role="tab"]').count();
   if (puzzleTabs < 4) throw new Error(`Expected at least 4 puzzle tabs, found ${puzzleTabs}`);
@@ -292,7 +292,7 @@ async function testUiFeatures() {
   }
   console.log('✔ Passed: Puzzles view renders with board, tabs, and tab switching');
 
-  // 8. Test Library View (#/library)
+  // 8. Test Library View
   console.log('Testing Library view...');
   await page.evaluate(() => window.Shell && window.Shell.navigate('library'));
   await page.waitForTimeout(500);
@@ -302,22 +302,22 @@ async function testUiFeatures() {
   });
   if (!libraryVisible) throw new Error('Library view section not visible after navigation');
 
-  const libraryTitle = await page.locator('#library-title').textContent();
+  const libraryTitle = await page.locator('[id="library-title"]').textContent();
   if (!libraryTitle || !libraryTitle.includes('Library')) {
     throw new Error(`Expected Library title, got: ${libraryTitle}`);
   }
 
-  const searchInput = page.locator('#library-search');
-  if (await searchInput.count() < 1) throw new Error('#library-search input not found');
+  const searchInput = page.locator('[id="library-search"]');
+  if (await searchInput.count() < 1) throw new Error('library-search input not found');
 
   const sourceChips = await page.locator('.library-chip[data-source]').count();
   if (sourceChips < 3) throw new Error(`Expected at least 3 source chips, found ${sourceChips}`);
 
-  const pgnForm = page.locator('#library-pgn-text');
-  if (await pgnForm.count() < 1) throw new Error('#library-pgn-text not found');
+  const pgnForm = page.locator('[id="library-pgn-text"]');
+  if (await pgnForm.count() < 1) throw new Error('library-pgn-text not found');
   console.log('✔ Passed: Library view renders with title, search, source chips, and PGN form');
 
-  // 9. Test Insights View (#/insights)
+  // 9. Test Insights View
   console.log('Testing Insights view...');
   await page.evaluate(() => window.Shell && window.Shell.navigate('insights'));
   await page.waitForTimeout(500);
@@ -327,18 +327,18 @@ async function testUiFeatures() {
   });
   if (!insightsVisible) throw new Error('Insights view section not visible after navigation');
 
-  const insightsTitle = await page.locator('#insights-title').textContent();
+  const insightsTitle = await page.locator('[id="insights-title"]').textContent();
   if (!insightsTitle || !insightsTitle.includes('Insights')) {
     throw new Error(`Expected Insights title, got: ${insightsTitle}`);
   }
 
-  const leagueSection = page.locator('#insights-league');
-  if (await leagueSection.count() < 1) throw new Error('#insights-league section not found');
+  const leagueSection = page.locator('[id="insights-league"]');
+  if (await leagueSection.count() < 1) throw new Error('insights-league section not found');
 
-  const pivotSection = page.locator('#insights-pivot');
-  if (await pivotSection.count() < 1) throw new Error('#insights-pivot section not found');
+  const pivotSection = page.locator('[id="insights-pivot"]');
+  if (await pivotSection.count() < 1) throw new Error('insights-pivot section not found');
 
-  const metricSelect = page.locator('#insights-metric');
+  const metricSelect = page.locator('[id="insights-metric"]');
   if (await metricSelect.count() > 0) {
     const metricOptions = await metricSelect.locator('option').count();
     console.log(`  Insights metric dropdown has ${metricOptions} options`);

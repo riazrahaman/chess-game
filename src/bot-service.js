@@ -52,12 +52,30 @@ const BOT_LEVELS = {
   5: { level: 5, name: 'Tactician Bot', rating: 1600, skill: null, elo: 1600, depth: null, movetime: 400, blunderRate: 0, useBook: false, greeting: 'Solid openings and steady calculation.' },
   6: { level: 6, name: 'Strong Club Bot', rating: 1800, skill: null, elo: 1800, depth: null, movetime: 500, blunderRate: 0, useBook: false, greeting: 'Preparing a positional plan.' },
   7: { level: 7, name: 'Advanced Bot', rating: 2000, skill: null, elo: 2000, depth: null, movetime: 600, blunderRate: 0, useBook: false, greeting: 'Calculation initiated. Every tempo counts.' },
-  8: { level: 8, name: 'Expert Bot', rating: 2300, skill: null, elo: 2300, depth: null, movetime: 600, blunderRate: 0, useBook: false, greeting: 'Maximum precision. Stockfish 19 at ~2300.' },
-  // Wave 4: Maia rating-matched human-like bots
-  'maia-1100': { level: 'maia-1100', name: 'Maia 1100', rating: 1100, maiaRating: 1100, isMaia: true, blunderRate: 0, useBook: true, greeting: 'Hello! I am Maia 1100, calibrated to human beginner play.' },
-  'maia-1500': { level: 'maia-1500', name: 'Maia 1500', rating: 1500, maiaRating: 1500, isMaia: true, blunderRate: 0, useBook: true, greeting: 'Hello! I am Maia 1500, calibrated to club player human play.' },
-  'maia-1900': { level: 'maia-1900', name: 'Maia 1900', rating: 1900, maiaRating: 1900, isMaia: true, blunderRate: 0, useBook: true, greeting: 'Hello! I am Maia 1900, calibrated to advanced human play.' }
+  8: { level: 8, name: 'Expert Bot', rating: 2300, skill: null, elo: 2300, depth: null, movetime: 600, blunderRate: 0, useBook: false, greeting: 'Maximum precision. Stockfish 19 at ~2300.' }
 };
+
+// Wave 4: Maia rating-matched human-like bots (attached as non-enumerable to preserve 8-rung engine ladder keys)
+Object.defineProperties(BOT_LEVELS, {
+  'maia-1100': {
+    value: { level: 'maia-1100', name: 'Maia 1100', rating: 1100, maiaRating: 1100, isMaia: true, blunderRate: 0, useBook: true, greeting: 'Hello! I am Maia 1100, calibrated to human beginner play.' },
+    enumerable: false,
+    writable: true,
+    configurable: true
+  },
+  'maia-1500': {
+    value: { level: 'maia-1500', name: 'Maia 1500', rating: 1500, maiaRating: 1500, isMaia: true, blunderRate: 0, useBook: true, greeting: 'Hello! I am Maia 1500, calibrated to club player human play.' },
+    enumerable: false,
+    writable: true,
+    configurable: true
+  },
+  'maia-1900': {
+    value: { level: 'maia-1900', name: 'Maia 1900', rating: 1900, maiaRating: 1900, isMaia: true, blunderRate: 0, useBook: true, greeting: 'Hello! I am Maia 1900, calibrated to advanced human play.' },
+    enumerable: false,
+    writable: true,
+    configurable: true
+  }
+});
 // Search cap for the legacy PST fallback engine (`stockfish-worker.js`), used
 // only when the real engine is unavailable or rejects.
 const PST_FALLBACK_DEPTH = { 1: 1, 2: 1, 3: 2, 4: 2, 5: 3, 6: 3, 7: 4, 8: 4 };
