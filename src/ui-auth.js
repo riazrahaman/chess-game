@@ -77,16 +77,18 @@ async function initGoogleSignIn() {
   } catch (_) {}
 
   if (!googleClientId) {
-    if (hint) hint.style.display = 'block';
+    if (hint) hint.style.display = 'none';
     if (container) container.style.display = 'none';
-    // The demo button only works when the server has ALLOW_DEMO_AUTH=1;
-    // otherwise hide it so users are steered to username/password.
+    const directWrap = document.getElementById('google-direct-signin');
+    if (directWrap) directWrap.style.display = demoAuthEnabled ? 'flex' : 'none';
     if (demoBtn) demoBtn.style.display = demoAuthEnabled ? 'inline-flex' : 'none';
     return;
   }
 
   if (hint) hint.style.display = 'none';
   if (container) container.style.display = 'block';
+  const directWrap = document.getElementById('google-direct-signin');
+  if (directWrap) directWrap.style.display = 'none';
   if (demoBtn) demoBtn.style.display = 'none';
 
   function renderGsiButton() {
@@ -200,14 +202,21 @@ function setupAuthUI() {
   if (demoGoogleBtn) {
     demoGoogleBtn.onclick = async () => {
       try {
+        const emailInput = document.getElementById('google-email-input');
+        const rawEmail = (emailInput && emailInput.value.trim()) || '';
+        const email = rawEmail || 'google.player@gmail.com';
+        const namePart = email.split('@')[0];
+        const name = namePart
+          ? namePart.replace(/[._-]/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+          : 'Google Player';
         const res = await fetch('/api/auth/google', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({
             demoUser: {
-              name: 'Google Player',
-              email: 'google.player@gmail.com'
+              name,
+              email
             }
           })
         });
@@ -228,6 +237,16 @@ function setupAuthUI() {
         }
       }
     };
+  }
+
+  const googleEmailInput = document.getElementById('google-email-input');
+  if (googleEmailInput && demoGoogleBtn) {
+    googleEmailInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        demoGoogleBtn.click();
+      }
+    });
   }
 
   if (signOutBtn) {

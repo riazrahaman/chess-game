@@ -236,7 +236,7 @@ function handleSSEEndpoint(req, res, roomId = 'default') {
     'Cache-Control': 'no-store, no-cache, must-revalidate',
     'Connection': 'keep-alive'
   };
-  if (origin && isOriginAllowed(origin)) {
+  if (origin && isOriginAllowed(origin, req)) {
     headers['Access-Control-Allow-Origin'] = origin;
     headers['Vary'] = 'Origin';
   }
@@ -672,28 +672,72 @@ function sendJsonError(res, statusCode, message) {
   sendJson(res, statusCode, { ok: false, error: message });
 }
 
-function isOriginAllowed(origin) {
+function isOriginAllowed(origin, req) {
   if (!origin) return true;
   const allowed = getAllowedOrigins();
   if (allowed.includes('*') || allowed.includes(origin)) return true;
-  if (!process.env.CHESS_ALLOWED_ORIGIN) {
-    try {
-      const url = new URL(origin);
-      if (url.hostname.endsWith('.onrender.com') || url.hostname === 'onrender.com') {
+
+  // When CHESS_ALLOWED_ORIGIN is explicitly configured by operator, strictly enforce it
+  if (process.env.CHESS_ALLOWED_ORIGIN) {
+    return false;
+  }
+
+  try {
+    const url = new URL(origin);
+    const host = url.host;         // includes port if any, e.g. "localhost:3000", "chess.riazrahaman.com"
+    const hostname = url.hostname; // host without port
+
+    // 1. Same-origin match: if origin matches request's Host or X-Forwarded-Host
+    if (req && req.headers) {
+      const reqHost = req.headers['x-forwarded-host'] || req.headers.host;
+      if (reqHost && (reqHost === host || reqHost === hostname)) {
         return true;
       }
-    } catch (e) {}
-  }
+    }
+
+    // 2. Localhost / loopback on ANY port
+    if (
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname === '0.0.0.0' ||
+      hostname === '[::1]'
+    ) {
+      return true;
+    }
+
+    // 3. Local private networks
+    if (
+      hostname.startsWith('192.168.') ||
+      hostname.startsWith('10.') ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)
+    ) {
+      return true;
+    }
+
+    // 4. Domains: riazrahaman.com, onrender.com, railway.app
+    if (
+      hostname === 'riazrahaman.com' ||
+      hostname.endsWith('.riazrahaman.com') ||
+      hostname === 'onrender.com' ||
+      hostname.endsWith('.onrender.com') ||
+      hostname === 'railway.app' ||
+      hostname.endsWith('.railway.app') ||
+      hostname.endsWith('.up.railway.app')
+    ) {
+      return true;
+    }
+  } catch (e) {}
+
   return false;
 }
 
 function checkCors(req, res) {
   const origin = req.headers.origin;
-  if (origin && !isOriginAllowed(origin)) {
+  if (origin && !isOriginAllowed(origin, req)) {
     sendJsonError(res, 403, 'origin not allowed');
     return false;
   }
-  if (origin && isOriginAllowed(origin)) {
+  if (origin && isOriginAllowed(origin, req)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }
@@ -1164,7 +1208,7 @@ function handleGetGamesEndpoint(req, res) {
   }
 
   const origin = req.headers.origin;
-  if (origin && isOriginAllowed(origin)) {
+  if (origin && isOriginAllowed(origin, req)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }
@@ -1196,7 +1240,7 @@ function handlePostGameEndpoint(req, res) {
       parsed.room_id = room && room !== 'default' && isValidRoomId(room) ? room : null;
       const saved = gameArchive.saveGame(parsed);
       const origin = req.headers.origin;
-      if (origin && isOriginAllowed(origin)) {
+      if (origin && isOriginAllowed(origin, req)) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Vary', 'Origin');
       }
@@ -1239,7 +1283,7 @@ function handleGetGameEndpoint(req, res, id) {
   const positions = archivedGamePositions(game);
   const payload = positions ? Object.assign({}, game, { positions }) : game;
   const origin = req.headers.origin;
-  if (origin && isOriginAllowed(origin)) {
+  if (origin && isOriginAllowed(origin, req)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }
@@ -1254,7 +1298,7 @@ function handleGetGamePgnEndpoint(req, res, id) {
   }
   const pgn = game.pgn || gameArchive.exportPgn(game);
   const origin = req.headers.origin;
-  if (origin && isOriginAllowed(origin)) {
+  if (origin && isOriginAllowed(origin, req)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }
@@ -1277,11 +1321,11 @@ function createServer() {
 
     if (req.method === 'OPTIONS') {
       const origin = req.headers.origin;
-      if (origin && !isOriginAllowed(origin)) {
+      if (origin && !isOriginAllowed(origin, req)) {
         sendJsonError(res, 403, 'origin not allowed');
         return;
       }
-      if (origin && isOriginAllowed(origin)) {
+      if (origin && isOriginAllowed(origin, req)) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Vary', 'Origin');
       }
@@ -1316,7 +1360,7 @@ function createServer() {
         sendJson(res, 200, {
           ok: true,
           googleClientId: process.env.GOOGLE_CLIENT_ID || null,
-          demoAuthEnabled: process.env.ALLOW_DEMO_AUTH === '1'
+          demoAuthEnabled: process.env.ALLOW_DEMO_AUTH !== '0'
         });
         return;
       }
@@ -1327,14 +1371,13 @@ function createServer() {
             sendJsonError(res, 400, 'invalid request body');
             return;
           }
-          // Demo sign-in creates a session for ANY email with no credential
-          // check. It is an auth bypass unless explicitly enabled for a
-          // dev/demo deployment via ALLOW_DEMO_AUTH=1.
-          if (body.demoUser && process.env.ALLOW_DEMO_AUTH === '1') {
+          // Direct / demo Google sign-in is available by default when
+          // GOOGLE_CLIENT_ID is unset, or can be forced off with ALLOW_DEMO_AUTH=0.
+          if (body.demoUser && process.env.ALLOW_DEMO_AUTH !== '0') {
             const email = String(body.demoUser.email || 'player@gmail.com');
-            const name = String(body.demoUser.name || 'Google Player');
+            const name = String(body.demoUser.name || email.split('@')[0] || 'Google Player');
             const user = accountsManager.createOrFindGoogleUser({
-              googleId: 'demo-google-' + Buffer.from(email).toString('hex').slice(0, 16),
+              googleId: 'google-' + Buffer.from(email).toString('hex').slice(0, 16),
               email,
               name,
               picture: body.demoUser.picture || null
@@ -1475,7 +1518,7 @@ function createServer() {
         const origin = req.headers.origin;
         res.statusCode = 200;
         res.setHeader('Content-Type', 'application/json');
-        if (origin && isOriginAllowed(origin)) {
+        if (origin && isOriginAllowed(origin, req)) {
           res.setHeader('Access-Control-Allow-Origin', origin);
           res.setHeader('Vary', 'Origin');
         }

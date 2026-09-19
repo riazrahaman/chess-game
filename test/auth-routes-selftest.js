@@ -179,12 +179,50 @@ async function run() {
       assert(res.body.token);
     });
 
+    await test('POST /api/auth/google with demoUser establishes Google session', async () => {
+      const res = await request(server, {
+        path: '/api/auth/google',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }, {
+        demoUser: {
+          name: 'Riaz Rahaman',
+          email: 'rahaman.riaz@gmail.com'
+        }
+      });
+
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.body.ok, true);
+      assert.strictEqual(res.body.user.email, 'rahaman.riaz@gmail.com');
+      assert.strictEqual(res.body.user.username, 'Riaz Rahaman');
+      assert.strictEqual(res.body.user.authProvider, 'google');
+      assert(res.body.token);
+    });
+
     await test('GET /api/profile returns profile stats', async () => {
       const res = await request(server, { path: '/api/profile?username=Magnus%20Player' });
       assert.strictEqual(res.status, 200);
       assert.strictEqual(res.body.ok, true);
       assert.strictEqual(res.body.profile.username, 'Magnus Player');
       assert(Array.isArray(res.body.profile.games));
+    });
+
+    await test('CORS allows riazrahaman.com domain and localhost on any port', async () => {
+      const resDomain = await request(server, {
+        path: '/api/time',
+        method: 'GET',
+        headers: { Origin: 'https://chess.riazrahaman.com' }
+      });
+      assert.strictEqual(resDomain.status, 200);
+      assert.strictEqual(resDomain.headers['access-control-allow-origin'], 'https://chess.riazrahaman.com');
+
+      const resLocal = await request(server, {
+        path: '/api/time',
+        method: 'GET',
+        headers: { Origin: 'http://localhost:3000' }
+      });
+      assert.strictEqual(resLocal.status, 200);
+      assert.strictEqual(resLocal.headers['access-control-allow-origin'], 'http://localhost:3000');
     });
 
     console.log(`\nAll ${passed} tests passed successfully!`);
