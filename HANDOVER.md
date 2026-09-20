@@ -675,3 +675,63 @@ CHESS_PORT=39281 CHESS_RATE_LIMIT=100000 npm run test:browser   # expect exit 0 
 # to /tmp, insert a deliberate early throw after the server spawns, run it, then
 # confirm the spawned `node server.js` is gone and `:39281` is free.
 ```
+
+## 21. FIX — Bot-config race left the human on the wrong seat (branch `fix/bot-config-race`, 2026-09-20)
+
+| Task | Owner | Branch | Status | Summary | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| `fix-bot-config-race` | builder | `fix/bot-config-race` | DONE | The CI `browser` job failed at `scripts/test-ui-features.mjs:150` with `Seat badge never showed Playing White (got: Seated: Black)`; the badge held `Seated: Black` for the **entire** 5 s bounded wait, so this was **not** slowness — the seat swap genuinely never completed. This is the same failure the §19 "fix" addressed, which means §19 only masked a deeper product bug. Reproduced locally with CDP `Emulation.setCPUThrottlingRate` rate 15 on a Playwright probe running the exact gesture (`levelSelect 4` → `colorSelect white` → `levelSelect 7` → `colorSelect black` → toggle on): the server ended with the bot on white and the human on black, i.e. the inverse of the test's (correct) expectation. Two compounding defects in `src/ui.js`. **Defect 1 — stale config read at execution time:** `sendBotConfigUpdateNow()` re-read the live DOM (`colorSelect.value`, `levelSelect.value`, `toggle.checked`) when it finally ran, but it is queued on `botConfigChain`; by then the DOM already held a *newer* selection, so it POSTed the stale colour and then claimed the wrong human seat (`humanColor = color === 'black' ? 'white' : 'black'`). Captured `POST /api/bot` bodies (user last selected black) included repeated `{"enabled":true,"level":7,"color":"white"}`. **Defect 2 — stale response clobbers newer input:** `updateBotUI(data)` wrote every `/api/bot` response back into the user-editable fields (`toggle.checked`, `levelSelect.value`, `colorSelect.value`), guarded only by `document.activeElement !== field`; a slow response for an older request therefore overwrote the user's newer selection. This is a REAL product bug: a user quickly changing bot colour/level on a slow connection ends up on the wrong seat. **Fix:** `sendBotConfigUpdate()` now reads the DOM **once, synchronously, at gesture time** and passes that immutable snapshot into the queued `sendBotConfigUpdateNow(snapshot)`, which never re-reads the DOM; and `updateBotUI(botConfig, {applyControls=false})` no longer writes user-editable fields from a response by default — the DOM is the source of truth for the controls, while `bot.status` (badge) and seat state remain server-authoritative. `fetchBotConfig()` passes `applyControls: true` (gated by a `botControlsTouched` flag) so initial page load still populates the controls. The `leaveSeat()` → `claimSeat(humanColor)` serialisation is unchanged. Gate-4 clean (no `makeMove`/`createInitialBoard`/`historyToSan`), no inline handlers. | CDP-throttled exact-gesture probe at rates **10/15/20/30, 3 runs each: all PASS after the fix** (`Seated: White`, botColor `black`); the original code FAILED **17 of 20** runs (`Seated: Black`, botColor white/black). Isolation probes (each defect is separately load-bearing; in the bare badge probe the two defects partially mask each other): a latency-injected 2400 ms **fidelity** probe shows the four `POST /api/bot` bodies now match the four gestures exactly (`[4/black, 4/white, 7/white, 7/black]`) whereas the original sent a stale tail (observed patterns included `[4/black, 4/black, 4/black, 4/black]`, `[…, 7/white, 7/white]`, and `[…, 7/black, 7/black]` — the exact repeat is timing-dependent); a 600 ms route-delay **guard** probe shows a slow older response no longer clobbers the newer DOM selection (original `domColor` clobbered to `white`; reverting only the guard reproduces it). `npm run test:browser` under the exact CI env block passed **twice** (exit 0, both sentinels, `Seat badge in bot mode: Seated: White`). Gates: `node --check src/ui.js` 0, `t0-deadcode` 27/0, `wave3-hygiene` 87, `reachability` 49/49 KNOWN_DARK 10, `about` 12, `npm run lint` 0, `npm run test:unit` exit 0 with `grep -c '^FAIL:'` = 0. Only `src/ui.js` changed. |
+
+### Root cause
+
+`sendBotConfigUpdate()` queues work on `botConfigChain` (`src/ui.js`). The old `sendBotConfigUpdateNow()` took **no arguments** and read `#bot-toggle` / `#bot-level-select` / `#bot-color-select` at *execution* time. Under load (or just fast successive gestures) an earlier queued call runs after a later `change` event has already updated the DOM, so it POSTs the newer colour while its caller intended the older one. Because the following seat swap derives the human colour from the same (now stale) value, the human is seated opposite the *wrong* bot colour. Compounding it, `updateBotUI()` echoed the server response into the controls for every response, so an in-flight older response overwrote a newer user selection in the DOM, which then poisoned *subsequent* queued requests too.
+
+### Exact edits
+
+- `src/ui.js` — `sendBotConfigUpdate()` now reads `toggle.checked`, `parseInt(levelSelect.value,10)` and `colorSelect.value` **synchronously, before queueing**, and passes them as a `snapshot` object into `botConfigChain.then(() => sendBotConfigUpdateNow(snapshot))`; it also sets `botControlsTouched = true`.
+- `src/ui.js` — `sendBotConfigUpdateNow(snapshot)` destructures `{enabled, level, color}` from the snapshot and no longer touches the DOM; its `POST /api/bot` body and the `humanColor = color === 'black' ? 'white' : 'black'` seat swap both use the snapshot. The `leaveSeat()` → `claimSeat(humanColor)` flow is unchanged.
+- `src/ui.js` — `updateBotUI(botConfig, { applyControls = false } = {})`: the three user-editable writes are now gated on `applyControls`; the `bot-status-badge` update stays unconditional (server-authoritative). Rationale for choosing the "stop writing user-editable fields" option over a sequence-tag scheme: the DOM already holds the user's latest intent, so re-asserting a response into the controls can only ever *lose* information; a sequence tag would add state and still have to decide when the DOM wins. This option is smaller and strictly safer.
+- `src/ui.js` — new module-scoped `let botControlsTouched = false;` and `fetchBotConfig()` calls `updateBotUI(data.bot, { applyControls: !botControlsTouched })`, so a slow page-load `/api/bot` GET cannot clobber a selection made after it started, while a normal load still populates the controls from the server.
+- `HANDOVER.md` §21, `docs/06-world-class-roadmap.md` B21, `docs/kanban-tasks.json` card `fix-bot-config-race`.
+
+### Note
+
+The two defects partially mask each other in the bare seat-badge probe: reverting only the snapshot capture lets `updateBotUI`'s write-back keep the DOM on the *latest* value and the run still passes; reverting only the response guard similarly passes (with the DOM clobbered). The dedicated probes (fidelity: POST bodies; guard: DOM after two rapid gestures with a slow API) isolate each defect and show both are load-bearing. The CI test assertion was **not** weakened — only `src/ui.js` changed; `scripts/test-ui-features.mjs` is untouched.
+
+### Reproduce locally
+
+```bash
+# Start the server with all state under a fresh tmpdir, then run a CDP-throttled
+# probe in the repo dir (Playwright resolves from ./node_modules):
+TMP=$(mktemp -d)
+CHESS_PORT=39281 CHESS_RATE_LIMIT=100000 \
+  CHESS_STATE_FILE=$TMP/.referee-state.json CHESS_JOURNAL_FILE=$TMP/.referee-journal.jsonl \
+  CHESS_DB_FILE=$TMP/games.db CHESS_JSON_ARCHIVE_FILE=$TMP/.games-archive.json \
+  CHESS_ACCOUNTS_DB_FILE=$TMP/accounts.db CHESS_ACCOUNTS_JSON_FILE=$TMP/.accounts.json \
+  CHESS_SOCIAL_DB_PATH=$TMP/social.db CHESS_SOCIAL_JSON_PATH=$TMP/.social.json \
+  CHESS_LEAGUES_DB_PATH=$TMP/leagues.db CHESS_LEAGUES_JSON_PATH=$TMP/.leagues.json \
+  CHESS_STUDY_DB_PATH=$TMP/study.db CHESS_STUDY_JSON_PATH=$TMP/.study.json \
+  CHESS_RATE_LIMIT_FILE=$TMP/rate-limit.json node server.js &
+
+# Probe gesture (rate >= 15 fails on the pre-fix code, <= 6 passes):
+node - <<'JS'
+import { chromium } from 'playwright';
+const b = await chromium.launch({ headless: true });
+const page = await (await b.newContext()).newPage();
+const cdp = await page.context().newCDPSession(page);
+await cdp.send('Emulation.setCPUThrottlingRate', { rate: 15 });
+await page.goto('http://127.0.0.1:39281/#/play', { waitUntil: 'domcontentloaded' });
+await page.waitForSelector('.chess-piece');
+const level = page.locator('#bot-level-select'), color = page.locator('#bot-color-select'), tog = page.locator('#bot-toggle');
+await level.selectOption('4'); await color.selectOption('white');
+await level.selectOption('7'); await color.selectOption('black');
+if (!await tog.isChecked()) await tog.click();
+await page.waitForFunction(() => { const b=document.getElementById('seat-badge'); return b && /White/.test(b.textContent||''); }, undefined, { timeout: 5000, polling: 50 });
+console.log('badge:', await page.locator('#seat-badge').textContent()); // expect "Seated: White"
+await b.close();
+JS
+
+# Full CI-shaped browser run:
+CHESS_PORT=39281 CHESS_RATE_LIMIT=100000 npm run test:browser   # expect exit 0 + both sentinels
+```
+
