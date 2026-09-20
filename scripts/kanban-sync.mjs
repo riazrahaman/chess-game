@@ -15,7 +15,7 @@ import path from 'node:path';
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
 const manifestPath = args.includes('--manifest') ? args[args.indexOf('--manifest') + 1] : path.resolve('docs/kanban-tasks.json');
-const BASE = (process.env.KANBAN_URL || 'https://agent-kanban-board-production.up.railway.app').replace(/\/+$/, '');
+const BASE = (process.env.KANBAN_URL || 'https://agent-kanban.riazrahaman.com').replace(/\/+$/, '');
 const TOKEN = process.env.KANBAN_AUTH_TOKEN;
 const AGENT = process.env.KANBAN_AGENT_ID || 'claude-code-lead';
 

@@ -56,6 +56,19 @@ let latestGameReview = null;
 let evalHistory = [0];
 let currentSeatRole = null;
 let currentSeatToken = null;
+let resignConfirmTimer = null;
+
+function resetResignConfirm() {
+  if (resignConfirmTimer) {
+    clearTimeout(resignConfirmTimer);
+    resignConfirmTimer = null;
+  }
+  const btn = (typeof document !== 'undefined') ? document.getElementById('resign') : null;
+  if (btn) {
+    btn.textContent = 'Resign';
+    if (btn.classList) btn.classList.remove('btn-danger-confirm');
+  }
+}
 
 function clearPremove() {
   premoveQueue = [];
@@ -745,7 +758,7 @@ function getAuthHeaders(extraHeaders = {}) {
   const headers = { 'Content-Type': 'application/json', ...extraHeaders };
   const room = getCurrentRoomId();
   const seatToken = (typeof window !== 'undefined' && (
-    (window.sessionStorage && window.sessionStorage.getItem('chess_seat_token')) ||
+    (window.sessionStorage && (window.sessionStorage.getItem('chess_seat_token_' + room) || window.sessionStorage.getItem('chess_seat_token'))) ||
     (window.localStorage && window.localStorage.getItem('chess_seat_token_' + room))
   )) || currentSeatToken;
   if (seatToken) {
@@ -1273,6 +1286,7 @@ function applyRefereeState(state) {
   turn = nextTurn;
   refereeStatus = state.status || getGameStatus(state.board, nextTurn);
   gameOver = state.gameOver === true;
+  if (gameOver) resetResignConfirm();
   result = state.result || null;
   if (pendingPromo) closePromoModal();
   renderGameEnd(state);
@@ -1509,11 +1523,42 @@ function pgnResultToken() {
 async function copyPgn() {
   const rawHistory = moveHistory.flatMap(move => [move.raw, move.rawBlack].filter(Boolean));
   const pgn = buildPgn(sanListFromPositions(livePositions, rawHistory), pgnResultToken());
-  try {
-    await navigator.clipboard.writeText(pgn);
+  let copied = false;
+  if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(pgn);
+      copied = true;
+    } catch (e) {
+      // clipboard writeText failed, fall back
+    }
+  }
+  if (!copied && typeof document !== 'undefined') {
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = pgn;
+      textarea.setAttribute('readonly', '');
+      textarea.style.contain = 'strict';
+      textarea.style.position = 'absolute';
+      textarea.style.left = '-9999px';
+      textarea.style.fontSize = '12pt';
+      if (document.body) {
+        document.body.appendChild(textarea);
+        textarea.select();
+        if (typeof textarea.setSelectionRange === 'function') {
+          textarea.setSelectionRange(0, textarea.value.length);
+        }
+        const successful = document.execCommand && document.execCommand('copy');
+        document.body.removeChild(textarea);
+        if (successful) copied = true;
+      }
+    } catch (err) {
+      // fallback failed
+    }
+  }
+  if (copied) {
     if (statusElement) statusElement.textContent = 'PGN copied';
-  } catch (e) {
-    console.error('copyPgn error:', e);
+  } else {
+    showUiError('Failed to copy PGN');
   }
 }
 
@@ -1949,6 +1994,7 @@ function initGame() {
   moveHistory = [];
   refereeStatus = 'ongoing';
   gameOver = false;
+  resetResignConfirm();
   result = null;
   kingStatus = { kingSquare: null, check: false, mate: false };
   previousBoard = null;
@@ -2027,6 +2073,15 @@ try {
 } catch (_) {}
 const resignButton = document.getElementById('resign');
 if (resignButton) resignButton.onclick = async () => {
+  if (!resignConfirmTimer) {
+    resignButton.textContent = 'Confirm Resign?';
+    resignButton.classList.add('btn-danger-confirm');
+    resignConfirmTimer = setTimeout(() => {
+      resetResignConfirm();
+    }, 4000);
+    return;
+  }
+  resetResignConfirm();
   const resignRole = currentSeatRole || (turn === 'white' ? 'white' : 'black');
   const cmdId = 'resign:' + resignRole + ':' + Date.now() + ':' + Math.random().toString(36).slice(2);
   await runRefereeCommand('Submitting resignation', () =>
@@ -2120,7 +2175,8 @@ function updateDrawNegotiationUI(state) {
     }
   }
   if (claimDrawButton) {
-    claimDrawButton.classList.toggle('hidden', !(seated && isDrawClaimable(state)));
+    const canClaim = (seated || (!state?.seats?.white && !state?.seats?.black)) && isDrawClaimable(state);
+    claimDrawButton.classList.toggle('hidden', !canClaim);
   }
 }
 
@@ -2466,7 +2522,7 @@ function stopSeatHeartbeat() {
 async function sendSeatHeartbeat() {
   const room = getCurrentRoomId();
   const token = (typeof window !== 'undefined' && (
-    (window.sessionStorage && window.sessionStorage.getItem('chess_seat_token')) ||
+    (window.sessionStorage && (window.sessionStorage.getItem('chess_seat_token_' + room) || window.sessionStorage.getItem('chess_seat_token'))) ||
     (window.localStorage && window.localStorage.getItem('chess_seat_token_' + room))
   )) || currentSeatToken;
   if (!token) {
@@ -2511,8 +2567,8 @@ async function claimSeat(role) {
       currentSeatToken = data.token;
       if (typeof window !== 'undefined') {
         if (window.sessionStorage) {
-          window.sessionStorage.setItem('chess_seat_token', data.token);
-          window.sessionStorage.setItem('chess_seat_role', role);
+          window.sessionStorage.setItem('chess_seat_token_' + room, data.token);
+          window.sessionStorage.setItem('chess_seat_role_' + room, role);
         }
         if (window.localStorage) {
           window.localStorage.setItem('chess_seat_token_' + room, data.token);
@@ -2549,6 +2605,8 @@ async function leaveSeat() {
   currentSeatToken = null;
   if (typeof window !== 'undefined') {
     if (window.sessionStorage) {
+      window.sessionStorage.removeItem('chess_seat_token_' + room);
+      window.sessionStorage.removeItem('chess_seat_role_' + room);
       window.sessionStorage.removeItem('chess_seat_token');
       window.sessionStorage.removeItem('chess_seat_role');
     }
@@ -2566,8 +2624,8 @@ function initSeatAuth() {
   let savedRole = null;
   if (typeof window !== 'undefined') {
     if (window.sessionStorage) {
-      savedToken = window.sessionStorage.getItem('chess_seat_token');
-      savedRole = window.sessionStorage.getItem('chess_seat_role');
+      savedToken = window.sessionStorage.getItem('chess_seat_token_' + room) || window.sessionStorage.getItem('chess_seat_token');
+      savedRole = window.sessionStorage.getItem('chess_seat_role_' + room) || window.sessionStorage.getItem('chess_seat_role');
     }
     if (!savedToken && window.localStorage) {
       savedToken = window.localStorage.getItem('chess_seat_token_' + room);
