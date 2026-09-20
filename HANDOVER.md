@@ -110,7 +110,7 @@ npm test         # Complete suite + Playwright browser smoke test + UI feature t
 
 Summary of test results:
 - **Gate 4 Invariant**: `ui.js` contains **0** occurrences of `makeMove(` and **0** occurrences of `createInitialBoard(`.
-- `npm run check`: **78 unit suites, 0 errors across entire codebase**
+- `npm run check`: **79 unit suites, 0 errors across entire codebase**
 - `audit-broken-corners-selftest.js`: 9/9 passed (Gate 4 invariant, seat token isolation, promotion cancel, draw claim visibility, touchscreen resign confirm, PGN copy fallback, SPA history navigation)
 - `static-url-navigation-selftest.js`: 8/8 passed
 - `study-chapters-selftest.js`: 17/17 passed
@@ -286,7 +286,8 @@ loop covers all `ui-*.js`; server-starting suites set `CHESS_LEAGUES_DB_PATH` un
 games are visible to any visitor; `service-worker.js` `CACHE_NAME` is still `chess-ui-v1` (bump to force existing
 installs to refetch `index.html`); brilliant/tablebase achievement events can only be owner-verified once archived
 games carry real player names; `scripts/test-ui-features.mjs` has no Puzzles/Library/Insights/Missed-tactics steps
-yet (DoD item 4); a 300-ply first missed-tactics request can take ~60 s (serial engine).
+yet (DoD item 4); a 300-ply first missed-tactics request was unbounded (~60 s serial engine) — now capped by the
+per-request budget in `routes-review.js` (B15, `fix/missed-tactics-bounded`).
 
 **AccountsManager JSON-path precedence (branch `fix/accounts-node20-isolation`).** `node:sqlite` exists only on
 Node ≥ 22.5. The `AccountsManager` JSON fallback used to resolve `options.jsonPath || DEFAULT_JSON_PATH`, so on
@@ -520,3 +521,15 @@ No commit / push / kanban change (builder was the only writer).
 
 ### Known limitations (non-blocking, follow-up)
 - The modal guard is static text analysis over `index.html`; a later **second** `#auth-modal` rule (cascade override) or an `@media`-wrapped decoy would still leave it green. Acceptable for a cosmetic two-line change; a future CSS-aware check would close it.
+
+---
+
+## 15. PERF FIX — Bound missed-tactics analysis (branch `fix/missed-tactics-bounded`, 2026-09-20)
+
+| Task | Owner | Branch | Status | Summary | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| `perf-missed-tactics-bounded` | builder | `fix/missed-tactics-bounded` | DONE | `routes-review.js` `evaluatePositions()` looped every uncached position serially with `await engineServer.analyse()` (depth 12, ≤200 ms movetime); a cold 300-ply game (~150 searches) could hold ONE request for ~30–60 s. Fix: per-request bounds on **new** engine searches — `REVIEW_MAX_EVALS` (env `CHESS_REVIEW_MAX_EVALS`, default 60) and `REVIEW_BUDGET_MS` (env `CHESS_REVIEW_BUDGET_MS`, default 5000 ms), checked before each new `analyse()`; the in-flight search finishes, so overshoot is ≤ one movetime. Cache hits and terminal positions are free and never counted against the gate (they still count in the reported `evaluated`), so a fully-cached game is still served whole. `CHESS_REVIEW_MAX_EVALS=0` / `CHESS_REVIEW_BUDGET_MS=0` mean "no new engine evals", not "unlimited". Skipped positions return `null` evals and flip `truncated` with a new `truncatedReason: 'budget'\|'max-plies'\|null` (plus a `budget` echo in the response); the response contract and depth-keyed `eval_cache` are unchanged apart from those two additive fields. `findMissedTactics` already tolerates null evals (`normalizeEval` skips windows touching a null), so `misses` is computed from whatever evals exist — no invented data. Client `ui-analysis.js` labels a truncated panel from the reason ("budget reached" vs "position cap reached") and the empty-state likewise; no inline handlers. Test seam: `evaluatePositions(positions, gameArchive, opts)` accepts `opts.analyser` / `opts.now` / `opts.maxEvals` / `opts.budgetMs` (defaults engineServer / Date.now / the env constants), so `test/missed-tactics-bounded-selftest.js` drives it with a counting stub — no Stockfish, no server. | `test/missed-tactics-bounded-selftest.js` (8 tests: cache-free, count cap, wall-clock cap, full-cache whole + unhurt, terminal count-free, null-tolerant misses, contract, max-plies reason); About stat + `about-selftest.js` 78→79; `test:unit` 79/79 |
+
+### Design trade-offs / honest notes
+- Defaults bound the cold worst case to ~60 searches (≈5 s budget → whichever comes first). A user with a long cold game gets the earliest positions' misses and an honest truncation label rather than a 30–60 s hang; a second request re-runs the still-uncached tail, but every completed eval is cached, so successive calls converge to complete.
+- `truncatedReason` is additive; nothing was removed or renamed from the response.

@@ -15,8 +15,14 @@
  *        ply), caching each eval in game-archive's eval_cache (getEval/saveEval,
  *        White-perspective cp like the browser worker stores), then returns the
  *        Miss list from missed-tactics.js findMissedTactics().
+ *        NEW engine calls are bounded per request (REVIEW_MAX_EVALS count and
+ *        REVIEW_BUDGET_MS wall clock, both env-overridable) so a cold, long game
+ *        cannot hold the request open for tens of seconds. Cache hits are free
+ *        and never counted against either bound, so a fully-cached game is still
+ *        served whole. Positions left unevaluated are null and the response is
+ *        flagged truncated.
  *        → { ok, gameId, plies, engine, depth, evaluated, cached, truncated,
- *            evals: [{ cp, mate, bestmove, depth }], misses: [...] }
+ *            truncatedReason, evals: [{ cp, mate, bestmove, depth }], misses: [...] }
  *
  *   POST /api/review/missed-tactics   body { moves: [uci...], color? }
  *        Same computation for an unarchived game (the Analysis view's "Current
@@ -37,6 +43,23 @@ try { engineServer = require('./engine-server.js'); } catch (_) { engineServer =
 const REVIEW_DEPTH = 12;
 const REVIEW_MOVETIME_MS = 200;
 const MAX_PLIES = 300;
+
+function envInt(name, fallback, min) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min === undefined ? 0 : min, Math.floor(n));
+}
+
+// Per-request bounds on NEW engine work. A cold ~300-ply game is ~150 serial
+// searches; with these the request is bounded to REVIEW_MAX_EVALS searches AND
+// REVIEW_BUDGET_MS of wall clock (whichever is reached first; the in-flight
+// search is allowed to finish, so the wall-clock overshoot is at most one
+// movetime). Cache hits are not counted against either bound. Both are read at
+// module load and can be overridden via env for tests/ops.
+const REVIEW_MAX_EVALS = envInt('CHESS_REVIEW_MAX_EVALS', 60, 0);
+const REVIEW_BUDGET_MS = envInt('CHESS_REVIEW_BUDGET_MS', 5000, 0);
 const UCI_RE = /^[a-h][1-8][a-h][1-8][qrbn]?$/;
 
 function fenTurn(fen) {
@@ -71,17 +94,44 @@ function cacheUsable(cached) {
   return hasScore && typeof cached.depth === 'number' && cached.depth >= REVIEW_DEPTH;
 }
 
-async function evaluatePositions(positions, gameArchive) {
+/**
+ * Bounded evaluator. `opts` is the test seam: `analyser` (defaults to the real
+ * engineServer) and `now` (defaults to Date.now) can be injected so the budget
+ * arithmetic is exercised without Stockfish. `opts.maxEvals` / `opts.budgetMs`
+ * override the module defaults.
+ *
+ * Budget rules:
+ *  - cache hits and terminal positions are free (no budget consumed) — they are
+ *    still counted in the reported `evaluated`, but never in the engine-search
+ *    gate (`newEvals`);
+ *  - NEW engine searches stop once `maxEvals` have been launched or `budgetMs`
+ *    of wall clock has elapsed since the first new search began (the in-flight
+ *    search always completes, so wall-clock can overshoot by at most one
+ *    search). A maxEvals or budgetMs of 0 therefore means "no new engine
+ *    evals", NOT "unlimited";
+ *  - every position skipped for a budget reason gets a null eval and flips
+ *    `truncated` (reason 'budget'); positions past MAX_PLIES flip it with reason
+ *    'max-plies'.
+ */
+async function evaluatePositions(positions, gameArchive, opts) {
+  const o = opts || {};
+  const analyser = o.analyser !== undefined ? o.analyser : engineServer;
+  const now = typeof o.now === 'function' ? o.now : Date.now;
+  const maxEvals = typeof o.maxEvals === 'number' ? o.maxEvals : REVIEW_MAX_EVALS;
+  const budgetMs = typeof o.budgetMs === 'number' ? o.budgetMs : REVIEW_BUDGET_MS;
   const evals = [];
   let cached = 0;
-  let evaluated = 0;
+  let evaluated = 0;   // positions actually scored this request (engine + terminal)
+  let newEvals = 0;    // NEW engine searches launched — the only thing the count gate counts
   let engineName = null;
   let truncated = false;
-  const available = !!(engineServer && engineServer.isAvailable());
+  let truncatedReason = null;
+  let budgetStartedAt = null;
+  const available = !!(analyser && typeof analyser.isAvailable === 'function' && analyser.isAvailable());
   for (let i = 0; i < positions.length; i++) {
     const fen = positions[i] && positions[i].fen;
     if (!fen) { evals.push(null); continue; }
-    if (i > MAX_PLIES) { truncated = true; evals.push(null); continue; }
+    if (i > MAX_PLIES) { truncated = true; truncatedReason = truncatedReason || 'max-plies'; evals.push(null); continue; }
     const hit = gameArchive && typeof gameArchive.getEval === 'function' ? gameArchive.getEval(fen) : null;
     if (cacheUsable(hit)) {
       cached++;
@@ -91,8 +141,18 @@ async function evaluatePositions(positions, gameArchive) {
     let ev = terminalEval(fen);
     if (!ev) {
       if (!available) { evals.push(null); continue; }
+      if (budgetStartedAt === null) budgetStartedAt = now();
+      // 0 means "no new engine evals" (see the JSDoc above), so both checks are
+      // unconditional — a non-negative elapsed time only ever adds to the count.
+      if (newEvals >= maxEvals || now() - budgetStartedAt >= budgetMs) {
+        truncated = true;
+        truncatedReason = truncatedReason || 'budget';
+        evals.push(null);
+        continue;
+      }
+      newEvals++;
       try {
-        const r = await engineServer.analyse(fen, { depth: REVIEW_DEPTH, movetime: REVIEW_MOVETIME_MS });
+        const r = await analyser.analyse(fen, { depth: REVIEW_DEPTH, movetime: REVIEW_MOVETIME_MS });
         engineName = r.engine || engineName;
         const line = (r.lines && r.lines[0]) || {};
         const wp = toWhitePerspective(fen, line);
@@ -109,8 +169,8 @@ async function evaluatePositions(positions, gameArchive) {
     }
     evals.push(ev);
   }
-  if (!engineName && available && engineServer.ENGINE_NAME) engineName = engineServer.ENGINE_NAME;
-  return { evals, cached, evaluated, engine: available ? engineName : null, truncated };
+  if (!engineName && available && analyser.ENGINE_NAME) engineName = analyser.ENGINE_NAME;
+  return { evals, cached, evaluated, engine: available ? engineName : null, truncated, truncatedReason };
 }
 
 function uciListFromGame(game) {
@@ -141,6 +201,8 @@ async function respondMisses(res, ctx, uci, color, extra) {
     evaluated: result.evaluated,
     cached: result.cached,
     truncated: result.truncated,
+    truncatedReason: result.truncatedReason || null,
+    budget: { maxNewEvals: REVIEW_MAX_EVALS, budgetMs: REVIEW_BUDGET_MS },
     thresholds: { swingCp: missedTactics.MISS_SWING_CP, giveBackCp: missedTactics.MISS_GIVEBACK_CP },
     evals: result.evals,
     misses
@@ -191,5 +253,7 @@ module.exports = {
   toWhitePerspective,
   REVIEW_DEPTH,
   REVIEW_MOVETIME_MS,
+  REVIEW_MAX_EVALS,
+  REVIEW_BUDGET_MS,
   MAX_PLIES
 };

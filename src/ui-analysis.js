@@ -562,6 +562,9 @@
   }
   function colorLabel(c) { return c === 'white' ? 'White' : 'Black'; }
   function uciToText(uci) { return uci ? uci.slice(0, 2) + '→' + uci.slice(2, 4) + (uci[4] ? '=' + uci[4].toUpperCase() : '') : '?'; }
+  // Why the server stopped early: 'budget' = time/search cap, 'max-plies' = the
+  // game is longer than the position cap. Anything else stays honest and generic.
+  function truncationNote(reason) { return reason === 'max-plies' ? 'position cap reached' : reason === 'budget' ? 'budget reached' : 'analysis stopped early'; }
 
   function loadMissed() {
     const label = $('[data-an="missed-label"]');
@@ -577,9 +580,15 @@
       : fetchJson('/api/review/missed-tactics', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ moves: state.uci }) });
     return req.then(r => {
       if (!r.body || !r.body.ok) throw new Error((r.body && r.body.error) || ('HTTP ' + r.status));
-      state.missed = { misses: r.body.misses || [], engine: r.body.engine, plies: r.body.plies, evaluated: r.body.evaluated, cached: r.body.cached };
+      const evals = Array.isArray(r.body.evals) ? r.body.evals : [];
+      const checked = evals.filter(Boolean).length;
+      state.missed = { misses: r.body.misses || [], engine: r.body.engine, plies: r.body.plies, evaluated: r.body.evaluated, cached: r.body.cached, truncated: !!r.body.truncated, truncatedReason: r.body.truncatedReason || null, checked, total: evals.length };
       state.retry = null;
-      if (label) label.textContent = r.body.engine ? `${r.body.engine} · depth ${r.body.depth} · ${r.body.cached} cached / ${r.body.evaluated} new` : 'Server engine unavailable — nothing evaluated.';
+      if (label) {
+        if (!r.body.engine) label.textContent = 'Server engine unavailable — nothing evaluated.';
+        else if (r.body.truncated) label.textContent = `${r.body.engine} · checked ${checked} of ${evals.length} positions (${truncationNote(r.body.truncatedReason)})${r.body.cached ? ` · ${r.body.cached} cached` : ''}`;
+        else label.textContent = `${r.body.engine} · depth ${r.body.depth} · ${r.body.cached} cached / ${r.body.evaluated} new`;
+      }
       renderMissed();
       renderMoves();
       renderBoard();
@@ -598,7 +607,10 @@
     }
     const list = state.missed.misses;
     if (!list.length) {
-      ul.innerHTML = `<li class="an-muted" data-an="missed-empty">No missed tactics in this game (${state.missed.plies} plies checked${state.missed.engine ? '' : ' — engine unavailable'}).</li>`;
+      const scope = state.missed.truncated
+        ? `${state.missed.checked} of ${state.missed.total} positions checked (${truncationNote(state.missed.truncatedReason)})`
+        : `${state.missed.plies} plies checked`;
+      ul.innerHTML = `<li class="an-muted" data-an="missed-empty">No missed tactics in this game (${scope}${state.missed.engine ? '' : ' — engine unavailable'}).</li>`;
       renderRetryBox();
       return;
     }
