@@ -996,3 +996,29 @@ The harness's `window` mock in `test/gate4-selftest.js` was exactly `{ matchMedi
 - Mutation proof (crash re-introduced on a scratch copy, never the repo): with the window mock reverted to the original `{ matchMedia: ... }` the copy fails at `evalmachine.<anonymous>:1909` with the same `TypeError`, **exit 1**; the real repo file simultaneously passes 43/0.
 - `node test/about-selftest.js` → Passed: 13 (expected count 82); `node test/t0-deadcode-selftest.js` → 27 passed, 0 failed; `node test/reachability-selftest.js` → 49; `node test/wave3-hygiene-selftest.js` → 87.
 - `npm run lint` → exit 0 (now also runs the gate4 suite, not just `--check`).
+
+## 27. FIX — p1-premove self-test: same vm harness repair as Gate 4, then wired into the unit chain (branch `fix/p1-premove-harness`, 2026-09-21)
+
+| | |
+|---|---|
+| Task | `fix-p1-premove-harness` (medium) |
+| Branch | `fix/p1-premove-harness` |
+| Status | DONE |
+
+### Defect
+
+`test/p1-premove-selftest.js` had the identical broken vm harness as `test/gate4-selftest.js` (§26): its `window` mock was exactly `{ matchMedia: () => ({ matches: false }) }`, so loading `src/ui.js` threw `TypeError: window.addEventListener is not a function` at `evalmachine.<anonymous>:1909` (`src/ui.js:1908-1912` registers the C3 pointer listeners at load). The suite also had **zero references in `package.json`** — neither `test:unit` nor `lint` mentioned it, so nothing ever failed.
+
+### Exact edits
+
+- The harness was ported from the repaired Gate 4 harness (§26): `window.addEventListener`/`removeEventListener` over a per-harness `windowListeners` registry, plus `window.sessionStorage`/`window.localStorage` mocks with `window.sessionStorage` **seeded** with `chess_seat_token_default` / `chess_seat_role_default` so load-time `initSeatAuth` adopts the seat and `submitMoveToReferee`'s auto-claim (`src/ui.js:798-802`) never consumes the pending `/api/move` fetch stub. The suite's existing context-level `localStorage` and `EventSource` mocks are unchanged.
+- NO assertion was added, removed, weakened or skipped.
+- WIRING (the card's honest wire-vs-document decision): the suite is genuine behavioural coverage (multi-premove queueing/flush, 5 assertions) and passes 5/0, so it is WIRED — `node --check test/p1-premove-selftest.js` appended to `lint`, and `node test/p1-premove-selftest.js` appended to `test:unit`. Suite count 82 → 83, About stat moved in `src/ui-about.js` (rendered) and `test/about-selftest.js` (expected count).
+- Docs: this section, `docs/06-world-class-roadmap.md` B27, `docs/kanban-tasks.json` card `fix-p1-premove-harness` (updated textually).
+
+### Evidence
+
+- Before: `node test/p1-premove-selftest.js` → TypeError, exit 1 (verified before the fix; unwired in both scripts, 0 references).
+- After: `node test/p1-premove-selftest.js` → **Passed: 5, Failed: 0, exit 0**.
+- Mutation proof (scratch copy `test/.p1mut-tmp.js` with the mock reverted, deleted after): the same `TypeError: window.addEventListener is not a function`, **exit 1**; the repo file (byte-identical, `cmp`) passes 5/0.
+- `node test/about-selftest.js` → Passed: 13 (expected count 83); `node test/t0-deadcode-selftest.js` → 27/0; `node test/reachability-selftest.js` → 49 (KNOWN_DARK 10); `node test/wave3-hygiene-selftest.js` → 87; `npm run lint` → exit 0; `npm run test:unit` → exit 0, 0 `^FAIL:`, 83 distinct suites.

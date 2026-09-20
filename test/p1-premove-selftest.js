@@ -127,11 +127,33 @@ function createHarness() {
     constructor(url) { this.url = url; this.listeners = {}; }
     addEventListener(type, fn) { this.listeners[type] = fn; }
   }
+  // B27: the harness window needs event registration (src/ui.js registers
+  // pointer listeners at load) and a seeded seat store, so load-time
+  // initSeatAuth() adopts the seat and the first move never auto-claims a
+  // seat fetch that would consume the pending /api/move fetch stub.
+  const seatStorage = new Map([['chess_seat_token_default', 'seat-token-harness'], ['chess_seat_role_default', 'white']]);
+  const seatStorageApi = {
+    getItem: key => seatStorage.has(key) ? seatStorage.get(key) : null,
+    setItem: (key, value) => seatStorage.set(key, value),
+    removeItem: key => seatStorage.delete(key)
+  };
+  const windowListeners = {};
   const context = {
     ...engine,
     document,
     Element: MockElement,
-    window: { matchMedia: () => ({ matches: false }) },
+    window: {
+      matchMedia: () => ({ matches: false }),
+      addEventListener(type, fn) { (windowListeners[type] ||= []).push(fn); },
+      removeEventListener(type, fn) {
+        const listeners = windowListeners[type];
+        if (!listeners) return;
+        const index = listeners.indexOf(fn);
+        if (index >= 0) listeners.splice(index, 1);
+      },
+      sessionStorage: seatStorageApi,
+      localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} }
+    },
     navigator: { clipboard: { writeText: async () => {} } },
     localStorage: {
       getItem: key => storage.has(key) ? storage.get(key) : null,
