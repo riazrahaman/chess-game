@@ -765,3 +765,127 @@ CHESS_PORT=39281 CHESS_RATE_LIMIT=100000 npm run test:browser   # expect exit 0 
 # run it, observe "Expected 999 plies before history scrubbing, got 10" (exit 1),
 # then delete the copy and confirm the repo still reads testMoves.length.
 ```
+
+## 23. FIX — History-scrub seat race: a stale premove re-claimed the seat (branch `fix/scrub-move-seat-race`, 2026-09-20)
+
+| Task | Owner | Branch | Status | Summary | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| `fix-scrub-move-seat-race` | builder | `fix/scrub-move-seat-race` | DONE | After B22 the History-Scrubbing block was still intermittently red on CI: it sent the ten plies with **token-less** `POST /api/move` calls after a fixed `waitForTimeout(200)`, and `/api/reset` does **not** release seats (only the GC collector `collectRoom()` calls `seatAuthManager.resetSeats`, `server.js:422`), so a seat claimed by an earlier gesture survived the reset and the moves 401'd (`validateMove`, `src/seat-auth.js:146`). The deeper, previously-unseen cause was a **stale browser-side premove**: the earlier move-review section's `#e2` → `#e4` click leaves `e2e4` in `premoveQueue` (`src/ui.js`) because it is not White's turn; `renderBoard`'s premove flush (`src/ui.js:1361-1393`) then fires `submitMoveToReferee('e2e4')` on the fresh post-reset state — and `submitMoveToReferee` **auto-claims the seat** (`src/ui.js:798-800`), so the page re-took White, landed a stray ply, and `/api/state` never showed a fresh 0-ply board. Round-1 hardening (test only): (0) clear the stale premove through the UI's own `Escape`→`clearPremove` path (`src/ui.js:662-668`), reading `.premove-source/.premove-target` first; (1) `leaveSeat()`; (2) reset; (3) bounded Node-side poll for `history.length===0 && board.turn==='white' && !gameOver`; (4) claim BOTH seats out of band (`/api/seat/claim`, `server.js:1640`) and send each half-move with its matching `X-Seat-Token`; (5) throw on any `!ok`; release both seats before the G4 block. The ghost assertions are byte-identical. **Round 2 (the real root cause — PRODUCT code):** an independent reviewer's 56-run CI-parity tally (~9% fail) proved the *earlier move-review* block still flaked because `botService.setBotConfig({enabled:false})` (`src/bot-service.js:104-160`) did `this.rooms.delete(roomId)` with **no `clearTimeout`** and no per-timer identity guard, while `triggerBotMoveIfNeeded` (`:268`) schedules a `setTimeout` of 200–450 ms and re-reads the referee on wake — so a straggler fired after a disable/reset and played a stray move onto a fresh board (a real user bug: disable the bot or hit New Game within ~450 ms of enabling it and the bot moves). Fix: store the pending handle on the room config (`config.timer`), `clearTimeout` + null it in `setBotConfig` on the disable and recolour paths, null it when the timer itself runs, and guard the wake (and the post-search enqueue) with a per-config `generation` token plus config-object identity so a slipped timer cannot mutate a newer generation; `thinking` is only reset on the generation that owns it. New regression suite `test/bot-service-cancel-selftest.js` (5 tests, including a post-await generation-guard case) fails on pre-fix code and passes after; wired into `test:unit` and `lint` (suite count 79→80). The browser drain was then simplified to the straightforward disable→reset→bounded-fresh-poll→click shape, because the product now cancels the timer. | Pre-fix regression proof in a `/tmp` copy: `node test/bot-service-cancel-selftest.js` → 1 passed, 4 failed, exit 1 (`a disabled bot must not enqueue a straggler move`, `1 !== 0`); same suite after the fix → 5 passed, 0 failed, exit 0. Round-1 premove root cause was captured directly (failing runs printed `premove-at-scrub-start: {"src":["e2"],"tgt":["e4"]}`), and the reviewer's re-measurement (51/56 = ~9% fail) is what exposed the product bug; the earlier **12/12** and **10/10** tallies in this section were from the round-1 test-only measurement and did **not** hold up under the 56-run tally — they are superseded. Post-fix browser evidence (all runs on fresh `mktemp -d` dirs, exact CI env block, `CHESS_PORT=39281`, `CHESS_RATE_LIMIT=100000`): **66 full-journey runs — 56 exit 0** (node 26: 14/14; node 20.19.5: 34/44; node 22: 8/8). The **move-review and history-scrub blocks failed in 0 of 66** (the scrub PASS line printed in every run that reached it), and port 39281 was free after each. The **only** 10 failures were the **pre-existing** seat-badge section (`Expected seat badge to show Playing White, got: Unseated`), which also failed on a **HEAD worktree baseline** (3 of 20 runs) and in the reviewer's B19/B21 territory — it is not this card's block and was left untouched. Load-bearing checks: a `/tmp` copy with the product fix reverted but the round-2 test kept reproduced the original symptom once in 30 runs (`HTTP status 400 POST /api/move` during move-review, then the end-of-run console gate); the **HEAD baseline** (round-1 test, pre-B23 code) also failed directly in the scrub block 4 of 20 (`Expected 10 plies before history scrubbing, got 2`), which the post-fix test never does. Pre-fix `/tmp` regression run: `node test/bot-service-cancel-selftest.js` → 1 passed, 4 failed, exit 1; post-fix → 5 passed, 0 failed, exit 0. Gates (Node 20.19.5): `node --check` 0, `t0-deadcode` 27/0, `wave3-hygiene` 87, `reachability` 49, `about` 12, `npm run lint` 0, `npm run check` exit 0 (suite count 80). Changed: `src/bot-service.js`, `scripts/test-ui-features.mjs`, `test/bot-service-cancel-selftest.js`, `package.json`, `src/ui-about.js`, `test/about-selftest.js`, docs. |
+
+### Root cause
+
+`src/ui.js` keeps a client-side premove queue (`premoveQueue`, `src/ui.js:51`). A premove is only submitted
+when the side to move changes to the premoved colour, via the `renderBoard` flush (`src/ui.js:1361-1393`). The
+B22 history-scrub block resets the room and then expects a fresh, White-to-move, 0-ply board. But an earlier
+test section clicks `#e2` then `#e4` while it is not White's turn, so `e2e4` sits in the queue. The reset
+itself succeeds (`POST /api/reset` → `200 {revision:0,…}`) — the queue is not part of referee state. When the
+fresh `White to move` snapshot arrives, the flush calls `submitMoveToReferee('e2e4')`, which **auto-claims the
+seat** for the side to move (`src/ui.js:798-800`). That produced two symptoms, both observed: a stray ply
+(`history:"e2e4"`, `turn:"black"`, `whiteOccupied:true`) and an occasional `409` on the block's own
+out-of-band `POST /api/seat/claim`. The old token-less moves then 401'd against the (now) claimed seat.
+
+### Exact edits
+
+- `scripts/test-ui-features.mjs` — the History-Scrubbing block only:
+  1. New step 0: a `page.evaluate` that reads `.premove-source, .premove-target` and dispatches a real
+     `KeyboardEvent('keydown', { key: 'Escape' })` on `#board > div`, invoking `clearPremove`
+     (`src/ui.js:662-668`); logs `Cleared a stale premove …` when one was present.
+  2. Step 1/2 unchanged in intent (`leaveSeat()` then `POST /api/reset`), with the comment corrected.
+  3. Step 3: the bounded Node-side `fetch('/api/state')` poll for the fresh position (already present in the
+     applied fix, verified).
+  4. Step 4/5: out-of-band claims of both seats plus per-side `X-Seat-Token` on each of the ten moves, with a
+     descriptive throw on any non-ok response (already present in the applied fix, verified).
+  5. Post-assertion release of both seats so the following G4 block's `window.claimSeat('black')` cannot 409
+     (already present in the applied fix, verified).
+  6. Header comment updated to name the premove-clear step and attribute the race.
+- `HANDOVER.md` §23, `docs/06-world-class-roadmap.md` B23, `docs/kanban-tasks.json` card `fix-scrub-move-seat-race`.
+
+### Addendum — the move-review section's own flake: a real product bug (round 2)
+
+The §23 work above fixed the scrub block, but an independent reviewer's **56-run CI-parity tally showed the
+move-review section still failing ~9% of the time (51/56 pass)** — the round-1 test-only hardening had masked,
+not fixed, the cause. The true root cause is in **product code**, not the click.
+
+**Root cause: a pending server-side bot move was never cancelled.** The bot-config section earlier enables the
+bot for **White** (human Black), so `botService.setBotConfig` claims White for the bot and
+`triggerBotMoveIfNeeded` (`server.js:1812`) schedules a White move on a 200–450 ms `setTimeout`
+(`src/bot-service.js`). `setBotConfig({ enabled:false })` did `this.rooms.delete(roomId)` with **no
+`clearTimeout`**, and the timer had no per-timer identity/generation guard; the toggle-off only POSTs
+`/api/bot {enabled:false}`, so the timer still fired, re-read the referee, saw a fresh White-to-move position
+and played a stray White move onto the reset board. This is a **real user bug**: disable the bot, or press
+New Game, within ~450 ms of enabling it and the bot plays a move the user did not ask for. The old `#e2` click
+then selected a White pawn while it was Black's turn and `#e4` queued a premove; the token-less move could
+also `401`/`400`, tripping the end-of-run console/HTTP error gate. (Diagnosed in round 1 with an instrumented
+`bot-service.js`: `[BOTDIAG] firing e2e4 color=white hist=["d2d4"] ... illegal move`; the repo file was
+restored byte-identical.)
+
+**Fix (PRODUCT, `src/bot-service.js`):**
+1. Scheduling stores the handle on the room config (`config.timer = setTimeout(...)`), and the timer nulls it
+   when it runs.
+2. `setBotConfig` does `clearTimeout(existing.timer)` + nulls it on the disable **and** recolour paths
+   (before the seat/room mutation), so a pending move is cancelled whenever the bot is stopped or retuned.
+3. A per-config **generation** token (bumped every time a config is created) plus config-object identity is
+   captured at schedule time and re-checked both on wake and again after the awaited `computeBotMove`; a
+   timer that slips through `clearTimeout` (or a re-enable) returns without enqueueing.
+4. `thinking` is only cleared by the generation that owns the timer, so a stale wake cannot leave a fresh
+   generation stuck `true` (nor wrongly clear a legitimately-thinking one).
+   Behaviour is otherwise unchanged: move choice, levels, book and chat are untouched, and the normal path
+   still moves.
+
+**Regression test:** new `test/bot-service-cancel-selftest.js` (5 tests, standalone with a stub seatAuth +
+referee and an overridden `computeBotMove`, so no engine/server). It fails on pre-fix code (1 passed,
+3 failed, exit 1) and passes after (4 passed, exit 0); wired into `test:unit` and `lint`, with the About
+unit-suite count moved 79→80.
+
+**Browser test simplified (`scripts/test-ui-features.mjs`):** now that the product cancels the timer, the
+round-1 re-reset/straggler drain and the seat-release heuristic were replaced by the straightforward shape:
+`POST /api/bot {enabled:false}` + reset, a bounded Node-side `/api/state` poll for the fresh start (the B20
+pattern), a bounded `getLivePly()===0` wait, the `#e2`/`#e4` clicks, and a bounded
+`waitForFunction(() => window.getLivePly() === 1)`. The History-Scrubbing scrub block (which passed 56/56)
+and every authoritative assertion are unchanged.
+
+**Evidence:** pre-fix `/tmp` copy `node test/bot-service-cancel-selftest.js` → 1 passed, 4 failed, exit 1;
+post-fix → 4 passed, 0 failed, exit 0. `npm run test:browser` under the exact CI env block on fresh
+`mktemp -d` dirs: **66 full-journey runs, 56 exit 0** (node 26: 14/14; node 20.19.5: 34/44; node 22: 8/8).
+The **move-review and history-scrub blocks failed in 0 of 66**; the scrub PASS line printed in every run that
+reached it, and :39281 was free after each. The **only** failures (10) were the **pre-existing** seat-badge
+section, which also failed on a **HEAD worktree baseline** (3 of 20) and belongs to B19/B21, not this card.
+Load-bearing: a `/tmp` copy with the product fix reverted but the round-2 test kept reproduced the original
+symptom (`HTTP status 400 POST /api/move` during move-review) once in 30 runs, and the HEAD baseline failed
+directly in the scrub block 4 of 20 (`Expected 10 plies before history scrubbing, got 2`). Gates:
+t0-deadcode 27/0, wave3-hygiene 87, reachability 49, about 12, `npm run lint` 0, `npm run check` exit 0.
+
+**Honest caveat:** the earlier **12/12** (round 1) and **10/10** claims recorded here were superseded by the
+reviewer's 56-run tally (51/56) — that is the measurement that exposed this product bug. The 66-run figure
+above is the re-measured post-fix evidence at the same CI-parity shape; its 10 failures are all the
+pre-existing seat-badge flake, so this card does **not** claim the whole browser journey is flake-free — only
+that the move-review and history-scrub blocks no longer contribute (0/66).
+
+
+### Note
+
+The premove is a test-fixture artifact of an earlier **click** section, not of the referee; the fix clears it
+through the same `Escape` path the UI exposes, so it is a genuine user-reachable route rather than a private
+helper reaching into `ui.js` internals (no `getPremoveQueue`/`clearPremove` is exported to `window`). The
+round-2 fix, by contrast, is a **product** change in `src/bot-service.js` — the straggler bot move was real
+user-facing behaviour, and the browser test only surfaced it (the B21 precedent).
+
+### Reproduce locally
+```bash
+# Regression suite: fails on pre-fix code, passes after.
+cp src/bot-service.js /tmp/bot-service.js.bak
+# (in a /tmp checkout of the pre-fix tree) node test/bot-service-cancel-selftest.js   # 1 passed, 4 failed, exit 1
+node test/bot-service-cancel-selftest.js                                            # 4 passed, 0 failed, exit 0
+cp /tmp/bot-service.js.bak src/bot-service.js
+# CI-shaped env block (all runtime state under a mktemp -d), then:
+CHESS_PORT=39281 CHESS_RATE_LIMIT=100000 npm run test:browser   # expect exit 0 + the scrub PASS line
+# Premove check: the block logs "Cleared a stale premove …" only on the runs where
+# an earlier click left one queued (intermittent); its absence is not a failure.
+# Bot-cancel check: no straggler drain is needed now — the product clearTimeout()s
+# the pending bot timer, so the move-review block just disables/resets and polls.
+# Mutation proof (never edit the repo): copy the script into the repo dir
+# (Playwright resolves only from ./node_modules), replace the per-side token with a
+# bogus one, run it, observe the 403 "Scrub move 0 (d2d4) was rejected", exit 1,
+# then delete the copy and confirm the repo md5 is unchanged.
+```
+

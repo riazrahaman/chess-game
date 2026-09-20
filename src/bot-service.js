@@ -107,6 +107,14 @@ class BotService {
     const color = options.color === 'white' ? 'white' : 'black';
 
     const existing = this.rooms.get(roomId);
+    // B23: cancel any pending bot move before the config is replaced or removed.
+    // Without this a straggler `setTimeout` scheduled by `triggerBotMoveIfNeeded`
+    // (200-450 ms) still fires after a disable/reset/recolour and plays a move
+    // onto a board the user already took back.
+    if (existing && existing.timer) {
+      clearTimeout(existing.timer);
+      existing.timer = null;
+    }
     if (existing && existing.token && this.seatAuth && (!enabled || existing.color !== color)) {
       try { this.seatAuth.releaseSeat(roomId, existing.token); } catch (_) {}
     }
@@ -147,7 +155,13 @@ class BotService {
       level,
       color,
       token,
-      thinking: false
+      thinking: false,
+      timer: null,
+      // B23: incremented on every config generation. A scheduled move captures
+      // this value and re-checks it on wake, so a timer that races the
+      // clearTimeout (or a re-enable) cannot mutate the board for a generation
+      // it no longer belongs to.
+      generation: (existing && existing.generation ? existing.generation : 0) + 1
     };
     this.rooms.set(roomId, state);
 
@@ -276,9 +290,18 @@ class BotService {
     if (currentTurn !== config.color) return false;
 
     config.thinking = true;
+    // Capture the generation (and the config object itself) so a straggler can
+    // be recognised and dropped even if it survived a clearTimeout.
+    const generation = config.generation;
     const thinkDelay = 200 + Math.floor(Math.random() * 250);
 
-    setTimeout(async () => {
+    config.timer = setTimeout(async () => {
+      config.timer = null;
+      // B23: this timer belongs to one config generation. If the bot was
+      // disabled, reset or recoloured since it was scheduled, the current
+      // room entry is a different generation (or absent) — bail WITHOUT
+      // touching thinking on that new generation.
+      if (this.rooms.get(roomId) !== config || config.generation !== generation) return;
       try {
         const freshRef = referee.getReferee(roomId);
         if (!freshRef || !freshRef.state || freshRef.state.gameOver) {
@@ -293,6 +316,9 @@ class BotService {
         const fen = freshRef.state.fen || rulesEngine.boardToFen(freshRef.state.board);
         const history = (freshRef.state && Array.isArray(freshRef.state.history)) ? freshRef.state.history : [];
         const botMove = await this.computeBotMove(fen, config.level, history);
+        // The search awaited above may have outlived a disable/recolour: do not
+        // enqueue a move for a generation that is no longer current.
+        if (this.rooms.get(roomId) !== config || config.generation !== generation) return;
 
         if (botMove) {
           const cmdId = 'bot-' + config.color + '-' + Date.now() + '-' + Math.random().toString(36).slice(2);
