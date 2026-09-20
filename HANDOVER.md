@@ -509,3 +509,14 @@ No commit / push / kanban change (builder was the only writer).
 - Kanban Board: Task `fix-audit-broken-corners` transitioned to `DONE` on `https://agent-kanban.riazrahaman.com`.
 
 
+
+---
+
+## 14. DEFECT FIX — Sign-in dialog centering (branch `fix/auth-modal-centering`, 2026-09-20)
+
+| Task | Owner | Branch | Status | Summary | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| `fix-auth-modal-centering` | orchestrator-admin | `fix/auth-modal-centering` | DONE | `#auth-modal` had **no CSS rule anywhere**, so `openAuthModal()` (which only removes `.hidden`) left the panel as an unstyled static block at the end of `<body>` — bottom-left, no backdrop. Fix: added `#auth-modal` to the existing `#archive-modal, #import-pgn-modal` rule group (`position:fixed; inset:0; rgba(0,0,0,0.5); display:flex; justify-content:center; align-items:center; z-index:150`) plus the `#auth-modal.hidden { display:none; }` variant. Regression guard added to `test/t1-mobile-visuals-selftest.js`: asserts all five modal ids (promo / game-end / archive / import-pgn / auth) are centered fixed overlays and that `#auth-modal.hidden` really sets `display:none`; the selector regex is id-anchored (`#id(?![\w-])`) so `#auth-modal-title` decoys cannot satisfy it. | 2 independent reviews APPROVE; real Playwright check at 1280x900 and 390x844 (centered delta 0.00px, backdrop, close works); 3 mutation proofs (revert → 2 FAIL, decoy → FAIL, `.hidden=color:red` → FAIL); `test:unit` 78/78 and `npm run check` on Node 20.19.5 both exit 0 |
+
+### Known limitations (non-blocking, follow-up)
+- The modal guard is static text analysis over `index.html`; a later **second** `#auth-modal` rule (cascade override) or an `@media`-wrapped decoy would still leave it green. Acceptable for a cosmetic two-line change; a future CSS-aware check would close it.

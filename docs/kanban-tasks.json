@@ -438,6 +438,14 @@
       "priority": "medium",
       "title": "A2.2 Study chapters — PGN/FEN/game import + hidden-move quiz + NAG PGN export",
       "description": "New #/study view plus /api/study/*: three chapter kinds (PGN parsed by study-tree.fromPGN preserving RAV + NAGs, FEN validated server-side with a recorded line, archived game by id). Hidden-move quiz mode guesses two-click on the Study board; POST /api/study/:id/guess validates against the stored line server-side (alternate mates accepted, wrong guesses never leak the solution, scripted replies auto-play). GET /api/study/:id/pgn exports PGN via study-tree.toPGN with $1-$9 NAG glyphs that round-trip through fromPGN. study-store.js mirrors social-store.js (CHESS_STUDY_DB_PATH / CHESS_STUDY_JSON_PATH). study-tree.js leaves KNOWN_DARK (now required from server.js). test/study-chapters-selftest.js (17) + test/study-tree-selftest.js (49)."
+    },
+    {
+      "id": "fix-auth-modal-centering",
+      "round": 1,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "Center the sign-in dialog and give it a modal overlay",
+      "description": "#auth-modal (index.html) had no CSS rule, so openAuthModal() only removed .hidden and the panel rendered bottom-left in flow with no backdrop. Fix: add #auth-modal to the #archive-modal/#import-pgn-modal fixed/flex/inset group plus a .hidden display:none variant. Guard added to test/t1-mobile-visuals-selftest.js (all five modal ids centered; #auth-modal.hidden must set display:none; id-anchored regex rejects #auth-modal-title decoys)."
     }
   ]
 }
