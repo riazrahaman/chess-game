@@ -559,11 +559,14 @@ async function run() {
     await test('GET /api/games/:id for an imported (SAN) game still ships referee-built positions', async () => {
       const li = await request(server, { path: '/api/library?source=lichess', token: alice.token });
       const id = li.body.games[0].id;
-      const res = await request(server, { path: '/api/games/' + encodeURIComponent(id) });
+      // B25: archived games are requester-scoped — an owned game is readable
+      // only by its owner, so this fetch carries alice's token (previously it
+      // was anonymous and only passed because the by-id read was unscoped).
+      const res = await request(server, { path: '/api/games/' + encodeURIComponent(id), token: alice.token });
       assert.strictEqual(res.status, 200);
       assert(Array.isArray(res.body.game.positions) && res.body.game.positions.length === 16, 'positions for 15 plies + start');
       assert.strictEqual(res.body.game.positions[1].san, 'e4');
-      const pgn = await request(server, { path: '/api/games/' + encodeURIComponent(id) + '/pgn' });
+      const pgn = await request(server, { path: '/api/games/' + encodeURIComponent(id) + '/pgn', token: alice.token });
       assert.strictEqual(pgn.status, 200);
       assert.match(pgn.raw, /\[Site "https:\/\/lichess\.org\//);
     });
