@@ -282,12 +282,14 @@ card: claim (needs `agent_id` + `role`; claims expire in 5 min and an admin reap
 **Lead follow-ups applied at merge:** `onRated` chain carries both SocialRoutes and insights consumers; Gate-4 module
 loop covers all `ui-*.js`; server-starting suites set `CHESS_LEAGUES_DB_PATH` under tmpdir.
 
-**Open after Wave 3:** `GET /api/games` (archive modal, Profile recent games) is still unscoped — owned/imported
-games are visible to any visitor; `service-worker.js` `CACHE_NAME` is still `chess-ui-v1` (bump to force existing
-installs to refetch `index.html`); brilliant/tablebase achievement events can only be owner-verified once archived
-games carry real player names; `scripts/test-ui-features.mjs` has no Puzzles/Library/Insights/Missed-tactics steps
-yet (DoD item 4); a 300-ply first missed-tactics request was unbounded (~60 s serial engine) — now capped by the
-per-request budget in `routes-review.js` (B15, `fix/missed-tactics-bounded`).
+**Open after Wave 3:** `GET /api/games` (archive modal, Profile recent games) is now scoped —
+`handleGetGamesEndpoint` (`server.js:1235-1252`) sets `owner = session.userId` when signed in and
+`owner = null` for guests (same pattern as `src/routes-library.js`); `service-worker.js` `CACHE_NAME` is
+`chess-ui-v5`; brilliant/tablebase achievement events can only be owner-verified once archived games carry
+real player names; `scripts/test-ui-features.mjs` now has Puzzles (~line 476), Library (~line 507), Insights
+(~line 532), Analysis/missed-tactics (~line 560), and Study (~line 614) steps; the ~60 s serial-engine missed-tactics
+request is now bounded by the per-request budget in `routes-review.js` (§15, `fix/missed-tactics-bounded`,
+`CHESS_REVIEW_MAX_EVALS`/`CHESS_REVIEW_BUDGET_MS`).
 
 **AccountsManager JSON-path precedence (branch `fix/accounts-node20-isolation`).** `node:sqlite` exists only on
 Node ≥ 22.5. The `AccountsManager` JSON fallback used to resolve `options.jsonPath || DEFAULT_JSON_PATH`, so on
