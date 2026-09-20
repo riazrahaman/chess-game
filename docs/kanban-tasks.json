@@ -454,6 +454,14 @@
       "priority": "medium",
       "title": "Center the sign-in dialog and give it a modal overlay",
       "description": "#auth-modal (index.html) had no CSS rule, so openAuthModal() only removed .hidden and the panel rendered bottom-left in flow with no backdrop. Fix: add #auth-modal to the #archive-modal/#import-pgn-modal fixed/flex/inset group plus a .hidden display:none variant. Guard added to test/t1-mobile-visuals-selftest.js (all five modal ids centered; #auth-modal.hidden must set display:none; id-anchored regex rejects #auth-modal-title decoys)."
+    },
+    {
+      "id": "ci-browser-gate",
+      "round": 6,
+      "status": "DONE",
+      "priority": "high",
+      "title": "B16 Run the Playwright journeys in CI",
+      "description": "CI only ran npm run check (linux node 20/22) and npm run test:unit (macos node 22); npm run test:browser (scripts/smoke-test.mjs + scripts/test-ui-features.mjs) never ran, so Play/Analysis/Puzzles/Library/Insights/Coordinates/Study/undo-request/auth-modal could regress unnoticed. Fix: new browser job in .github/workflows/ci.yml (ubuntu-latest, node 22, needs: [linux], npx playwright install --with-deps chromium) runs npm run test:browser with all runtime state redirected to ${{ runner.temp }} via CHESS_STATE_FILE/CHESS_JOURNAL_FILE/CHESS_DB_FILE/CHESS_JSON_ARCHIVE_FILE/CHESS_ACCOUNTS_DB_FILE/CHESS_ACCOUNTS_JSON_FILE/CHESS_SOCIAL_DB_PATH/CHESS_SOCIAL_JSON_PATH/CHESS_LEAGUES_DB_PATH/CHESS_LEAGUES_JSON_PATH/CHESS_STUDY_DB_PATH/CHESS_STUDY_JSON_PATH/CHESS_RATE_LIMIT_FILE plus CHESS_PORT=39281 and CHESS_RATE_LIMIT=100000; upload-artifact on failure (test-results/, playwright-report/, blob-report/). Triggers: push/PR to main, nightly schedule 17 4 * * *, workflow_dispatch. .gitignore now covers the artifact dirs. Reproduce locally: HANDOVER.md 16."
     }
   ]
 }

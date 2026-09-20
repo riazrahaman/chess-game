@@ -23,3 +23,9 @@ brief.html
 game-log.md
 .claude/
 .opencode/
+
+# Playwright browser-test artifacts (CI uploads these on failure)
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
