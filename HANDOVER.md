@@ -588,3 +588,48 @@ node test/p3-sqlite-selftest.js
 CHESS_ARCHIVE_FORCE_JSON=1 node test/p3-sqlite-selftest.js
 ```
 The suite computes `hasSqlite` itself (`test/p3-sqlite-selftest.js:31-46`) and asserts `backendType === 'json'` under the flag — so a silently ignored env var turns the suite red rather than passing a rubber stamp.
+
+---
+
+## 18. FIX — Study create→list flake in the new browser job (branch `fix/study-create-flake`, 2026-09-20)
+
+| Task | Owner | Branch | Status | Summary | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| `fix-study-create-flake` | builder | `fix/study-create-flake` | DONE | CI run **35501617040** — the **first** real run of the `browser` job landed by §16 — failed on `ubuntu-latest`/node 22 at `scripts/test-ui-features.mjs:546` (`created Study chapter did not appear in the list`). Root cause is a **client stale-response race**, not a server bug. `src/ui-study.js` `mount()` calls `loadChapters()` **and** `show()` calls `loadChapters()` again, so the first `#/study` navigation fires **two concurrent list GETs with no `study_player` cookie**; the server's `viewerOf` (`src/routes-study.js:80`) mints a fresh anon id and `Set-Cookie` on each. `createChapter()` fired the `POST` and a non-awaited, unguarded `loadChapters()`; the two slow, **cookie-less/empty** GET responses could resolve **after** the POST's fresh cookie-bearing refresh and clobber the list back to zero (`rows 1 → 0`). The fixed `700 ms` sleep only widened the window on a cold runner (the run also cold-imported 8,861 puzzles). Fix: (1) an optimistic insert of the returned `res.chapter` into `state.chapters` + re-render, (2) a monotonic `listSeq` sequence guard that discards any superseded (stale) response, and (3) `listPromise` de-dupes the `mount()`/`show()` double GET so first contact mints **one** guest identity. The browser assertion now uses a bounded 5 s / 50 ms `waitForFunction` for the created title (still requires the real row — not weakened), a bounded wait for the viewer, and a bounded wait for the server-validated quiz reply. | Reproduced deterministically with a Playwright `route.fulfill` probe holding the two first-contact list-GET responses 2.5 s: old code `t+2400 ms rows=0 text="No chapters yet."` after `POST 201` + fresh `GET 200`; fixed code `rows=1` throughout. POST/GET/cookie evidence verbatim below. Full `npm run test:browser` **3×** under the exact CI env block → all exit 0. `t0-deadcode` 27/0, `wave3-hygiene` 87, `reachability` 49/49, `about` 12, `study-chapters` 17/17, `npm run lint` exit 0 |
+| `study-create-list-regression-guard` | builder | `fix/study-create-flake` | DONE | Coverage is the **browser step** (`scripts/test-ui-features.mjs` Study block): it polls for the row for the exact created title and for the viewer/quiz reply, so a regression that loses the row after create fails the journey. The assertion is title-authoritative — a missing created title **throws** regardless of any pre-existing rows (proven by mutation: pre-seeded `PREEXISTING ROW` + a no-op `createChapter()` → step exits 1 with `created Study chapter did not appear in the list (list: "PREEXISTING ROW…")`). The server-side identity scoping already has deterministic Node coverage in `test/study-chapters-selftest.js` (`M1: a different anon cookie cannot read, delete or un-quiz another guest’s chapter; the same cookie can`, and `ownership: signed-in chapters are scoped…`), which is why the defect was provably **client-side** — both GETs in the failing pair carried no cookie and were served the same empty guest view by a correct server. | Mutation proof (title never appears → step FAILS); `test/study-chapters-selftest.js` → 17 passed, 0 failed; `about-selftest` still 12/12 (no About/unit-suite count change: this branch adds **no** new `test/*-selftest.js`) |
+
+### Root cause, with captured evidence
+
+A Playwright probe (in `/tmp`, deleted after) intercepted `**/api/study*`, let the request reach the server, then held the **response** of the first two (cookie-less) list GETs. The server correctly minted a cookie and an empty guest list for each; holding those responses until after the create flow's fresh refresh reproduced the exact CI symptom — the new row was rendered, then **vanished**:
+
+```
+[hold #1] server minted 1gpKZrhrXID0IgFT; Path=/; H; body has 0 chapters; holding 2500ms
+[hold #2] server minted iNLbpIw0rmbPxNc-; Path=/; H; body has 0 chapters; holding 2500ms
+REQ  GET /api/study cookie=NONE
+REQ  GET /api/study cookie=NONE
+REQ  POST /api/study cookie=study_player=1gpKZrhrXID0IgFT     ← POST got the cookie from held-GET#1
+RESP POST 201
+REQ  GET /api/study cookie=study_player=1gpKZrhrXID0IgFT       ← fresh refresh, returns the chapter
+RESP GET 200
+t+150ms … rows=1
+[hold #1] releasing now
+[hold #2] releasing now
+t+2400ms rows=0 text="No chapters yet. Create one on the left."   ← stale empty GET clobbered it
+```
+
+`POST /api/study` returned **201** with the chapter and the fresh `GET` returned it; the failure is therefore **not** server-side ownership, and **not** merely "the 700 ms sleep was too short" — a longer sleep alone would still lose the race. Class: **(a)/(b) combined — a client timing race over an identity/ordering race** (the stale requests were cookie-less because two concurrent first-contact GETs raced the cookie). With the fix applied the same probe stays `rows=1` at every sample across the release (verified `t+150 ms … t+5400 ms`), and reverting only `src/ui-study.js` with `git stash` restores `rows=0`.
+
+### Exact edits
+- `src/ui-study.js` — extracted `renderChapterList()`; added `listSeq`/`listPromise`; `loadChapters({force})` now de-dupes concurrent calls, force-refreshes after create, and **discards any response whose `seq !== listSeq`**; `createChapter()` optimistically inserts `res.chapter` before the guarded refresh. A 15 s wedge timer releases `listPromise` if a fetch never settles, so the dedupe guard cannot permanently disable later (Refresh) loads. No inline handlers added (Gate 4 / CSP unchanged; the `#board`-vs-`#study-board` split is untouched).
+- `scripts/test-ui-features.mjs` — replaced the `waitForTimeout(700)` + one-shot count with a bounded `waitForFunction` (5 s, 50 ms) keyed on the created title. The authoritative check is "a row whose text includes the created title": the success path may still count rows, but on timeout the step **throws** `created Study chapter did not appear in the list` (with the current list text for diagnosis) and does **not** fall back to counting arbitrary rows — so a pre-existing row plus a no-op create cannot satisfy it. Bounded waits for the viewer panel and for the quiz reply (`guessMoves===1 && quizFen!==quizFenBefore`) were added; both still fail if the viewer/reply never arrives.
+- `HANDOVER.md` §18, `docs/06-world-class-roadmap.md` B18, `docs/kanban-tasks.json` card `fix-study-create-flake`.
+
+### Reproduce locally
+```bash
+# CI-shaped env block (all runtime state under a mktemp -d), then:
+CHESS_PORT=39281 CHESS_RATE_LIMIT=100000 npm run test:browser   # expect exit 0 + Study PASS line
+
+# Prove the race (old code loses the row, fixed code keeps it): re-run the
+# response-holding probe described above against `#/study`.
+```
+No Node-22-only failure was reproduced locally (see "could not verify"); the race is Node-version-independent and was reproduced deterministically on node 26.8.2.
