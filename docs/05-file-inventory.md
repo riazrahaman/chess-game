@@ -54,7 +54,7 @@ reachability (loaded / allowlisted / precached / called) is enforced by `test/re
 - `data/openings.tsv`, `data/puzzles-sample.csv` (+ READMEs with provenance/licence)
 - `vendor/stockfish/` — engine loader + WASM + `Copying.txt` + upgrade notes
 - `scripts/smoke-test.mjs`, `scripts/test-ui-features.mjs` (Playwright), `scripts/engine-probe.js`, `scripts/import-puzzles.mjs`, `scripts/kanban-sync.mjs`
-- `test/*-selftest.js` — one standalone script per area; `wave0`–`wave3` suites cover the audited work; `reachability` and `t0-deadcode` are the structural guards; `g4-undo-request-selftest.js` covers the consent-gated undo (76 assertions)
+- `test/*-selftest.js` — one standalone script per area; `wave0`–`wave3` suites cover the audited work; `reachability` and `t0-deadcode` are the structural guards; `g4-undo-request-selftest.js` covers the consent-gated undo (76 assertions); `accounts-isolation-selftest.js` pins the `AccountsManager` JSON-path precedence ladder and the no-shared-store guarantee
 
 ## Runtime artifacts (gitignored)
 `.referee-state.json` / `.referee-journal.jsonl` (default room) and `.referee-state-<room>.json` /
