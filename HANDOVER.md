@@ -335,3 +335,101 @@ the Study view owns `#study-board` and never touches `#board`.
 chapters are flat (no folder/collection grouping); `service-worker.js` `CACHE_NAME` bumped to
 `chess-ui-v4` for the new nav entry; `study.db` is gitignored via `*.db` and `.study.json` via an explicit
 rule. Interactive-lesson per-move prompts (N3 item 21) remain open.
+
+---
+
+## 11. M5 — Performance pass (branch `feat/m5-performance-pass`, 2026-09-20)
+
+Kanban had no `m5` card (52 cards total; M5 arrived as task text only), so no kanban change. An
+evidence-backed audit, not a rewrite: measure → fix only what the evidence supports → test → document.
+
+| Item | Status | Evidence |
+|---|---|---|
+| `computeHistoryPositions` O(n) memoization | **not applicable** | Deleted by B3 (10b3855); absent from `src/` (only stale `.claude/worktrees/` copies). Per-ply `state.positions[]` replaced it. |
+| D2 cache-control audit | **done, re-verified** | 539c7cc; re-measured 2026-09-20 |
+| D1 gzip/brotli | **done, re-verified** | 498e2d1 |
+| Frontend bottleneck audit | **no change justified** | measured below |
+| M5-1 referee double-replay fix | **done (uncommitted)** | `drawStatus()` + `applyDrawStatus()` |
+
+### Measurement 1 — static delivery (reproducible)
+
+```
+$ CHESS_PORT=39281 CHESS_STATE_FILE="$TMP/state.json" CHESS_JOURNAL_FILE="$TMP/journal.jsonl" \
+  CHESS_DB_FILE="$TMP/games.db" … node server.js      # $TMP = os.tmpdir mkdtemp
+
+$ curl -sS -D- -o /dev/null -H 'Accept-Encoding: identity' .../src/ui.js
+HTTP/1.1 200 OK
+Cache-Control: public, max-age=0, must-revalidate
+Vary: Accept-Encoding
+ETag: W/"23acb-1a0bb4c383b"
+# gzip → adds Content-Encoding: gzip; br → Content-Encoding: br (same ETag, Vary on all)
+
+$ curl -sS -D- -o /dev/null -H 'If-None-Match: W/"23acb-1a0bb4c383b"' .../src/ui.js
+HTTP/1.1 304 Not Modified
+Cache-Control: public, max-age=0, must-revalidate
+ETag: W/"23acb-1a0bb4c383b"      # 0-byte body
+```
+
+| Scope | identity | gzip | br |
+|---|---|---|---|
+| `src/ui.js` (146,123 B) | 146,123 B / 0.98 ms | 36,071 B / 3.68 ms | 33,719 B / 2.87 ms |
+| first load: `index.html` + 47 scripts | **802,205 B (802.9 KB)** | **221,807 B (216.6 KB)** | **209,398 B (204.4 KB)** |
+| repeat request with `If-None-Match` | — | **304, 0 B** | — |
+
+### Measurement 2 — server hot path (the one real finding)
+
+Per-move `ref.enqueue({type:'move'})` on a 160-ply non-repeating game, components attributed:
+
+| ply | `automaticDraw` | `claimableDraw` | two-replay draw total | snapshot stringify+write |
+|---|---|---|---|---|
+| 40 | 1.376 ms | 1.272 ms | 2.649 ms | 0.083 ms |
+| 160 | 4.346 ms | 4.106 ms | **8.452 ms** | 0.081 ms |
+
+`automaticDraw` (`rules-engine.js:318`) and `claimableDraw` (`:338`) both call `createFromHistory(history)`
+(`:156`) → two O(n) replays per ply. Fix: `rulesEngine.drawStatus(boardOrFen, history)` replays **once** and
+returns `{automatic, claimable}`; `referee-service.js` `applyDrawStatus(s)` consumes it in `applyMove`
+(`:426`) and `rebuildState` (`:323`) instead of the pair. Fallback keeps the old two-call behaviour if
+`drawStatus` is absent.
+
+Real-referee before/after (same harness, same game):
+
+| plies | before (two replays) | after (one replay) |
+|---|---|---|
+| 1–10 | 1.585 ms | 1.173 ms |
+| 40–50 | 3.544 ms | 2.126 ms |
+| 80–90 | 5.781 ms | 3.078 ms |
+| 150–160 | 8.635 ms | **4.477 ms** |
+
+Differential (old pair vs `drawStatus`) over 9,301 positions (random games + shuffle + FEN edges + malformed
+history): **0 mismatches**. `test/m5-performance-selftest.js` (**15 tests**) re-runs a subset (FEN edges + 4,650
+random-game positions), the replayed-vs-FEN split, plus referee fivefold/threefold/fifty-move and the
+no-`drawStatus` fallback.
+
+**Round-2 coverage (replayed-vs-FEN split).** `drawStatus()` reads the halfmove-clock / seventyfive-move /
+insufficient-material / fifty-move conditions from the **board's own FEN** but finds repetition in the
+**replay**. The first suite never paired an edited FEN clock with a non-empty replay, so a mutant making the
+FEN-only checks use `(replayed || fenInstance)` survived it. Added 6 tests: three helper-level cases (board
+clock 100 / 150 / K-vs-K, each with a short replay whose clock disagrees), one asserting repetition *does*
+come from the replay, and two end-to-end `/api/setup` + `g1f3` cases (a pawn move would reset the clock, so a
+knight move is required to keep the disagreement). **Mutation proof:** mutating `drawStatus` to
+`clockSource = replayed || fenInstance` fails **5** of the 15 tests (helper fifty/seventyfive/insufficient +
+both e2e cases) with `claimable:false`/`draw:false` where the FEN verdict is expected; restoring the original
+source returns the suite to **15/15 green**. No suite count change (75).
+
+### Measurement 3 — client (no change)
+
+`positionsToHistorySnapshots` (called on every SSE/poll state, `ui.js:1336`) measured on extracted pure
+functions: 0.19 ms @ 40 plies, 0.71 ms @ 160, **1.31 ms @ 300**; `fenToDisplayBoard` 0.004 ms each. The 1 s
+clock tick (`renderTimers`) only toggles two classes. Neither is on a per-frame path; **no production client
+change is justified**, so `src/ui.js` is untouched.
+
+### Files
+
+- `src/rules-engine.js` — added `drawStatus()` + export.
+- `src/referee-service.js` — `applyDrawStatus()` helper; `applyMove`/`rebuildState` use it.
+- `test/m5-performance-selftest.js` — new (15 tests), wired into `test:unit` + `lint`.
+- `package.json` — suite append (74 → 75); `src/ui-about.js` + `test/about-selftest.js` — count 74 → 75.
+- `service-worker.js` — `CACHE_NAME` `chess-ui-v4` → `chess-ui-v5` (the precached `ui-about.js` bytes changed).
+- `docs/06-world-class-roadmap.md`, `docs/05-file-inventory.md`, this file — M5 status.
+
+No commit / push / kanban change (builder was the only writer).

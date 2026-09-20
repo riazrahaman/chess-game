@@ -85,6 +85,46 @@ function refreshClaimableDraw(s) {
   catch (_) { s.claimableDraw = null; }
 }
 
+// M5: apply the automatic-draw transition AND the claimable-draw flag from a
+// single history replay. automaticDraw() and claimableDraw() each rebuilt the
+// full history with createFromHistory(), so the post-move path replayed a long
+// game twice per ply; rulesEngine.drawStatus() replays once. Falls back to the
+// old two-call path if drawStatus is unavailable (e.g. an older rules-engine).
+function applyDrawStatus(s) {
+  if (s.gameOver) { s.claimableDraw = null; return; }
+  let status = null;
+  try { status = rulesEngine.drawStatus(s.board, s.history); }
+  catch (_) { status = null; }
+  if (!status) {
+    // Fallback for an engine without drawStatus: preserve the original
+    // two-call behaviour (automatic transition, then claimable flag).
+    try {
+      const draw = rulesEngine.automaticDraw(s.board, s.history);
+      if (draw && draw.draw) {
+        s.gameOver = true;
+        s.status = 'draw';
+        s.draw = true;
+        s.drawReason = draw.reason;
+        s.result = '½-½';
+        s.claimableDraw = null;
+        return;
+      }
+    } catch (_) { /* fall through to claimable probe */ }
+    refreshClaimableDraw(s);
+    return;
+  }
+  if (status.automatic.draw) {
+    s.gameOver = true;
+    s.status = 'draw';
+    s.draw = true;
+    s.drawReason = status.automatic.reason;
+    s.result = '½-½';
+    s.claimableDraw = null;
+    return;
+  }
+  s.claimableDraw = status.claimable;
+}
+
 // Legacy snapshots (pre-B3) have no positions; rebuild from the standard start
 // position when the replay lands on the snapshot's own FEN, otherwise expose
 // only the current position so the scrubber degrades instead of lying.
@@ -279,18 +319,9 @@ function rebuildState(history, moveTimestamps) {
   s.gameOver = status === 'checkmate' || status === 'stalemate';
   if (status === 'checkmate') s.result = s.board.turn === 'white' ? '0-1' : '1-0';
   if (status === 'stalemate') s.result = '½-½';
-  if (!s.gameOver) {
-    const draw = rulesEngine.automaticDraw(s.board, s.history);
-    if (draw.draw) {
-      s.gameOver = true;
-      s.status = 'draw';
-      s.draw = true;
-      s.drawReason = draw.reason;
-      s.result = '½-½';
-    }
-  }
   s.fen = rulesEngine.boardToFen(s.board);
-  refreshClaimableDraw(s);
+  // M5: one replay covers both the automatic draw and the claimable flag.
+  applyDrawStatus(s);
   return s;
 }
 
@@ -387,18 +418,11 @@ function applyMove(s, moveStr, moveTs, lagCompMs = 0) {
   s.gameOver = status === 'checkmate' || status === 'stalemate';
   if (status === 'checkmate') s.result = nextTurn === 'white' ? '0-1' : '1-0';
   if (status === 'stalemate') s.result = '½-½';
-  if (!s.gameOver) {
-    const draw = rulesEngine.automaticDraw(s.board, s.history);
-    if (draw.draw) {
-      s.gameOver = true;
-      s.status = 'draw';
-      s.draw = true;
-      s.drawReason = draw.reason;
-      s.result = '½-½';
-    }
-  }
   s.fen = rulesEngine.boardToFen(s.board);
-  refreshClaimableDraw(s);
+  // M5: one replay covers both the automatic draw and the claimable flag.
+  // applyDrawStatus() is a no-op beyond clearing claimableDraw when gameOver
+  // (checkmate/stalemate), so the ordering does not change outcomes.
+  applyDrawStatus(s);
   return { flagged: false };
 }
 

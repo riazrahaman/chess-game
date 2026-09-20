@@ -345,6 +345,52 @@
     return { claimable: false, reason: null };
   }
 
+  /**
+   * Evaluate the automatic AND claimable draw conditions in a SINGLE history
+   * replay. automaticDraw() and claimableDraw() each rebuild the full move
+   * history with createFromHistory() to obtain position counts, so calling both
+   * (as the referee does after every move) replays a long game twice per ply.
+   * drawStatus() replays once and evaluates both sets against that instance.
+   *
+   * Semantics are identical to the standalone helpers, including their split:
+   * repetition (fivefold/threefold) uses the replayed history when available
+   * and falls back to the FEN-only instance otherwise; the halfmove-clock,
+   * insufficient-material and fifty-move checks ALWAYS use the board's own FEN.
+   * Returns { automatic: {draw, reason}, claimable: {claimable, reason} }.
+   */
+  function drawStatus(boardOrFen, history) {
+    var replayed = null;
+    if (history && history.length > 0) {
+      try { replayed = createFromHistory(history); }
+      catch (e) { replayed = null; }
+    }
+    var fenInstance = create(boardOrFen);
+
+    var automatic = { draw: false, reason: null };
+    var fivefold = replayed
+      ? replayed._getPositionCount(replayed._hash) >= 5
+      : fenInstance._getPositionCount(fenInstance._hash) >= 5;
+    if (fivefold) {
+      automatic = { draw: true, reason: 'fivefold' };
+    } else if (fenInstance._halfMoves >= 150) {
+      automatic = { draw: true, reason: 'seventyfive-move' };
+    } else if (fenInstance.isInsufficientMaterial()) {
+      automatic = { draw: true, reason: 'insufficient' };
+    }
+
+    var claimable = { claimable: false, reason: null };
+    var threefold = replayed
+      ? replayed.isThreefoldRepetition()
+      : fenInstance.isThreefoldRepetition();
+    if (threefold) {
+      claimable = { claimable: true, reason: 'threefold' };
+    } else if (fenInstance.isDrawByFiftyMoves()) {
+      claimable = { claimable: true, reason: 'fifty-move' };
+    }
+
+    return { automatic: automatic, claimable: claimable };
+  }
+
   function san(boardOrFen, from, to, promotion) {
     var instance = create(boardOrFen);
     var moveObj = { from: from, to: to };
@@ -421,6 +467,7 @@
     evaluateDraw: evaluateDraw,
     automaticDraw: automaticDraw,
     claimableDraw: claimableDraw,
+    drawStatus: drawStatus,
     getGameStatus: getGameStatus,
     san: san,
     historyToSan: historyToSan,

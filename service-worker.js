@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'chess-ui-v4';
+const CACHE_NAME = 'chess-ui-v5';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',

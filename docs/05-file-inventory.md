@@ -7,8 +7,8 @@ reachability (loaded / allowlisted / precached / called) is enforced by `test/re
 | Module | Role |
 |---|---|
 | `server.js` | HTTP API, SSE, static allowlist (`ALLOWED_FILES`), CSP/HSTS/CORS, gzip + ETag, rate limiting, auth routes, room router, idle-room GC, admin routes |
-| `src/referee-service.js` | authoritative per-room game state: FIFO command queue, journal + snapshot, per-ply positions, claimable draws, human-vs-human undo requests (`state.undoRequest`), room inspection/deletion for GC |
-| `src/rules-engine.js`, `src/engine.js` | chess.js adapter (legality, FEN, SAN, automatic vs claimable draws) and in-house move generator/PGN builder |
+| `src/referee-service.js` | authoritative per-room game state: FIFO command queue, journal + snapshot, per-ply positions, claimable draws, human-vs-human undo requests (`state.undoRequest`), room inspection/deletion for GC; `applyDrawStatus()` derives the automatic + claimable draw verdicts from a single history replay (M5) |
+| `src/rules-engine.js`, `src/engine.js` | chess.js adapter (legality, FEN, SAN, automatic vs claimable draws — `drawStatus()` returns both from one replay, M5) and in-house move generator/PGN builder |
 | `src/seat-auth.js` | seat tokens per room; claims may carry the signed-in account |
 | `src/bot-service.js`, `src/engine-server.js` | Play-vs-Computer ladder over Stockfish in a worker thread; TSV opening book for L1–L4; PST fallback |
 | `src/accounts.js` | scrypt accounts, sessions, Google Identity verification |
