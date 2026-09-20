@@ -96,6 +96,7 @@ in `HANDOVER.md` §5–§8 and on the kanban board (`docs/kanban-tasks.json`).
 | 1 | Real engine | vendored Stockfish 19 lite WASM in the analysis Worker (d16 MultiPV) and in Node for bots (Skill/UCI_Elo ~800–2300); CSP `wasm-unsafe-eval`; engine proof test |
 | 2 | Site shell | hash-routed shell + Home onboarding; Play view slimmed + Settings; 8,861 CC0 puzzles with server-verified solving; rating on game end, lobby, leaderboards, arenas, social; Analysis view; lichess chess-openings TSV, fabricated stats deleted; SW no longer caches `/api` |
 | 3 | Retention | streaks with slack, achievements, weekly leagues, Insights, Library + lichess/Chess.com import, idle-room GC, `script-src` without `unsafe-inline`, Miss classification + retry loop |
+| 4 | Training & Deep Polish | Study chapters (`ui-study.js`, `study-tree.js`), concealed quiz mode, NAG PGN export, M5 performance single-replay draw status, in-memory static URL SPA shell navigation (`feat/static-url-navigation`), Master QA Audit & 6 broken corners remediated (`fix/audit-broken-corners`), suite count raised to 78 |
 
-`KNOWN_DARK` went 30 → 11 across Waves 2–3. Next: Wave 4 (training depth — repertoire trainer, Maia-style
-human-like opponents, practice curriculum, endgames trainer).
+`KNOWN_DARK` went 30 → 10 across Waves 2–4. Full test battery stands at 78 unit test suites plus Playwright E2E suites passing cleanly with zero errors.
+

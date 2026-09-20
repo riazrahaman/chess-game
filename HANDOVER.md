@@ -110,7 +110,11 @@ npm test         # Complete suite + Playwright browser smoke test + UI feature t
 
 Summary of test results:
 - **Gate 4 Invariant**: `ui.js` contains **0** occurrences of `makeMove(` and **0** occurrences of `createInitialBoard(`.
-- `npm run check`: **0 errors across entire codebase**
+- `npm run check`: **78 unit suites, 0 errors across entire codebase**
+- `audit-broken-corners-selftest.js`: 9/9 passed (Gate 4 invariant, seat token isolation, promotion cancel, draw claim visibility, touchscreen resign confirm, PGN copy fallback, SPA history navigation)
+- `static-url-navigation-selftest.js`: 8/8 passed
+- `study-chapters-selftest.js`: 17/17 passed
+- `m5-performance-selftest.js`: 15/15 passed
 - `engine-selftest.js`: 42/42 passed
 - `pieces-selftest.js`: 32/32 passed
 - `security-selftest.js`: 58/58 passed
@@ -465,4 +469,43 @@ No commit / push / kanban change (builder was the only writer).
    - Gate 4 invariant: zero calls to `makeMove(` or `createInitialBoard(`.
    - Unit suites count updated to 77 in `src/ui-about.js`, `test/about-selftest.js`, and `package.json`.
    - `scripts/smoke-test.mjs` and `scripts/test-ui-features.mjs` verified passing in Chromium with zero errors.
+
+---
+
+## 13. MASTER QA AUDIT & DEFECT REMEDIATION (branch `fix/audit-broken-corners`, 2026-09-20)
+
+| Task ID | Owner | Branch | Status | What landed | Tests |
+|---|---|---|---|---|---|
+| `fix-audit-broken-corners` | orchestrator-admin | `fix/audit-broken-corners` | DONE | Full deep-dive QA audit across all 18 feature domains producing Master QA Audit & Test Plan. Remediated 6 broken corners: (1) multi-tab seat isolation (`chess_seat_token_${room}`), (2) promotion modal Cancel & Escape dismiss in puzzles & study, (3) draw claim button visibility for unseated/local games, (4) 2-step touchscreen resignation confirmation state machine (4s timeout), (5) clipboard fallback with `execCommand` and UI toast, (6) in-memory browser history navigation (`pushState`/`popstate`). Updated Kanban default to `agent-kanban.riazrahaman.com`. | `test/audit-broken-corners-selftest.js` (9 assertions), 78 unit test suites in `npm run check` (0 failures), Playwright smoke & feature tests (0 errors), Gate 4 invariant (0 hits). |
+
+### Master QA Audit & Test Plan Artifact
+- Location: `master_qa_audit_and_test_plan.md`
+- Scope: 924 lines covering 18 structured suites (Site Shell, Board Mechanics, Multiplayer Rooms & Seats, Game Termination & Clocks, G4 Undo Requests, AI Bot Play, AI Coach & Reports, Analysis Board & MultiPV, Puzzles & Repetition, Coordinates Trainer, Study Chapters & Quiz Mode, Library & External Import, Compete Lobby & Leagues, Accounts & Profiles, Settings & Theming, Accessibility & Voice, Service Worker & PWA, Security & Invariants).
+
+### Broken Corners Remediated
+1. **Multi-Tab Seat Isolation (`src/ui.js`, `src/ui-compete.js`)**:
+   - Room-namespaced storage keys: `sessionStorage.getItem('chess_seat_token_' + room)` (with legacy fallback).
+   - Prevents seat token contamination and race conditions when playing across multiple simultaneous tabs.
+2. **Promotion Modal Dismiss / Escape Clean-Up (`src/ui-puzzles.js`, `src/ui-study.js`)**:
+   - Added Cancel button to `.pz-promo` and `.st-promo`.
+   - Added `Escape` key listener with complete event cleanup, square unselection, and re-rendering.
+3. **Unseated Draw Claim Visibility (`src/ui.js`)**:
+   - Ensured `#claim-draw` button is visible when conditions are met in unseated games:
+     `canClaim = (seated || (!state?.seats?.white && !state?.seats?.black)) && isDrawClaimable(state)`.
+4. **Touchscreen Resignation Safety (`src/ui.js`, `index.html`)**:
+   - 2-step confirmation on `#resign`: First click sets button to 'Confirm Resign?' with `.btn-danger-confirm` and starts a 4-second reset timer. Only a second click proceeds with resignation. Resets cleanly on board reset/game end.
+5. **PGN Copy Fallback (`src/ui.js`)**:
+   - Fallback executes `document.execCommand('copy')` on a temporary off-screen `<textarea>` when `navigator.clipboard` is unavailable or rejected.
+   - Shows feedback toast via `showUiError()`.
+6. **SPA History Navigation (`src/shell.js`)**:
+   - Navigating sections issues `history.pushState({ viewId, params }, '', pathname)`.
+   - Listens on `popstate` to restore sections when clicking the browser's back/forward buttons without full reloads.
+
+### Verification & Invariants
+- Gate 4 Architectural Invariant: Exactly 0 occurrences of `makeMove(` or `createInitialBoard(` across all 18 UI and shell files.
+- Unit Test Battery: 78/78 suites passing in `npm run check`.
+- Browser Test Battery: Playwright smoke test and UI/AI feature test passed in Chromium with 0 errors.
+- Git Status: Merged into `main` (`--no-ff`, commit `933eb20`), pushed to `origin/main`.
+- Kanban Board: Task `fix-audit-broken-corners` transitioned to `DONE` on `https://agent-kanban.riazrahaman.com`.
+
 
