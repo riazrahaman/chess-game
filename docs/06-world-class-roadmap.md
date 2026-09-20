@@ -81,7 +81,7 @@ rematch `decline` arm. No orphan client fetches.
 - **New client module `src/ui-auth.js`** — sign-in modal (Google Identity Services + local username/password), guest continue, `#new-room-btn`. It is not servable (B11), so none of this works in the browser today.
 - **CSP loosened for Google** (`server.js:462-467`): `script-src` adds `https://accounts.google.com/gsi/client`, `connect-src` and `frame-src` add `https://accounts.google.com/gsi/`. Still `'unsafe-inline' 'unsafe-eval'`; D4 unchanged. Note `connect-src` now has an allowlist pattern to copy for the tablebase (D5).
 - **`.gitignore` now covers `*.db`, `accounts.db`, `.accounts.json`.** It does **not** cover the Google OAuth `client_secret_*.json` currently sitting untracked in the repo root (B12).
-- **Roadmap line references drifted** in `ui.js` (+~11–13 lines): `showUiError` → 738, `computeHistoryPositions` concat → 786-787, `refereeClockAt` stamp → 1165, `pollReferee` → 1378, `startSSE` → 1439. `index.html` still has 0 `</details>` (B2 stands). Bug table updated below.
+- **Roadmap line references drifted** in `ui.js` (+~11–13 lines): `showUiError` → 738, `computeHistoryPositions` concat → 786-787 *(since deleted by B3; see §5 M5)*, `refereeClockAt` stamp → 1165, `pollReferee` → 1378, `startSSE` → 1439. `index.html` still has 0 `</details>` (B2 stands). Bug table updated below.
 - Nothing in the commit touches the engine, puzzles, openings, bots, caching, or the dark modules — Phases 1–3 are unaffected.
 
 ---
@@ -208,17 +208,54 @@ and neither is called.
 
 ## 5. PHASE 2b — Delivery & infrastructure `[server]`
 
-Measured: **433 KB uncompressed first load** (32 scripts = 369 KB + 65 KB HTML), ~91 KB if gzipped —
-**nothing is compressed**; `Cache-Control: no-store` is set globally (`server.js:833`) including static
-files; **no ETag / Last-Modified / 304**; keep-alive on.
+Measured (**2026-09-20, M5 re-audit**, local server): **803 KB uncompressed first load** (index.html + 47
+`<script>` files) → **217 KB gzip** / **204 KB brotli**; `src/`, `assets/` and `vendor/` carry
+`public, max-age=0, must-revalidate` + a weak ETag and answer `304` to `If-None-Match`; `/api/*`, `index.html`,
+the service worker and the manifest stay `no-store`. (The §2b figures below — "433 KB … nothing is
+compressed … no ETag/304" — are the *original audit*, kept for history; D1+D2 landed and the 2026-09-20
+re-measurement above supersedes them.)
 
-- D1 gzip/brotli via `zlib` when `Accept-Encoding` allows — S. **Done 498e2d1** (`ui.js` 118 KB → 30 KB gzip / 26 KB br).
-- D2 `Cache-Control: public, max-age=31536000, immutable` for `/src/*` and `/assets/*` with a content-hash query param stamped by a tiny `scripts/stamp-assets.js`; keep `no-store` for `/api/*` only; ETag from mtime+size — S. **Done 539c7cc** (chose `max-age=0, must-revalidate` + weak ETag + 304; no hashing).
+- D1 gzip/brotli via `zlib` when `Accept-Encoding` allows — S. **Done 498e2d1** (`ui.js` 118 KB → 30 KB gzip / 26 KB br). *M5 re-measured 2026-09-20: identity 802.9 KB / gzip 216.6 KB / br 204.4 KB for the full first load; `ui.js` alone 146 KB → 36 KB gzip / 34 KB br.*
+- D2 `Cache-Control: public, max-age=31536000, immutable` for `/src/*` and `/assets/*` with a content-hash query param stamped by a tiny `scripts/stamp-assets.js`; keep `no-store` for `/api/*` only; ETag from mtime+size — S. **Done 539c7cc** (chose `max-age=0, must-revalidate` + weak ETag + 304; no hashing). *M5 re-verified 2026-09-20: `If-None-Match` returns `304` with zero body; `Vary: Accept-Encoding` set on both 200 and 304.*
 - D3 Precache `stockfish-worker.js` (and the engine WASM after E1a); reconcile `PRECACHE_ASSETS` with `ALLOWED_FILES`; PNG icons (192/512) for install prompts — S. **Worker + reconciliation done 45b6383**; PNG icons still open.
 - D4 CSP hardening — **`'unsafe-eval'` gone (Wave 1), `'unsafe-inline'` gone from script-src (Wave 3); style-src still inline**: `'wasm-unsafe-eval'`, drop `'unsafe-eval'` and `'unsafe-inline'` (move the SW-registration inline script to a file; hash the stylesheet or externalise it). `frame-ancestors 'none'` contradicts `embed-viewer.js` — add a dedicated `/embed/:id` route with a permissive frame policy — S. — **in progress (Wave 1, branch `feat/wave1-real-engine`)**: `'wasm-unsafe-eval'` in, `'unsafe-eval'` out, `worker-src 'self' blob:` kept; the redundant `onsubmit` attribute on `#chat-form` removed. **Still open**: `'unsafe-inline'` in `script-src` (only the SW-registration inline block remains — hash it from `index.html` at startup or externalise it), `style-src 'unsafe-inline'` (inline `<style>` + `style=""` attributes), and the `/embed/:id` frame policy.
 - D5 `connect-src` allowlist for `tablebase.lichess.ovh` (or proxy it) — S. — **in progress (Wave 1, branch `feat/wave1-real-engine`)**: `https://tablebase.lichess.ovh` added to `connect-src` (asserted in `security-headers-selftest`).
 - D6 SSE-first transport (B6) and client `Last-Event-ID` resume — S. **Poll backoff done 5b38dfc**; `Last-Event-ID` resume still open.
 - D7 `historyToSan` (`engine.js:727-736`) replays from the initial board with disambiguation on every state: 8.3 ms at 200 plies, ~0.9 s cumulative. Have the referee include SAN per ply in `stateView` so the client never recomputes it (also removes the Gate-4 workaround, B3) — S. **Done 10b3855** (`state.positions[].san`).
+
+### M5 — Performance pass (branch `feat/m5-performance-pass`, 2026-09-20) — **evidence-backed audit**
+
+An M5 card asked to "optimize `computeHistoryPositions` to O(n) memoized, audit cache-control headers, audit
+frontend bottlenecks". Two of those three targets **no longer exist as work**:
+
+- **`computeHistoryPositions` was deleted by B3 (10b3855)** — it is not in `src/`; the referee ships per-ply
+  `state.positions[]` and the client renders from them. The `ui.js:783-801` line refs in **§1a** and the **B3**
+  row are historical (they describe the pre-B3 file). `rg computeHistoryPositions` matches only stale
+  `.claude/worktrees/` copies (never shipped).
+- **D1 (gzip/br) and D2 (ETag/304)** are done (498e2d1, 539c7cc) and re-verified here, not re-implemented.
+
+So M5 became a *measurement* pass. Findings, all reproduced against `CHESS_PORT=39281 node server.js` with
+state under an `os.tmpdir()` mkdtemp:
+
+| # | Finding | Evidence | Action |
+|---|---|---|---|
+| M5-1 | **Two full history replays per move.** `automaticDraw()` and `claimableDraw()` each call `createFromHistory()` for position counts, so the referee's post-move path replayed a long game **twice per ply** — 8.45 ms of 8.53 ms per move at 160 plies (draw detection), vs 0.08 ms for the snapshot write. | `src/rules-engine.js:318-346`; measured `node` harness | **fixed** — new `rulesEngine.drawStatus()` evaluates both verdicts from one replay; referee's `applyDrawStatus()` uses it in `applyMove`/`rebuildState`. ~2.0× on the per-move path, differential-clean over 9,301 positions. |
+| M5-2 | Static delivery: compression + revalidation work. | `curl` (see below) | **no change** |
+| M5-3 | Client per-ply rebuild (`positionsToHistorySnapshots` + `fenToDisplayBoard`) is 1.31 ms at 300 plies on every SSE/poll state; clock tick is a 1 Hz class toggle. | extracted pure fns, measured | **no change** — real but small, and it runs off the board-visible path. |
+| M5-4 | `/api/state` `stateView()` allocates `renderAscii(board)` + `historyStr(history)` strings per request. | code read | **no change** — sub-0.1 ms; not on a per-frame path. |
+
+Reproducible commands (full output in the M5 handover, §11): `curl -H 'Accept-Encoding: br' -D-` on
+`/src/ui.js` returns `Content-Encoding: br` (146 KB → 34 KB); a repeat with `If-None-Match: W/"23acb-…"`
+returns `304` with a zero-byte body. First load (index.html + 47 scripts): identity **802.9 KB** / gzip
+**216.6 KB** / br **204.4 KB**.
+
+New suite `test/m5-performance-selftest.js` (**15 tests**) pins `drawStatus()` ≡ `automaticDraw()`+`claimableDraw()`
+on FEN edges, **4,650 random-game positions** (25 games × 2,325 plies × with/without history), the
+replayed-vs-FEN split explicitly (FEN-clock fifty/seventyfive/insufficient paired with a *disagreeing*
+short history, and repetition driven *by* the replay), the referee's fivefold/threefold/fifty-move behaviour,
+and the end-to-end `/api/setup`-with-edited-clock path; wired into `test:unit` + `lint` (74 → 75 suites;
+`ui-about.js` + `about-selftest.js` updated). A mutant routing the FEN-only checks through the replay is
+killed by 5 of the 15 tests (mutation proof in HANDOVER §11).
 
 ---
 

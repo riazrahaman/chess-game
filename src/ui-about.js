@@ -520,7 +520,7 @@
 
         <section class="about-section" data-about-section="stats" aria-label="Chess site statistics">
           <div class="about-stats-grid">
-            <article class="about-stat-card"><span class="about-stat-value">74</span><span class="about-stat-label">Unit suites run</span><span class="about-stat-detail">In the full unit check</span></article>
+            <article class="about-stat-card"><span class="about-stat-value">75</span><span class="about-stat-label">Unit suites run</span><span class="about-stat-detail">In the full unit check</span></article>
             <article class="about-stat-card"><span class="about-stat-value">8,861</span><span class="about-stat-label">Puzzles</span><span class="about-stat-detail">Real lichess positions</span></article>
             <article class="about-stat-card"><span class="about-stat-value">8</span><span class="about-stat-label">Bot levels</span><span class="about-stat-detail">About 800–2300</span></article>
             <article class="about-stat-card"><span class="about-stat-value">200</span><span class="about-stat-label">Games replayed</span><span class="about-stat-detail">Per differential run</span></article>
