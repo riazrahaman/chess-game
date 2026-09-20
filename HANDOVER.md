@@ -633,3 +633,23 @@ CHESS_PORT=39281 CHESS_RATE_LIMIT=100000 npm run test:browser   # expect exit 0 
 # response-holding probe described above against `#/study`.
 ```
 No Node-22-only failure was reproduced locally (see "could not verify"); the race is Node-version-independent and was reproduced deterministically on node 26.8.2.
+
+## 19. FIX — Seat-badge flake in the browser job (branch `fix/browser-seat-badge-flake`, 2026-09-20)
+
+| Task | Owner | Branch | Status | Summary | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| `fix-browser-seat-badge-flake` | builder | `fix/browser-seat-badge-flake` | DONE | CI run **35504521830** (the `fix/study-create-flake` push) had every non-browser job green but the `browser` job failed fast (30 s) at `scripts/test-ui-features.mjs:145` with `Expected seat badge to show Playing White, got: Seated: Black`. Root cause is the **same class** as §18 — a fixed sleep racing an async round-trip, **not** a seat-auth bug. The step selects bot colour `white` (so the human takes black; badge `Seated: Black`), then selects `black` (so the human must take white). The `bot-select` `change` handler calls `sendBotConfigUpdate()` (`src/ui.js`), which is serialised on `botConfigChain` and runs `POST /api/bot` → `await leaveSeat()` → `await claimSeat('white')`; the badge text is written by `updateSeatUI()` (`src/ui.js:2472-2492`, values `Seated: White` / `Seated: Black` / `Unseated`). A fixed `waitForTimeout(500)` could therefore read the **stale** `Seated: Black` on a loaded runner. Fix: replace the sleep with a bounded `waitForFunction` polling `#seat-badge` for `White` (5 s, 50 ms; the catch throws with the current badge text), and replace the `waitForTimeout(600)` after the `#new-game` click with a bounded wait on `#command-status` settling to `data-state` success/error on the `Starting new game` label plus an explicit error throw. | Mutation proof: pointing the new wait at a never-appearing string fails with the real badge text (`Seat badge never showed Playing White (got: Seated: White)`, exit 1) while the repo stays untouched. Full `npm run test:browser` under the exact CI env block **9/9 isolated runs PASS** on fresh temp dirs, each printing `Seat badge in bot mode: Seated: White` plus every sentinel. Gates `t0-deadcode` 27/0, `wave3-hygiene` 87, `reachability` 49/49, `about` 12, `npm run lint` 0. Only `scripts/test-ui-features.mjs` changed. |
+
+### Exact edits
+- `scripts/test-ui-features.mjs` — the fixed `waitForTimeout(500)` before the `#seat-badge` read became a bounded `page.waitForFunction` polling the badge for `White`; the fixed `waitForTimeout(600)` after the `#new-game` click became a bounded wait on `#command-status` reaching `data-state` `success`/`error` on the `Starting new game` label, followed by an explicit `error` throw. The subsequent authoritative assertion still requires `White`, so the step cannot pass on a stale badge. No other sleeps in the file were touched.
+- `HANDOVER.md` §19, `docs/06-world-class-roadmap.md` B19, `docs/kanban-tasks.json` card `fix-browser-seat-badge-flake`.
+
+### Known follow-up (filed separately, out of scope here)
+The tester stress found a **separate pre-existing** flake in the same browser script: the undo-request block does a fixed `waitForTimeout(300)` before sending `e2e4`, which can 400 `illegal move` when it is Black to move; and the script's top-level `.catch` calls `process.exit(1)` **before** `serverProc.kill()`, leaking a `node server.js` still holding `:39281` (the next run then logs `Server already running.` and cascades). Tracked by the kanban card `fix-undo-browser-flake` (branch `fix/undo-browser-flake`).
+
+### Reproduce locally
+```bash
+# CI-shaped env block (all runtime state under a mktemp -d), then:
+CHESS_PORT=39281 CHESS_RATE_LIMIT=100000 npm run test:browser   # expect exit 0 + "Seat badge in bot mode: Seated: White"
+```
+The race is Node-version-independent; the real ubuntu/node-22 runner was not reproduced locally (see "could not verify" in the review/tester reports).
