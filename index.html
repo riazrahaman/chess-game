@@ -764,6 +764,7 @@
         .brand-mark i:nth-child(2), .brand-mark i:nth-child(3) { opacity: .35; }
         h1 { font-family: Georgia, "Times New Roman", serif; font-size: 29px; line-height: 1; font-weight: 400; letter-spacing: -1px; margin: 0; }
         .brand p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+        .brand-version { color: var(--muted); font-size: 11px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; margin-left: 6px; opacity: 0.85; }
         #theme-bar { margin: 0; gap: 8px; display: flex; align-items: center; flex-wrap: wrap; font-size: 12px; }
         body button, body select, body input, body textarea { font: inherit; color: var(--text-color); background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 5px; }
         body button, body select { min-height: 40px; padding: 8px 12px; font-size: 13px; font-weight: 500; }
@@ -960,7 +961,7 @@
 <body>
     <a class="skip-link" href="#workspace">Skip to game</a>
     <header class="app-header">
-    <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><div><h1>Chess UI</h1><p>A little space to think.</p></div></div>
+    <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><div><h1>Chess UI <span id="app-version" class="brand-version" aria-label="Application version"></span></h1><p>A little space to think.</p></div></div>
     <nav id="shell-nav" aria-label="Site"></nav>
     <div id="account-bar" style="display:flex; align-items:center; gap:8px; margin-left:auto;">
         <div id="account-user-badge" style="display:none; align-items:center; gap:6px; font-size:0.8rem; font-weight:600; padding:3px 10px; border-radius:12px; background:var(--panel-bg); border:1px solid var(--panel-border);">

@@ -504,7 +504,7 @@
             <button class="about-action about-action-primary" type="button" data-about-action="play">Start a game</button>
             <a class="about-action" href="https://chess-game-0zax.onrender.com" target="_blank" rel="noopener">Open live site</a>
           </div>
-          <p class="about-version">v1.0.0</p>
+          <p class="about-version" id="about-version" aria-label="Application version"></p>
         </header>
 
         <section class="about-section" data-about-section="features" aria-label="Chess features">
@@ -662,6 +662,16 @@
     state.el = el;
     injectStyles();
     renderSkeleton(el);
+    // Populate the About version from the same single source as the brand
+    // header (shell.js fills #app-version from GET /api/version, which reads
+    // package.json at boot). textContent only — no innerHTML.
+    var brandVersion = typeof document !== 'undefined' ? document.getElementById('app-version') : null;
+    var aboutVersion = typeof document !== 'undefined' ? document.getElementById('about-version') : null;
+    if (aboutVersion && brandVersion && brandVersion.textContent) {
+      aboutVersion.textContent = brandVersion.textContent;
+    } else if (aboutVersion) {
+      aboutVersion.textContent = 'v—';
+    }
     bindEvents();
     state.mounted = true;
   }

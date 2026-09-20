@@ -232,6 +232,29 @@ test('About markup contains no inline event handlers', () => {
   assert(!/\son[a-z]+\s*=/i.test(runtime.rendered), 'inline on*= handler found in rendered output');
 });
 
+test('version is single-sourced from package.json with no hardcoded drift', () => {
+  const pkg = JSON.parse(read('package.json'));
+  const expected = 'v' + pkg.version;
+  assert(/^v\d+\.\d+\.\d+$/.test(expected), 'package.json version is not vX.Y.Z: ' + expected);
+  // (a) About page must not hardcode a version literal — it populates #about-version at runtime
+  assert(/id="about-version"/.test(runtime.rendered), 'About page is missing #about-version element');
+  assert(!/about-version[^>]*>v\d+\.\d+\.\d+</.test(runtime.rendered), 'About page hardcodes a version literal instead of populating from the single source');
+  // (b) server.js must read package.json version at boot and expose it via GET /api/version
+  const server = read('server.js');
+  assert(/require\(['"]\.\/package\.json['"]\)\.version/.test(server), 'server.js does not read version from package.json at boot');
+  assert(server.includes("urlPath === '/api/version'"), 'server.js does not expose GET /api/version');
+  // (c) index.html brand header must have #app-version for shell.js to populate
+  const html = read('index.html');
+  assert(/id="app-version"/.test(html), 'index.html brand header is missing #app-version element');
+  assert(/\.brand-version/.test(html), 'index.html is missing .brand-version CSS rule');
+  // (d) shell.js must populate #app-version from GET /api/version (textContent, no innerHTML)
+  const shell = read('src/shell.js');
+  assert(/\/api\/version/.test(shell), 'shell.js does not fetch /api/version');
+  assert(/app-version/.test(shell), 'shell.js does not populate #app-version');
+  assert(/about-version/.test(shell), 'shell.js must also fill #about-version so a deep-linked #/about shows the version instead of the v— fallback');
+  assert(/textContent/.test(shell) && !/innerHTML/.test(shell.split('populateAppVersion')[1] || ''), 'shell.js must use textContent, not innerHTML, for the version badge');
+});
+
 test('index.html loads and hosts the About view', () => {
   const html = read('index.html');
   assert(html.includes('<script src="src/ui-about.js"></script>'), 'index.html does not load src/ui-about.js');

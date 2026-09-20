@@ -261,6 +261,25 @@
     const boot = () => route();
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
     window.Shell = Shell;
+
+    // Populate the brand-header version badge from the single source of truth
+    // (GET /api/version, which reads package.json at boot). textContent only —
+    // no innerHTML — so the endpoint cannot inject markup.
+    (function populateAppVersion() {
+      try {
+        fetch('/api/version').then(function (r) { return r.json(); }).then(function (data) {
+          if (!data || !data.version) return;
+          const text = 'v' + data.version;
+          const brand = document.getElementById('app-version');
+          if (brand) brand.textContent = text;
+          // The About view may have mounted (and read #app-version) before this
+          // fetch resolved — e.g. a direct/bookmarked load of #/about — so fill
+          // its element directly too, rather than leaving the v— fallback.
+          const about = document.getElementById('about-version');
+          if (about) about.textContent = text;
+        }).catch(function () { /* network error: leave the fallback */ });
+      } catch (_) { /* fetch unavailable: leave the fallback */ }
+    })();
   }
 
   if (typeof module !== 'undefined' && module.exports) module.exports = Shell;

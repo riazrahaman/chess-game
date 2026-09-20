@@ -4,6 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const zlib = require('zlib');
 
+const APP_VERSION = require('./package.json').version;
 const referee = require('./src/referee-service.js');
 const { seatAuthManager } = require('./src/seat-auth.js');
 const gameArchive = require('./src/game-archive.js');
@@ -1408,6 +1409,11 @@ function createServer() {
           serverReceiveTime: now,
           serverTransmitTime: now
         });
+        return;
+      }
+
+      if (req.method === 'GET' && urlPath === '/api/version') {
+        sendJson(res, 200, { ok: true, version: APP_VERSION });
         return;
       }
 
