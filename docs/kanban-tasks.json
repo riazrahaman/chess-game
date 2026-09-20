@@ -3,6 +3,14 @@
   "notes": "Source of truth for the agent-kanban-board project 'chess'. Synced by scripts/kanban-sync.mjs (idempotent: creates missing cards, reconciles status/description). Legacy rounds 1-4 were migrated from HANDOVER.md because the original localhost:4100 board's data did not survive. Rounds: 1 = pre-audit orchestration, 2 = Wave 0, 3 = Wave 1, 4 = Wave 2, 5 = Wave 3.",
   "tasks": [
     {
+      "id": "perf-missed-tactics-bounded",
+      "round": 6,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "B15 Bound missed-tactics analysis per request",
+      "description": "routes-review.js evaluatePositions() serialised an engine search per uncached position (REVIEW_DEPTH 12, REVIEW_MOVETIME_MS 200); a cold 300-ply game (~150 searches) could block one request ~30-60 s. Cap NEW engine calls per request: REVIEW_MAX_EVALS (env CHESS_REVIEW_MAX_EVALS, default 60) and REVIEW_BUDGET_MS (env CHESS_REVIEW_BUDGET_MS, default 5000); cache hits and terminal evals are free; skipped positions return null evals and set truncated + additive truncatedReason 'budget'|'max-plies'|null. Depth-keyed eval_cache and the response contract are unchanged; findMissedTactics already tolerates null evals. ui-analysis.js labels a truncated panel by reason ('budget reached' vs 'position cap reached'). Test seam: evaluatePositions(positions, gameArchive, opts) with opts.analyser/now/maxEvals/budgetMs (stub-driven, no Stockfish). test/missed-tactics-bounded-selftest.js (8 tests); about stat 78->79."
+    },
+    {
       "id": "chess-t0-seat-auth-heartbeat",
       "round": 1,
       "status": "DONE",

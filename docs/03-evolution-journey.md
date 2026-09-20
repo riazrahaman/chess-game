@@ -98,5 +98,5 @@ in `HANDOVER.md` §5–§8 and on the kanban board (`docs/kanban-tasks.json`).
 | 3 | Retention | streaks with slack, achievements, weekly leagues, Insights, Library + lichess/Chess.com import, idle-room GC, `script-src` without `unsafe-inline`, Miss classification + retry loop |
 | 4 | Training & Deep Polish | Study chapters (`ui-study.js`, `study-tree.js`), concealed quiz mode, NAG PGN export, M5 performance single-replay draw status, in-memory static URL SPA shell navigation (`feat/static-url-navigation`), Master QA Audit & 6 broken corners remediated (`fix/audit-broken-corners`), suite count raised to 78 |
 
-`KNOWN_DARK` went 30 → 10 across Waves 2–4. Full test battery stands at 78 unit test suites plus Playwright E2E suites passing cleanly with zero errors.
+`KNOWN_DARK` went 30 → 10 across Waves 2–4. Full test battery stands at 79 unit test suites plus Playwright E2E suites passing cleanly with zero errors.
 
