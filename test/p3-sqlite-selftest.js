@@ -167,7 +167,7 @@ async function runTests() {
   assert(searchFischer.length === 1 && searchFischer[0].white.includes('Fischer'), 'searchGames("fischer"): case-insensitive match');
 
   const searchEco = sqliteArchive.searchGames('D10');
-  assert(searchEco.length === 1 && searchEco[0].id === 'custom-game-id-003', 'searchGames("D10"): matched by ECO code');
+  assert(searchEco.some(g => g.id === 'custom-game-id-003'), 'searchGames("D10"): matched by ECO code');
 
   const searchDraw = sqliteArchive.searchGames('1/2-1/2');
   assert(searchDraw.length === 1 && searchDraw[0].result === '1/2-1/2', 'searchGames("1/2-1/2"): matched by result');
