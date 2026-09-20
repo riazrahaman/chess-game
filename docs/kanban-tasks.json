@@ -462,6 +462,14 @@
       "priority": "high",
       "title": "B16 Run the Playwright journeys in CI",
       "description": "CI only ran npm run check (linux node 20/22) and npm run test:unit (macos node 22); npm run test:browser (scripts/smoke-test.mjs + scripts/test-ui-features.mjs) never ran, so Play/Analysis/Puzzles/Library/Insights/Coordinates/Study/undo-request/auth-modal could regress unnoticed. Fix: new browser job in .github/workflows/ci.yml (ubuntu-latest, node 22, needs: [linux], npx playwright install --with-deps chromium) runs npm run test:browser with all runtime state redirected to ${{ runner.temp }} via CHESS_STATE_FILE/CHESS_JOURNAL_FILE/CHESS_DB_FILE/CHESS_JSON_ARCHIVE_FILE/CHESS_ACCOUNTS_DB_FILE/CHESS_ACCOUNTS_JSON_FILE/CHESS_SOCIAL_DB_PATH/CHESS_SOCIAL_JSON_PATH/CHESS_LEAGUES_DB_PATH/CHESS_LEAGUES_JSON_PATH/CHESS_STUDY_DB_PATH/CHESS_STUDY_JSON_PATH/CHESS_RATE_LIMIT_FILE plus CHESS_PORT=39281 and CHESS_RATE_LIMIT=100000; upload-artifact on failure (test-results/, playwright-report/, blob-report/). Triggers: push/PR to main, nightly schedule 17 4 * * *, workflow_dispatch. .gitignore now covers the artifact dirs. Reproduce locally: HANDOVER.md 16."
+    },
+    {
+      "id": "ci-json-fallback-on-sqlite-node",
+      "round": 6,
+      "status": "DONE",
+      "priority": "medium",
+      "title": "B17 Exercise the JSON persistence fallback on a sqlite-capable Node in CI",
+      "description": "The game-archive JSON adapter (src/game-archive.js, forceable via CHESS_ARCHIVE_FORCE_JSON=1 at game-archive.js:1370) was only exercised by the linux node-20 leg, where node:sqlite is absent; every node-22 leg selected sqlite, so the JSON backend could drift unguarded on a modern Node. Fix: isolated json-fallback job in .github/workflows/ci.yml (ubuntu-latest, node 22) mirroring the macos shape (checkout@v4 / setup-node@v4 / npm install) running npm run test:unit with CHESS_ARCHIVE_FORCE_JSON: 1; no needs: (browser's needs: [linux] untouched). test/p3-sqlite-selftest.js computes hasSqlite itself and asserts backendType === 'json' under the flag, so an ignored env var fails the suite. Honest scope: the env var forces only the game archive; accounts.js/social-store.js/study-store.js take a per-constructor forceJson with no env hook, so their JSON adapters are still covered only on node 20. Reproduce locally: HANDOVER.md 17."
     }
   ]
 }

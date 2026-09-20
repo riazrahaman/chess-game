@@ -38,6 +38,25 @@ jobs:
       - run: npm install
       - run: npm run test:unit
 
+  # Node 22 ships `node:sqlite`, so without this leg the game-archive JSON
+  # fallback (CHESS_ARCHIVE_FORCE_JSON=1) would never run on a modern Node —
+  # it would only be exercised by the node-20 linux leg, where node:sqlite is
+  # absent. Running the unit suite against the forced-JSON archive backend on a
+  # sqlite-capable Node keeps the two backends from drifting.
+  json-fallback:
+    name: Test (ubuntu-latest, node 22, JSON fallback)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Run unit suite against the forced-JSON archive backend
+        env:
+          CHESS_ARCHIVE_FORCE_JSON: 1
+        run: npm run test:unit
+
   browser:
     name: Browser (ubuntu-latest, node 22)
     runs-on: ubuntu-latest
