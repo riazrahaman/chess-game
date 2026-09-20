@@ -273,12 +273,41 @@
   function showPromotion(from, to) {
     const wrap = boardEl.parentElement;
     const overlay = h('div', { class: 'pz-promo', role: 'dialog', 'aria-label': 'Choose promotion piece' });
+    const cleanup = () => {
+      window.removeEventListener('keydown', onKey);
+      overlay.remove();
+      state.selected = null;
+      renderBoard();
+    };
+    const onKey = (ev) => {
+      if (ev.key === 'Escape') {
+        cleanup();
+      }
+    };
+    window.addEventListener('keydown', onKey);
     for (const type of ['q', 'r', 'b', 'n']) {
-      const btn = h('button', { type: 'button', 'aria-label': `Promote to ${type}`, onclick: () => { overlay.remove(); submitMove(from + to + type); } });
+      const btn = h('button', {
+        type: 'button',
+        'aria-label': `Promote to ${type}`,
+        onclick: () => {
+          window.removeEventListener('keydown', onKey);
+          overlay.remove();
+          submitMove(from + to + type);
+        }
+      });
       if (typeof window.pieceSvgMarkup === 'function') btn.innerHTML = window.pieceSvgMarkup(state.puzzle.solverColor, type);
       else btn.textContent = type.toUpperCase();
       overlay.appendChild(btn);
     }
+    const cancelBtn = h('button', {
+      type: 'button',
+      class: 'pz-promo-cancel',
+      'aria-label': 'Cancel promotion',
+      onclick: () => {
+        cleanup();
+      }
+    }, 'Cancel');
+    overlay.appendChild(cancelBtn);
     wrap.appendChild(overlay);
   }
 

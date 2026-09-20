@@ -50,7 +50,7 @@
     if (window.location.hash && window.location.hash.startsWith('#/')) {
       try {
         if (window.history && typeof window.history.replaceState === 'function') {
-          window.history.replaceState(null, '', window.location.pathname + (window.location.search || ''));
+          window.history.replaceState(window.history.state || null, '', window.location.pathname + (window.location.search || ''));
         }
       } catch (_) {}
     }
@@ -196,6 +196,13 @@
     },
     navigate(id, params) {
       if (typeof window === 'undefined') return;
+      if (currentId !== id) {
+        try {
+          if (window.history && typeof window.history.pushState === 'function') {
+            window.history.pushState({ viewId: id, params }, '', window.location.pathname);
+          }
+        } catch (_) {}
+      }
       show(id, params || {});
       stripHash();
     },
@@ -246,6 +253,11 @@
       }
     });
     window.addEventListener('hashchange', route);
+    window.addEventListener('popstate', (ev) => {
+      if (ev.state && ev.state.viewId) {
+        show(ev.state.viewId, ev.state.params || {}, false);
+      }
+    });
     const boot = () => route();
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
     window.Shell = Shell;

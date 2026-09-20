@@ -155,8 +155,8 @@ function competeEnterRoom(match) {
     if (match.seatToken && match.color) {
       window.localStorage.setItem('chess_seat_token_' + match.roomId, match.seatToken);
       window.localStorage.setItem('chess_seat_role_' + match.roomId, match.color);
-      window.sessionStorage.setItem('chess_seat_token', match.seatToken);
-      window.sessionStorage.setItem('chess_seat_role', match.color);
+      window.sessionStorage.setItem('chess_seat_token_' + match.roomId, match.seatToken);
+      window.sessionStorage.setItem('chess_seat_role_' + match.roomId, match.color);
     }
     if (match.pairingId) window.sessionStorage.setItem('chess_lobby_seen_' + match.pairingId, '1');
   } catch (_) { /* storage unavailable: the player can still claim a seat manually */ }
