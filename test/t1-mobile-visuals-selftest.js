@@ -50,6 +50,30 @@ function main() {
   assert(!uiContent.includes('makeMove('), 'ARCHITECTURAL INVARIANT: ui.js does not call makeMove(');
   assert(!uiContent.includes('createInitialBoard('), 'ARCHITECTURAL INVARIANT: ui.js does not call createInitialBoard(');
 
+  // 5. Modal overlays are centered fixed/inset dialogs.
+  // A modal id may head a compound selector (e.g. "#archive-modal, #import-pgn-modal, #auth-modal"),
+  // so match "#id" where nothing but the id follows the '#' up to the delimiter/brace — this rules out
+  // decoys like "#auth-modal-title" or "#auth-modal-error".
+  const ruleBodiesFor = (id) => {
+    const bodies = [];
+    const re = new RegExp(`#${id}(?![\\w-])[^{}]*\\{([^}]*)\\}`, 'gs');
+    let m;
+    while ((m = re.exec(indexContent)) !== null) bodies.push(m[1]);
+    return bodies;
+  };
+  const hasDeclarations = (body) =>
+    /position:\s*fixed;/.test(body) && /inset:\s*0(px)?\b/.test(body) &&
+    /display:\s*flex;/.test(body) && /justify-content:\s*center;/.test(body) && /align-items:\s*center;/.test(body);
+
+  const modalIds = ['promo-modal', 'game-end-overlay', 'archive-modal', 'import-pgn-modal', 'auth-modal'];
+  for (const id of modalIds) {
+    assert(ruleBodiesFor(id).some(hasDeclarations), `#${id} is a centered fixed overlay (position:fixed/inset:0/flex-center)`);
+  }
+
+  // The .hidden companion rule must actually hide the dialog, not merely exist.
+  const hiddenBodies = ruleBodiesFor('auth-modal.hidden');
+  assert(hiddenBodies.length > 0 && hiddenBodies.some((b) => /display:\s*none\b/.test(b)), '#auth-modal.hidden rule sets display:none');
+
   console.log(`\nResults: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
 }
