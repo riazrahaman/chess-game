@@ -38,10 +38,23 @@
   // Captured before ui.js rewrites "/" to "/game/<room>" via replaceState, so a
   // plain visit lands on Home while shared room links land on the board.
   const initialPath = (typeof window !== 'undefined' && window.location) ? window.location.pathname : '/';
+  let initialHash = (typeof window !== 'undefined' && window.location) ? window.location.hash : '';
   const views = new Map();
   const mounted = new Set();
   let currentId = null;
+  let currentParams = {};
   const listeners = new Set();
+
+  function stripHash() {
+    if (typeof window === 'undefined' || !window.location) return;
+    if (window.location.hash && window.location.hash.startsWith('#/')) {
+      try {
+        if (window.history && typeof window.history.replaceState === 'function') {
+          window.history.replaceState(null, '', window.location.pathname + (window.location.search || ''));
+        }
+      } catch (_) {}
+    }
+  }
 
   function parseHash(hash) {
     const h = typeof hash === 'string' ? hash : '';
@@ -104,6 +117,7 @@
     const view = views.get(id) || views.get('home');
     if (!view) return;
     const nextId = view.id;
+    currentParams = params || {};
     if (currentId && currentId !== nextId) {
       const prev = views.get(currentId);
       const prevEl = sectionFor(currentId);
@@ -142,7 +156,9 @@
 
   function route() {
     if (typeof window === 'undefined') return;
-    const parsed = parseHash(window.location.hash);
+    const hash = window.location.hash || initialHash;
+    initialHash = '';
+    const parsed = parseHash(hash);
     if (!parsed) {
       // No route yet: pages can pick their landing view (ui.js sets 'play' for
       // /game/<room> URLs so shared links open on the board).
@@ -150,6 +166,7 @@
       return; // in-page anchor (#workspace etc.): leave the current view alone
     }
     show(parsed.id, parsed.params);
+    stripHash();
   }
 
   const Shell = {
@@ -171,7 +188,7 @@
       }
       if (currentId === view.id && !mounted.has(view.id)) {
         currentId = null;
-        show(view.id, parseHash(window.location.hash)?.params || {});
+        show(view.id, currentParams);
       } else {
         renderNav();
       }
@@ -179,11 +196,8 @@
     },
     navigate(id, params) {
       if (typeof window === 'undefined') return;
-      let hash = '#/' + (id === 'home' ? '' : id);
-      if (params && Object.keys(params).length) {
-        hash += '?' + Object.entries(params).map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&');
-      }
-      if (window.location.hash === hash) route(); else window.location.hash = hash;
+      show(id, params || {});
+      stripHash();
     },
     current() { return currentId; },
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
@@ -219,16 +233,17 @@
     for (const k of KNOWN_VIEWS) {
       if (!views.has(k.id)) Shell.registerView({ id: k.id });
     }
-    // index.html carries <base href="/"> (so assets resolve under /game/<room>),
-    // which turns every href="#/x" into a full navigation to "/#/x". Intercept
-    // in-document hash links and set location.hash directly instead.
+    // Intercept in-document hash links and navigate in-memory while keeping URL static.
     document.addEventListener('click', ev => {
       if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
-      const a = ev.target && ev.target.closest ? ev.target.closest('a[href^="#"]') : null;
+      const a = ev.target && ev.target.closest ? ev.target.closest('a[href^="#/"]') : null;
       if (!a) return;
       ev.preventDefault();
-      const href = a.getAttribute('href');
-      if (window.location.hash === href) route(); else window.location.hash = href;
+      const href = a.getAttribute('href') || '';
+      const parsed = parseHash(href);
+      if (parsed) {
+        Shell.navigate(parsed.id, parsed.params);
+      }
     });
     window.addEventListener('hashchange', route);
     const boot = () => route();

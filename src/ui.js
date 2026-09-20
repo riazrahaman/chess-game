@@ -3697,7 +3697,7 @@ function initRoomRouting() {
     }
     try {
       if (window.history && typeof window.history.replaceState === 'function') {
-        window.history.replaceState(null, '', '/game/' + encodeURIComponent(personalRoom) + window.location.hash);
+        window.history.replaceState(null, '', '/game/' + encodeURIComponent(personalRoom) + (window.location.search || '') + (window.location.hash || ''));
       }
     } catch (_) {}
   }
@@ -3779,7 +3779,7 @@ if (typeof window !== 'undefined' && window.Shell && document.body) {
     }
     if (params.bot || params.invite) {
       // Clean the one-shot params so a reload doesn't re-trigger them.
-      try { history.replaceState(null, '', window.location.pathname + window.location.search + '#/play'); } catch (_) {}
+      try { history.replaceState(null, '', window.location.pathname + (window.location.search || '')); } catch (_) {}
     }
   });
 }
