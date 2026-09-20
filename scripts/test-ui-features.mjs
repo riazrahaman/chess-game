@@ -276,7 +276,21 @@ async function testUiFeatures() {
     }, m);
     await page.waitForTimeout(50);
   }
-  await page.waitForTimeout(300);
+  // Bounded wait for all 10 plies to land in the page's live history before
+  // scrubbing: the moves were sent via awaited direct fetch('/api/move') calls,
+  // but the page only learns about them through its own SSE/state poll
+  // (src/ui.js pollReferee), which lags behind on a loaded runner. If fewer
+  // than 10 plies have arrived client-side, jumpToPly(10) clamps target to
+  // liveHistory.length and falls back to the live board (queen still on d1),
+  // failing the ghost assertion below. This is the same class of race as B20
+  // (undo-request reset/moves) and uses the same proven synchronous
+  // waitForFunction predicate (Playwright does NOT await an async predicate —
+  // a returned Promise is always truthy — so the poll must be synchronous).
+  const expectedPly = testMoves.length;
+  await page.waitForFunction(n => window.getLivePly() === n, expectedPly, { timeout: 5000, polling: 50 }).catch(async () => {
+    const ply = await page.evaluate(() => window.getLivePly()).catch(() => '(unavailable)');
+    throw new Error(`Expected ${expectedPly} plies before history scrubbing, got ${ply}`);
+  });
 
   // Jump to ply 0 then jump to ply 10 (Qxd4)
   await page.evaluate(() => window.jumpToPly(0));

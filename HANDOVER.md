@@ -737,3 +737,31 @@ JS
 CHESS_PORT=39281 CHESS_RATE_LIMIT=100000 npm run test:browser   # expect exit 0 + both sentinels
 ```
 
+## 22. FIX — History-scrub browser flake: jump raced the client state sync (branch `fix/scrub-live-ply-race`, 2026-09-20)
+
+| Task | Owner | Branch | Status | Summary | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| `fix-scrub-live-ply-race` | builder | `fix/scrub-live-ply-race` | DONE | The History-Scrubbing block of `scripts/test-ui-features.mjs` ends an otherwise-passing run intermittently on CI: `Testing History Scrubbing DOM Reconcile & Ghost Piece prevention...` is reached, then the ghost assertion throws (`Ghost white queen remained on d1 after jumping to ply 10`). Root cause is the same class as B18/B19/B20 — a fixed sleep racing an async client round-trip, **not** a rendering or referee bug. The ten plies are sent by **awaited** direct `fetch('/api/move')` calls (so the server applies them), but the page only learns of them through its own SSE / `pollReferee` state sync (`src/ui.js`), which lags behind. The old fixed `await page.waitForTimeout(300)` could elapse before all ten plies had landed in the page's `liveHistory`; `jumpToPly(10)` then clamped the target to `liveHistory.length` and fell back to the live board, on which the white queen is still on d1 — so the very next `ghostCheck` read failed. Fix: replace the sleep with a bounded synchronous `page.waitForFunction(n => window.getLivePly() === n, expectedPly, { timeout: 5000, polling: 50 })`, where `expectedPly = testMoves.length`; its `.catch` reads the actual ply and throws `Expected ${expectedPly} plies before history scrubbing, got ${ply}`. The predicate is deliberately synchronous — Playwright does not await an async predicate (a returned Promise is always truthy), the same fail-open shape B20 called out. No assertion was weakened. | Mutation proof on a `/tmp` copy of the script (wait target forced to `999`): the scrub step fails with `Expected 999 plies before history scrubbing, got 10`, exit 1, while the repo file still reads `testMoves.length`. Full `npm run test:browser` under the exact CI env block (all `CHESS_*` state in a fresh `mktemp -d`, `CHESS_PORT=39281`, `CHESS_RATE_LIMIT=100000`) **twice**, fresh temp dir per run: both exit 0 and print `✔ Passed: History scrubbing correctly cleans vacated squares without ghost duplicate pieces`, `SMOKE TEST PASSED…`, and `ALL UI & AI FEATURE TESTS PASSED SUCCESSFULLY with ZERO ERRORS!`; `:39281` free after each. Gates `t0-deadcode` 27/0, `wave3-hygiene` 87, `reachability` 49/49 (KNOWN_DARK 10), `about` 12, `npm run lint` 0. Only `scripts/test-ui-features.mjs` changed. |
+
+### Root cause
+
+The move loop issues `await fetch('/api/move' + q, …)` inside `page.evaluate`, so each command is applied server-side before the loop advances. But the **page** is a separate consumer: it mirrors the referee through SSE plus the `pollReferee` state poll (`src/ui.js`), and its `liveHistory` (read by `getLivePly()`, `src/ui.js:827`, exported at `src/ui.js:3685`) is only as current as the last state it received. The fixed `waitForTimeout(300)` is a bet that ten SSE/poll updates arrive within 300 ms; on a loaded runner they do not. `jumpToPly(10)` clamps its target to `liveHistory.length`, so a short history means the scrubber never advances past the live board (queen still on d1) and the ghost assertion fires. The race is in the **test's synchronization with the page**, not in `jumpToPly` or the diff renderer.
+
+### Exact edits
+
+- `scripts/test-ui-features.mjs` — the fixed `await page.waitForTimeout(300)` after the ten-move loop became a bounded synchronous `page.waitForFunction(n => window.getLivePly() === n, expectedPly, { timeout: 5000, polling: 50 })` with `const expectedPly = testMoves.length;`. Its `.catch` evaluates `window.getLivePly()` and throws `Expected ${expectedPly} plies before history scrubbing, got ${ply}` (falling back to `'(unavailable)'` if the evaluate itself fails). This is the same proven shape as the B20 wait (`window.getLivePly() === 2`).
+- `HANDOVER.md` §22, `docs/06-world-class-roadmap.md` B22, `docs/kanban-tasks.json` card `fix-scrub-live-ply-race`.
+
+### Note
+
+The other **unrelated** fixed sleeps in the file (the `waitForTimeout(50)` between moves, the `200` after the reset, the `150`/`200` around the two `jumpToPly` calls, and every sleep outside this block) were left untouched per scope — the fix synchronizes only the one readiness the ghost assertion depends on. The assertion itself (`ghostCheck.d1 !== null`, etc.) is unchanged, so the step still proves the vacated squares are cleaned; the new wait only removes the race that let it observe a not-yet-synced board.
+
+### Reproduce locally
+```bash
+# CI-shaped env block (all runtime state under a mktemp -d), then:
+CHESS_PORT=39281 CHESS_RATE_LIMIT=100000 npm run test:browser   # expect exit 0 + the scrub PASS line
+# Mutation proof (never edit the repo): copy the script into the repo dir
+# (Playwright resolves only from ./node_modules), force the wait target to 999,
+# run it, observe "Expected 999 plies before history scrubbing, got 10" (exit 1),
+# then delete the copy and confirm the repo still reads testMoves.length.
+```
