@@ -22,8 +22,28 @@ async function waitForServer(timeoutMs) {
   return false;
 }
 
+// Shared teardown so BOTH the success path and the top-level failure path kill
+// the spawned server. The old top-level `.catch` called process.exit(1) before
+// serverProc.kill(), leaking a `node server.js` holding :39281 — the next run
+// then logged "Server already running." and cascaded. Idempotent and never
+// throws so both paths can run it.
+let serverProc = null;
+let browser = null;
+
+async function teardown() {
+  if (serverProc) {
+    const proc = serverProc;
+    serverProc = null;
+    try { proc.kill('SIGTERM'); } catch (_) {}
+  }
+  if (browser) {
+    const b = browser;
+    browser = null;
+    try { await b.close(); } catch (_) {}
+  }
+}
+
 async function testUiFeatures() {
-  let serverProc = null;
   if (!(await isServerUp())) {
     console.log('Starting chess server on port 39281...');
     serverProc = spawn('node', ['server.js'], {
@@ -39,7 +59,7 @@ async function testUiFeatures() {
   }
 
   console.log('Launching browser to test UI & AI features...');
-  const browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true });
   const context = await browser.newContext();
   const page = await context.newPage();
 
@@ -304,7 +324,46 @@ async function testUiFeatures() {
     const q = (typeof getCurrentRoomId === 'function' && getCurrentRoomId() !== 'default') ? `?room=${encodeURIComponent(getCurrentRoomId())}` : '';
     await fetch('/api/reset' + q, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   });
-  await page.waitForTimeout(200);
+  // Bounded Node-side poll for the reset to actually be visible in the
+  // referee's `/api/state` before claiming seats / sending moves.
+  //
+  // The `page.evaluate` above DOES await its `/api/reset` fetch, so the reset
+  // command is applied before this starts; the residual race is the *page*
+  // learning about the fresh position via its own state poll, and the first
+  // test move `e2e4` being illegal if the room is still at the scrub-test
+  // position with Black to move (the server would answer 400 and the
+  // console-error gate would fail the run). Poll `/api/state` (the referee's
+  // source of truth, same data the UI renders from) until it shows the fresh
+  // position: 0 plies, White to move, not game over.
+  //
+  // NOTE: this is a plain `page.evaluate` returning a real Promise to Node,
+  // NOT `page.waitForFunction(async …)`. Playwright does not await an async
+  // waitForFunction predicate (a returned Promise is always-truthy), so that
+  // shape silently resolves on the first poll and gates nothing.
+  const resetDeadline = Date.now() + 5000;
+  let resetState = null;
+  for (;;) {
+    resetState = await page.evaluate(async () => {
+      const q = (typeof getCurrentRoomId === 'function' && getCurrentRoomId() !== 'default') ? `?room=${encodeURIComponent(getCurrentRoomId())}` : '';
+      try {
+        const res = await fetch('/api/state' + q, { cache: 'no-store' });
+        return res.ok ? await res.json() : null;
+      } catch (_) {
+        return null;
+      }
+    }).catch(() => null);
+    const fresh = resetState
+      && Array.isArray(resetState.history)
+      && resetState.history.length === 0
+      && !!resetState.board
+      && resetState.board.turn === 'white'
+      && resetState.gameOver !== true;
+    if (fresh) break;
+    if (Date.now() >= resetDeadline) {
+      throw new Error(`Room never reset to a fresh position (0 plies, White to move) before the undo-test moves; /api/state=${JSON.stringify(resetState)}`);
+    }
+    await page.waitForTimeout(50);
+  }
 
   // Page claims black through its own helper so the UI holds that seat token.
   const pageSeated = await page.evaluate(() => window.claimSeat('black'));
@@ -336,7 +395,16 @@ async function testUiFeatures() {
     await send('e2e4', whiteToken);
     await send('e7e5', blackToken);
   }, { room: undoRoomId, whiteToken, blackToken });
-  await page.waitForTimeout(300);
+  // Bounded wait for both moves to land instead of a fixed sleep: the page
+  // learns about them via its next state poll, so racing it read a stale ply
+  // count. This predicate is synchronous, so `waitForFunction` genuinely awaits
+  // it (unlike an async predicate, whose Promise is always truthy). Poll the
+  // page's own live ply count (the same source the assertion below uses) and
+  // throw with the real count if it never reaches 2.
+  await page.waitForFunction(() => window.getLivePly() === 2, undefined, { timeout: 5000, polling: 50 }).catch(async () => {
+    const ply = await page.evaluate(() => window.getLivePly()).catch(() => '(unavailable)');
+    throw new Error(`Expected 2 plies before undo request, got ${ply}`);
+  });
   const undoPlyBefore = await page.evaluate(() => window.getLivePly());
   if (undoPlyBefore !== 2) throw new Error(`Expected 2 plies before undo request, got ${undoPlyBefore}`);
 
@@ -640,6 +708,7 @@ async function testUiFeatures() {
   }
 
   await browser.close();
+  browser = null;
   // Clean up server state for subsequent tests
   try {
     await fetch(`${URL}api/bot`, {
@@ -650,14 +719,15 @@ async function testUiFeatures() {
     await fetch(`${URL}api/reset`, { method: 'POST' });
   } catch (_) {}
 
-  if (serverProc) {
-    try { serverProc.kill('SIGTERM'); } catch (_) {}
-  }
-
   console.log('ALL UI & AI FEATURE TESTS PASSED SUCCESSFULLY with ZERO ERRORS!');
 }
 
-testUiFeatures().catch(err => {
+// Tear down (browser + spawned server) on BOTH paths, then exit. The success
+// path has already closed the browser and nulled serverProc; teardown() is
+// idempotent, so this is the single exit gate.
+testUiFeatures().then(() => {
+  return teardown().then(() => process.exit(0));
+}).catch(err => {
   console.error('TEST FAILED:', err);
-  process.exit(1);
+  teardown().then(() => process.exit(1));
 });
