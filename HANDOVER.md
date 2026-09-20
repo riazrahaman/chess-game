@@ -889,3 +889,43 @@ CHESS_PORT=39281 CHESS_RATE_LIMIT=100000 npm run test:browser   # expect exit 0 
 # then delete the copy and confirm the repo md5 is unchanged.
 ```
 
+
+## 24. FEAT — App version beside the brand, single-sourced from package.json (branch `feat-version-beside-brand`, 2026-09-20)
+
+| Task | Owner | Branch | Status | Summary | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| `feat-version-beside-brand` | builder | `feat/version-beside-brand` | DONE | The brand header showed "Chess UI" with **no version**, and the version lived in two hardcoded places that had never moved: `package.json` (`1.0.0`) and `src/ui-about.js` (`v1.0.0`). The server never read `package.json`, and there was no `/api/version`. Fix: (1) bump `package.json` version `1.0.0` → `1.1.0`; (2) `server.js` reads the version **once at boot** (`const APP_VERSION = require('./package.json').version;`) and exposes an unauthenticated `GET /api/version` → `{ok:true, version}` (added next to the other `/api/` GET routes; `/api/state`'s contract is untouched); (3) the brand block gains `<span id="app-version" class="brand-version" aria-label="Application version"></span>` inside the `<h1>`, styled subtly (muted, 11px, mono) via a new `.brand-version` rule beside `.brand p`; (4) `src/shell.js` (always loaded, self-initialising, already has DOM access) populates `#app-version` from `GET /api/version` with `textContent` only (no innerHTML), so the endpoint cannot inject markup; (5) `src/ui-about.js` no longer hardcodes a version — it renders `#about-version` from the same `#app-version` element that shell.js fills (the About module is forbidden from calling `fetch()` by its own selftest, so it reads the shared DOM source instead), falling back to `v—` only if the version fetch never resolves (and, after the review fix, shell.js also fills `#about-version` once the fetch lands, so a direct/bookmarked `#/about` deep link shows the real version rather than the fallback). The About unit-suite count is unchanged at 80 (no new suite file); `test/about-selftest.js` gained a 13th test that statically pins the single-source chain (About has `#about-version` and no version literal; `server.js` reads `package.json` and exposes `/api/version`; `index.html` has `#app-version` + `.brand-version`; `shell.js` fetches `/api/version` and uses `textContent`). | `node --check` on all five edited JS files → 0. `curl -s /api/version` on a tmpdir server → `{"ok":true,"version":"1.1.0"}`; the rendered page contains `id="app-version"`. MUTATION PROOF: with `package.json` temporarily set to `9.9.9` the endpoint returned `{"ok":true,"version":"9.9.9"}` (proving it reads the file, not a hardcoded string), then `package.json` was restored to `1.1.0` and the endpoint returned `1.1.0` again. Gates: `reachability` 49 passed (KNOWN_DARK 10), `wave3-hygiene` 87, `t0-deadcode` 27/0, `about` 13 passed, `npm run lint` exit 0. Server killed; port free. Changed: `package.json`, `server.js`, `index.html`, `src/shell.js`, `src/ui-about.js`, `test/about-selftest.js`, docs. |
+
+### Root cause
+
+The version was maintained by hand in two files (`package.json:3` and the About skeleton) and displayed only on
+the About page — never in the brand header. Nothing read `package.json` at runtime, so the two literals could
+(and did) drift from any future bump.
+
+### Exact edits
+
+- `package.json` — `"version": "1.0.0"` → `"1.1.0"` (no dependency or script changes).
+- `server.js` — `const APP_VERSION = require('./package.json').version;` near the top; a new
+  `if (req.method === 'GET' && urlPath === '/api/version') { sendJson(res, 200, { ok: true, version: APP_VERSION }); return; }`
+  branch alongside the other `/api/` GET routes. `/api/state` is unchanged.
+- `index.html` — `<h1>Chess UI <span id="app-version" class="brand-version" …></span></h1>`; a new
+  `.brand-version` CSS rule (muted, 11px, mono) next to `.brand p`. No inline handlers, no inline script.
+- `src/shell.js` — a `populateAppVersion()` IIFE at boot: reads `#app-version`, `fetch('/api/version')`, writes
+  `'v' + data.version` via `textContent`, filling BOTH `#app-version` and `#about-version` (the latter so a pre-mounted `#/about` deep link is not stuck on the fallback); leaves them on the fallback if the fetch never resolves. Self-initialising (no extra call site).
+- `src/ui-about.js` — the hardcoded `<p class="about-version">v1.0.0</p>` becomes `<p class="about-version" id="about-version">`
+  and `mount()` fills it from `#app-version`'s `textContent` (same single source); `v—` is the fallback before the fetch resolves, and shell.js writes `#about-version` directly once it does.
+- `test/about-selftest.js` — a 13th test asserting the single-source chain so a future hardcoded version or a
+  dropped endpoint fails the suite.
+
+### Reproduce locally
+
+```bash
+# Endpoint reads package.json at boot:
+T=$(mktemp -d); CHESS_PORT=39355 CHESS_STATE_FILE=$T/s.json CHESS_JOURNAL_FILE=$T/j.jsonl \
+  CHESS_DB_FILE=$T/g.db CHESS_JSON_ARCHIVE_FILE=$T/a.json node server.js &
+curl -s http://127.0.0.1:39355/api/version    # {"ok":true,"version":"1.1.0"}
+# Mutation proof (restore afterwards):
+cp package.json /tmp/pkg.bak && sed -i '' 's/"1.1.0"/"9.9.9"/' package.json
+# restart the server → {"ok":true,"version":"9.9.9"}; then:
+cp /tmp/pkg.bak package.json
+```
