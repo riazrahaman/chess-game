@@ -967,3 +967,32 @@ Found by an external review handoff (baseline `55239e1`). The list path (`GET /a
 - `node test/study-chapters-selftest.js` → 17 passed, 0 failed; `node test/about-selftest.js` → Passed: 13; `node test/t0-deadcode-selftest.js` → 27/0; `node test/reachability-selftest.js` → 49 (KNOWN_DARK 10); `node test/wave3-hygiene-selftest.js` → 87; `npm run lint` → 0.
 - The suite's own positive control proves the leak was real: before the resolver, signed-in B / anonymous got 200 on all three GET paths and 201 on Study import (all three private-fixture moves returned).
 
+
+## 26. FIX — Gate 4 self-test harness: the vm window mock could not load ui.js, so the suite crashed after 8 static passes (branch `fix/gate4-selftest-harness`, 2026-09-21)
+
+`node test/gate4-selftest.js` died after its 8 static HTML/token-scan assertions with:
+
+```
+TypeError: window.addEventListener is not a function
+    at evalmachine.<anonymous>:1909
+  window.addEventListener('pointermove', handlePointerMove, { passive: false });
+```
+
+### Root cause (mock gap, not a ui.js defect)
+
+The harness's `window` mock in `test/gate4-selftest.js` was exactly `{ matchMedia: () => ({ matches: false }) }`. But `src/ui.js` registers pointer listeners **at load time** (C3 pointer support, `src/ui.js:1908-1912`): `window.addEventListener('pointermove', handlePointerMove, { passive: false })` plus `pointerup` and `pointercancel`. Inside the vm context the mock had no `addEventListener`, so the module threw during `vm.runInContext` and every behavioral assertion after line 186 of the harness was unreachable. The suite was wired into `lint` only as `node --check test/gate4-selftest.js` (syntax-only, can never catch this) and was **not wired into `test:unit` at all** — so the crash was invisible to `npm run check`.
+
+### Changes (no assertion changed, nothing skipped; only the vm harness, the package.json wiring and the About suite-count stat — a display-only line — were touched)
+
+- `test/gate4-selftest.js` `window` mock now provides `addEventListener`/`removeEventListener` backed by a per-harness `windowListeners` registry (the same shape `test/p1-scrubber-selftest.js` and `test/p2-multipv-selftest.js` already use, consistent with MockElement's listener registry). The load path needed nothing else from `window` (`requestAnimationFrame` is only touched behind `canAnimate()`, which stays false without an rAF global).
+- Second mock gap found **by running**, after the first fix unblocked the load: `submitMoveToReferee` auto-claims a seat when none is held (`src/ui.js:798-802`), and that `/api/seat/claim` fetch consumed the harness's own pending `/api/move` fetch stub, wedging `commandPending` and failing the Space/retry/premove behavioral assertions. `window.sessionStorage`/`window.localStorage` mocks now exist (sibling-suite pattern) and are seeded with `chess_seat_token_default`/`chess_seat_role_default` so load-time `initSeatAuth` adopts the seat and the auto-claim never fires.
+- WIRING: `node test/gate4-selftest.js` appended to the END of BOTH `test:unit` and `lint` in `package.json` (the existing `node --check test/gate4-selftest.js` in `lint` is retained). Suite count 81 → 82, and the About unit-suite stat moved 81 → 82 in both `src/ui-about.js` (rendered stat) and `test/about-selftest.js` (expected count).
+- Docs: this section, `docs/06-world-class-roadmap.md` B26, `docs/kanban-tasks.json` card `fix-gate4-selftest-harness` (appended textually).
+
+### Evidence
+
+- Before: `node test/gate4-selftest.js` → 8 PASS lines then the TypeError, **exit 1**.
+- After: `node test/gate4-selftest.js` → **43 passed, 0 failed, exit 0** (all 43 assertions now print; 8 static + 35 behavioral).
+- Mutation proof (crash re-introduced on a scratch copy, never the repo): with the window mock reverted to the original `{ matchMedia: ... }` the copy fails at `evalmachine.<anonymous>:1909` with the same `TypeError`, **exit 1**; the real repo file simultaneously passes 43/0.
+- `node test/about-selftest.js` → Passed: 13 (expected count 82); `node test/t0-deadcode-selftest.js` → 27 passed, 0 failed; `node test/reachability-selftest.js` → 49; `node test/wave3-hygiene-selftest.js` → 87.
+- `npm run lint` → exit 0 (now also runs the gate4 suite, not just `--check`).
