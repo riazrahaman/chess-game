@@ -31,6 +31,7 @@ process.env.CHESS_JOURNAL_FILE = path.join(TMP, '.referee-journal.jsonl');
 process.env.CHESS_DB_FILE = path.join(TMP, 'games.db');
 process.env.CHESS_JSON_ARCHIVE_FILE = path.join(TMP, '.games-archive.json');
 process.env.CHESS_ACCOUNTS_DB_FILE = path.join(TMP, 'accounts.db');
+process.env.CHESS_ACCOUNTS_JSON_FILE = path.join(TMP, '.accounts.json');
 process.env.CHESS_SOCIAL_DB_PATH = path.join(TMP, 'social.db');
 process.env.CHESS_ROOM_GC = '0'; // never let a scheduler run inside a test
 delete process.env.CHESS_ADMIN_TOKEN;

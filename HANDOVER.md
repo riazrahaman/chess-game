@@ -284,6 +284,18 @@ installs to refetch `index.html`); brilliant/tablebase achievement events can on
 games carry real player names; `scripts/test-ui-features.mjs` has no Puzzles/Library/Insights/Missed-tactics steps
 yet (DoD item 4); a 300-ply first missed-tactics request can take ~60 s (serial engine).
 
+**AccountsManager JSON-path precedence (branch `fix/accounts-node20-isolation`).** `node:sqlite` exists only on
+Node ≥ 22.5. The `AccountsManager` JSON fallback used to resolve `options.jsonPath || DEFAULT_JSON_PATH`, so on
+Node 20 a caller-supplied `dbPath` (or string path) was silently dropped and every manager shared the one
+`src/.accounts.json` — the same class of cross-contamination `game-archive.js` already fixed (see its
+precedence-ladder comment at `game-archive.js:1386-1406`). `accounts.js` now mirrors that ladder exactly:
+`typeof options === 'string'` → that string; `options.jsonPath` → verbatim; resolved `dbPath === ':memory:'` →
+`:memory:`; explicit `options.dbPath` → `dbPath + '.json'`; otherwise `DEFAULT_JSON_PATH`. Production
+(`new AccountsManager()` with no options) still resolves to `DEFAULT_JSON_PATH`, and `:memory:` adapters stay
+in-memory. Test suites now also set `CHESS_ACCOUNTS_JSON_FILE` under `os.tmpdir()` (defense in depth), and
+`test/accounts-isolation-selftest.js` pins all six input shapes plus the no-shared-state guarantee on both Node 20
+and Node ≥ 22.5.
+
 ## 9. POST-WAVE 3 — Gameplay correctness (branch `feat/g4-undo-request`, 2026-09-19)
 
 | Card | Owner | Commit | What landed | Tests |
@@ -433,3 +445,24 @@ change is justified**, so `src/ui.js` is untouched.
 - `docs/06-world-class-roadmap.md`, `docs/05-file-inventory.md`, this file — M5 status.
 
 No commit / push / kanban change (builder was the only writer).
+
+## 12. Static URL Navigation Across Site Shell Sections (branch `feat/static-url-navigation`, 2026-09-20)
+
+| Task ID | Owner | Branch | Status | What landed | Tests |
+|---|---|---|---|---|---|
+| `static-url-navigation` | orchestrator-admin | `feat/static-url-navigation` | DONE | In-memory SPA shell navigation matching `agent-kanban.riazrahaman.com`. URL remains static at `/game/<room>` (or `/`) without hash pollution when switching between sections (Play, Analysis, Puzzles, Coordinates, Library, Study, Compete, Profile, About, Home). Deep links on initial load are respected and then cleanly stripped via `history.replaceState`. | `test/static-url-navigation-selftest.js` (8 assertions), full `test:unit` (77 suites), Playwright smoke & feature tests |
+
+### Architecture & Fix Details
+1. **`src/shell.js`**:
+   - `Shell.navigate(id, params)` switches views directly in memory (`show(id, params)`), calls `stripHash()`, and avoids setting `window.location.hash`.
+   - Global click listener intercepts in-document `a[href^="#/"]` links, calls `preventDefault()`, and delegates to `Shell.navigate(parsed.id, parsed.params)`.
+   - In-page anchors (e.g. `#workspace`) do not start with `#/` and are left to native browser scrolling.
+   - On boot, `route()` reads `window.location.hash || initialHash` to respect deep links, displays the view, and cleanly strips the hash via `history.replaceState`.
+2. **`src/ui.js`**:
+   - `initRoomRouting()` preserves initial hash during the `/` → `/game/<room>` redirect so `shell.js` boot can read it before stripping.
+   - One-shot parameter cleanups (`params.bot`, `params.invite`) use `window.location.pathname + (window.location.search || '')` instead of forcing `#/play`.
+3. **Audit & Safety**:
+   - Gate 4 invariant: zero calls to `makeMove(` or `createInitialBoard(`.
+   - Unit suites count updated to 77 in `src/ui-about.js`, `test/about-selftest.js`, and `package.json`.
+   - `scripts/smoke-test.mjs` and `scripts/test-ui-features.mjs` verified passing in Chromium with zero errors.
+

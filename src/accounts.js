@@ -348,19 +348,42 @@ class AccountsManager {
     this.memory = new MemoryAccountsAdapter();
     this.storage = null;
 
+    const dbPath = typeof options === 'string' ? options : (options.dbPath || DEFAULT_DB_PATH);
+
     if (Object.prototype.hasOwnProperty.call(options, 'storage')) {
       this.storage = options.storage;
     } else if (options.forceMemory !== true) {
       if (options.forceJson !== true) {
         try {
-          this.storage = new SqliteAccountsAdapter(options.dbPath || DEFAULT_DB_PATH);
+          this.storage = new SqliteAccountsAdapter(dbPath);
         } catch (_) {
           this.storage = null;
         }
       }
       if (!this.storage) {
+        // Node < 22.5 has no node:sqlite, so the JSON fallback must NOT collapse
+        // a caller's explicit dbPath/jsonPath onto the one shared DEFAULT_JSON_PATH
+        // — otherwise two managers built with different dbPaths silently share a
+        // single file and cross-contaminate accounts. Honour the caller's intent:
+        //   - string options             → that string is the JSON path
+        //   - explicit options.jsonPath  → use it verbatim
+        //   - dbPath ':memory:'          → keep the adapter in memory (no file)
+        //   - explicit options.dbPath    → derive a distinct "<dbPath>.json" file
+        //   - no explicit path           → DEFAULT_JSON_PATH (production default)
+        let jsonPath;
+        if (typeof options === 'string') {
+          jsonPath = options;
+        } else if (options.jsonPath) {
+          jsonPath = options.jsonPath;
+        } else if (dbPath === ':memory:') {
+          jsonPath = ':memory:';
+        } else if (options.dbPath) {
+          jsonPath = dbPath + '.json';
+        } else {
+          jsonPath = DEFAULT_JSON_PATH;
+        }
         try {
-          this.storage = new JsonAccountsAdapter(options.jsonPath || DEFAULT_JSON_PATH);
+          this.storage = new JsonAccountsAdapter(jsonPath);
         } catch (_) {
           this.storage = null;
         }
