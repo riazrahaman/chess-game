@@ -470,6 +470,14 @@
       "priority": "medium",
       "title": "B17 Exercise the JSON persistence fallback on a sqlite-capable Node in CI",
       "description": "The game-archive JSON adapter (src/game-archive.js, forceable via CHESS_ARCHIVE_FORCE_JSON=1 at game-archive.js:1370) was only exercised by the linux node-20 leg, where node:sqlite is absent; every node-22 leg selected sqlite, so the JSON backend could drift unguarded on a modern Node. Fix: isolated json-fallback job in .github/workflows/ci.yml (ubuntu-latest, node 22) mirroring the macos shape (checkout@v4 / setup-node@v4 / npm install) running npm run test:unit with CHESS_ARCHIVE_FORCE_JSON: 1; no needs: (browser's needs: [linux] untouched). test/p3-sqlite-selftest.js computes hasSqlite itself and asserts backendType === 'json' under the flag, so an ignored env var fails the suite. Honest scope: the env var forces only the game archive; accounts.js/social-store.js/study-store.js take a per-constructor forceJson with no env hook, so their JSON adapters are still covered only on node 20. Reproduce locally: HANDOVER.md 17."
+    },
+    {
+      "id": "fix-study-create-flake",
+      "round": 6,
+      "status": "DONE",
+      "priority": "high",
+      "title": "B18 Fix the Study create-to-list flake in the new browser job",
+      "description": "CI run 35501617040 (the first real browser job run, added by B16) failed at scripts/test-ui-features.mjs:546 with 'created Study chapter did not appear in the list' although POST /api/study returned 201. Root cause was client-side stale-response ordering, not a server bug: src/ui-study.js mount() AND show() each call loadChapters(), so the first #/study navigation fired two concurrent cookie-less list GETs (the server mints a fresh study_player cookie per request in routes-study.js viewerOf, line 80); the create handler's non-awaited, unguarded refresh could be clobbered by those slow stale empty responses resolving afterwards (rows 1 -> 0). Fix: (1) optimistically insert the returned res.chapter into state.chapters and re-render, (2) a monotonic listSeq guard that discards any superseded response, (3) a listPromise that de-dupes the mount()/show() double GET so first contact mints ONE guest identity. Harden the browser assertion: replace the fixed 700 ms sleep + one-shot count with a bounded 5 s / 50 ms waitForFunction keyed on the created title (still requires the real row), plus bounded waits for the viewer panel and the server-validated quiz reply. Reproduced deterministically with a Playwright route.fulfill probe holding the two first-contact list responses 2.5 s: old code rows=0 text='No chapters yet.', fixed code rows=1 throughout; reverting only ui-study.js via git stash restores rows=0. Full npm run test:browser passed 3x under the CI env block. Guard: the browser step is the coverage; server identity scoping is already covered by test/study-chapters-selftest.js (17/17). Reproduce locally: HANDOVER.md section 18."
     }
   ]
 }

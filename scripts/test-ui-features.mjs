@@ -535,16 +535,41 @@ async function testUiFeatures() {
 
   // Create a FEN quiz chapter through the UI.
   await page.locator('[id="study-kind-tabs"] button[data-kind="fen"]').click();
-  await page.locator('[id="study-fen-title"]').fill('UI smoke: queen\'s pawn');
+  const createdStudyTitle = 'UI smoke: queen\'s pawn';
+  await page.locator('[id="study-fen-title"]').fill(createdStudyTitle);
   await page.locator('[id="study-fen"]').fill('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
   await page.locator('[id="study-fen-line"]').fill('1. d4 d5');
   await page.locator('[id="study-quiz-toggle"]').check();
   await page.locator('[id="study-create-btn"]').click();
-  await page.waitForTimeout(700);
 
+  // Bounded poll (up to 5 s) for the created chapter's row. A fixed sleep is
+  // flaky on cold/slow runners and under the mount()/show() double-GET race;
+  // we require the row for THIS title — a pre-existing row must not satisfy it.
+  let createdRowFound = true;
+  try {
+    await page.waitForFunction((title) => {
+      const list = document.getElementById('study-list');
+      if (!list) return false;
+      return [...list.querySelectorAll('li')].some(li => (li.textContent || '').includes(title));
+    }, createdStudyTitle, { timeout: 5000, polling: 50 });
+  } catch (_) {
+    createdRowFound = false;
+  }
+  if (!createdRowFound) {
+    const listText = await page.evaluate(() => {
+      const list = document.getElementById('study-list');
+      return list ? (list.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 200) : '(no list)';
+    });
+    throw new Error(`created Study chapter did not appear in the list (list: ${JSON.stringify(listText)})`);
+  }
   const studyRows = await page.locator('[id="study-list"] li button').count();
   if (studyRows < 1) throw new Error('created Study chapter did not appear in the list');
 
+  // The viewer opens from the same POST callback; wait for it instead of racing it.
+  await page.waitForFunction(() => {
+    const p = document.getElementById('study-viewer-panel');
+    return !!(p && !p.hidden && window.UIStudy && window.UIStudy.state && window.UIStudy.state.current);
+  }, undefined, { timeout: 5000, polling: 50 }).catch(() => {});
   const viewerVisible = await page.evaluate(() => {
     const p = document.getElementById('study-viewer-panel');
     return p && !p.hidden;
@@ -555,7 +580,11 @@ async function testUiFeatures() {
   const quizFenBefore = await page.evaluate(() => window.UIStudy && window.UIStudy.state.quizFen);
   await page.locator('[id="study-board"] [data-square="d2"]').click();
   await page.locator('[id="study-board"] [data-square="d4"]').click();
-  await page.waitForTimeout(600);
+  // Bounded poll for the server-validated reply rather than a fixed sleep.
+  await page.waitForFunction((before) => {
+    const s = window.UIStudy && window.UIStudy.state;
+    return !!(s && s.guessMoves.length === 1 && s.quizFen && s.quizFen !== before);
+  }, quizFenBefore, { timeout: 5000, polling: 50 }).catch(() => {});
   // Positive assertion: the correct guess advanced the line — one committed
   // guess recorded, the position changed, and the quiz is still concealed.
   const afterGuess = await page.evaluate(() => {

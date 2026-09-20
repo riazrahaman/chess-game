@@ -505,8 +505,39 @@
     if (el) { el.textContent = msg; el.className = 'st-status' + (tone ? ' ' + tone : ''); }
   }
 
-  function loadChapters() {
-    api('/api/study').then(res => {
+  function renderChapterList() {
+    const list = document.getElementById('study-list');
+    if (!list) return;
+    list.innerHTML = '';
+    if (state.chapters.length === 0) { list.appendChild(h('li', { class: 'st-muted', text: 'No chapters yet. Create one on the left.' })); return; }
+    for (const ch of state.chapters) {
+      const li = h('li');
+      const left = h('div');
+      left.appendChild(h('div', { text: ch.title }));
+      left.appendChild(h('div', { class: 'st-meta', text: `${KIND_LABELS[ch.kind] || ch.kind} · ${ch.totalMoves} moves · ${fmtDate(ch.updatedAt)}` }));
+      if (ch.quiz) left.appendChild(h('span', { class: 'st-badge', text: 'quiz' }));
+      if (ch.owned) left.appendChild(h('span', { class: 'st-badge', text: 'owned' }));
+      const open = h('button', { type: 'button', text: 'Open', onclick: () => openChapter(ch.id) });
+      li.appendChild(left);
+      li.appendChild(open);
+      list.appendChild(li);
+    }
+  }
+
+  // listSeq guards against out-of-order responses: a slow GET issued before a
+  // create (possibly without the guest cookie) must not clobber the fresh list
+  // the create refresh produced. listPromise dedupes the mount()+show() pair on
+  // first navigation so two concurrent first-contact GETs cannot race and mint
+  // two different guest identities (the chapter would then be invisible).
+  let listSeq = 0;
+  let listPromise = null;
+
+  function loadChapters(options) {
+    const force = !!(options && options.force);
+    if (listPromise && !force) return listPromise;
+    const seq = ++listSeq;
+    const promise = api('/api/study').then(res => {
+      if (seq !== listSeq) return; // superseded by a newer load
       const list = document.getElementById('study-list');
       if (!list) return;
       if (!res || res.ok !== true) { list.innerHTML = ''; list.appendChild(h('li', { class: 'st-muted', text: 'Could not load chapters.' })); return; }
@@ -514,21 +545,18 @@
       state.authenticated = !!res.authenticated;
       const scope = document.getElementById('study-scope');
       if (scope) scope.textContent = res.authenticated ? 'Your chapters.' : 'Guest chapters on this server. Sign in to keep them with your account.';
-      list.innerHTML = '';
-      if (state.chapters.length === 0) { list.appendChild(h('li', { class: 'st-muted', text: 'No chapters yet. Create one on the left.' })); return; }
-      for (const ch of state.chapters) {
-        const li = h('li');
-        const left = h('div');
-        left.appendChild(h('div', { text: ch.title }));
-        left.appendChild(h('div', { class: 'st-meta', text: `${KIND_LABELS[ch.kind] || ch.kind} · ${ch.totalMoves} moves · ${fmtDate(ch.updatedAt)}` }));
-        if (ch.quiz) left.appendChild(h('span', { class: 'st-badge', text: 'quiz' }));
-        if (ch.owned) left.appendChild(h('span', { class: 'st-badge', text: 'owned' }));
-        const open = h('button', { type: 'button', text: 'Open', onclick: () => openChapter(ch.id) });
-        li.appendChild(left);
-        li.appendChild(open);
-        list.appendChild(li);
-      }
-    });
+      renderChapterList();
+    }).catch(() => {
+      if (seq !== listSeq) return;
+      const list = document.getElementById('study-list');
+      if (list) { list.innerHTML = ''; list.appendChild(h('li', { class: 'st-muted', text: 'Could not load chapters.' })); }
+    }).then(() => { if (listPromise === promise) listPromise = null; });
+    listPromise = promise;
+    // A fetch that never settles must not wedge the dedupe guard and disable
+    // later (Refresh) loads; release it after a generous safety window.
+    const wedgeTimer = setTimeout(() => { if (listPromise === promise) listPromise = null; }, 15000);
+    promise.then(() => clearTimeout(wedgeTimer), () => clearTimeout(wedgeTimer));
+    return promise;
   }
 
   // ------------------------------------------------------------------ create
@@ -556,7 +584,16 @@
     api('/api/study', { method: 'POST', body }).then(res => {
       if (!res || res.ok !== true) { setListStatus(res && res.error ? res.error : 'Create failed.', 'error'); return; }
       setListStatus('Chapter created.', 'ok');
-      loadChapters();
+      // Optimistically insert the chapter the server just returned under THIS
+      // viewer's identity, then refresh authoritatively. Even if a slow,
+      // stale pre-create GET resolves later, the sequence guard in
+      // loadChapters() discards it, so the new row cannot vanish.
+      if (res.chapter) {
+        const known = state.chapters.some(ch => ch.id === res.chapter.id);
+        state.chapters = known ? state.chapters : [res.chapter].concat(state.chapters);
+        renderChapterList();
+      }
+      loadChapters({ force: true });
       openChapter(res.chapter.id);
     }).catch(() => setListStatus('Network error.', 'error'));
   }
