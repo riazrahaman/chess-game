@@ -566,3 +566,25 @@ The scripts spawn (and kill) their own server on 39281; run them sequentially �
 - The artifacts directories (`test-results/`, `playwright-report/`) are only produced by Playwright's HTML/trace reporters, which these plain `chromium.launch()` scripts do **not** enable; the upload step is therefore a no-op today (`if-no-files-found: ignore`) and becomes useful the moment a reporter/trace is added. It is wired now to avoid another CI change later.
 - `CHESS_BOT` does **not** exist in the server or scripts; it was intentionally omitted (the scripts drive bot enable/disable through the UI and `/api/bot`).
 - CI itself was not executed locally (no GitHub runner); the job was validated by parsing the YAML and by running the exact `npm run test:browser` command with the exact env block against the real server on macOS. The Linux-specific pieces (`--with-deps`, headless Chromium without a display) are standard and the scripts launch `chromium.launch({ headless: true })` (smoke-test.mjs:142, test-ui-features.mjs:42).
+
+---
+
+## 17. CI GATE — Exercise the JSON persistence fallback on a sqlite-capable Node (branch `ci/json-fallback`, 2026-09-20)
+
+| Task | Owner | Branch | Status | Summary | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| `ci-json-fallback-on-sqlite-node` | builder | `ci/json-fallback` | DONE | The game-archive JSON adapter (`src/game-archive.js`, forced by `CHESS_ARCHIVE_FORCE_JSON=1` at `src/game-archive.js:1370`) only ran in CI on the `linux` **node-20** leg — where `node:sqlite` is absent, so JSON is the *only* option. On node 22 (the modern supported Node) `node:sqlite` is present and every leg selected sqlite, leaving the JSON backend unexercised on a sqlite-capable Node and free to drift. New isolated job `json-fallback` (`Test (ubuntu-latest, node 22, JSON fallback)`) in `.github/workflows/ci.yml` mirrors the `macos` shape (checkout@v4 / setup-node@v4 node 22 / `npm install`) and runs `npm run test:unit` with `CHESS_ARCHIVE_FORCE_JSON: 1`. `npm run test:unit` (not `check`) is deliberate: `lint` is already covered by the node-22 `linux` matrix leg, and this leg's only purpose is the unit suites against the forced backend. No `needs:` — independent of `linux`/`browser` (the `browser` job's `needs: [linux]` is untouched). | `CHESS_ARCHIVE_FORCE_JSON=1 npm run test:unit` → exit 0, zero `^FAIL:` lines; the env var is proven live by `test/p3-sqlite-selftest.js`: without it, `PASS: createGameArchive(":memory:") uses SQLite backend`; with it, `PASS: createGameArchive(":memory:") gracefully falls back to JSON when node:sqlite is unavailable` (an ignored var would fail that assertion); workflow parses via `yaml.safe_load`; `npm run lint` exit 0; `about-selftest` 12/12, `reachability-selftest` 49/49, `wave3-hygiene-selftest` 87/87 |
+
+### Honest caveat — what this leg does *not* cover
+- `CHESS_ARCHIVE_FORCE_JSON` forces **only the game archive** (`game-archive.js`). `src/accounts.js`, `src/social-store.js` and `src/study-store.js` accept a per-constructor `options.forceJson` but expose **no env-level force switch**, so on node 22 they keep using sqlite and their JSON adapters are **still exercised only on the node-20 leg**. This job therefore closes the *game-archive* JSON-on-modern-Node gap, not a universal one. Wiring env hooks into the other three stores would be the follow-up to give this leg full coverage.
+
+### Reproduce locally
+```bash
+# Node must HAVE node:sqlite for this to be the meaningful case (22+ / v26 here).
+CHESS_ARCHIVE_FORCE_JSON=1 npm run test:unit   # expect exit 0, zero ^FAIL:
+
+# Prove the flag actually flips the backend (without the flag → sqlite; with it → JSON):
+node test/p3-sqlite-selftest.js
+CHESS_ARCHIVE_FORCE_JSON=1 node test/p3-sqlite-selftest.js
+```
+The suite computes `hasSqlite` itself (`test/p3-sqlite-selftest.js:31-46`) and asserts `backendType === 'json'` under the flag — so a silently ignored env var turns the suite red rather than passing a rubber stamp.
