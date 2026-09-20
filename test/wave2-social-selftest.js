@@ -22,6 +22,7 @@ process.env.CHESS_JOURNAL_FILE = path.join(TMP, '.referee-journal.jsonl');
 process.env.CHESS_DB_FILE = path.join(TMP, 'games.db');
 process.env.CHESS_JSON_ARCHIVE_FILE = path.join(TMP, '.games-archive.json');
 process.env.CHESS_ACCOUNTS_DB_FILE = path.join(TMP, 'accounts.db');
+process.env.CHESS_ACCOUNTS_JSON_FILE = path.join(TMP, '.accounts.json');
 process.env.CHESS_SOCIAL_DB_PATH = path.join(TMP, 'social.db');
 process.env.CHESS_LEAGUES_DB_PATH = path.join(TMP, 'leagues.db');
 process.env.CHESS_LEAGUES_JSON_PATH = path.join(TMP, '.leagues.json');

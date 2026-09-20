@@ -25,6 +25,7 @@ process.env.CHESS_LEAGUES_DB_PATH = path.join(TMP_DIR, 'leagues.db');
 process.env.CHESS_DB_FILE = path.join(TMP_DIR, 'games.db');
 process.env.CHESS_JSON_ARCHIVE_FILE = path.join(TMP_DIR, 'archive.json');
 process.env.CHESS_ACCOUNTS_DB_FILE = path.join(TMP_DIR, 'accounts.db');
+process.env.CHESS_ACCOUNTS_JSON_FILE = path.join(TMP_DIR, '.accounts.json');
 process.on('exit', () => { try { fs.rmSync(TMP_DIR, { recursive: true, force: true }); } catch (_) {} });
 
 const { createServer } = require('../server.js');

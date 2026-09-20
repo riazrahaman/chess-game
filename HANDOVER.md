@@ -284,6 +284,18 @@ installs to refetch `index.html`); brilliant/tablebase achievement events can on
 games carry real player names; `scripts/test-ui-features.mjs` has no Puzzles/Library/Insights/Missed-tactics steps
 yet (DoD item 4); a 300-ply first missed-tactics request can take ~60 s (serial engine).
 
+**AccountsManager JSON-path precedence (branch `fix/accounts-node20-isolation`).** `node:sqlite` exists only on
+Node ≥ 22.5. The `AccountsManager` JSON fallback used to resolve `options.jsonPath || DEFAULT_JSON_PATH`, so on
+Node 20 a caller-supplied `dbPath` (or string path) was silently dropped and every manager shared the one
+`src/.accounts.json` — the same class of cross-contamination `game-archive.js` already fixed (see its
+precedence-ladder comment at `game-archive.js:1386-1406`). `accounts.js` now mirrors that ladder exactly:
+`typeof options === 'string'` → that string; `options.jsonPath` → verbatim; resolved `dbPath === ':memory:'` →
+`:memory:`; explicit `options.dbPath` → `dbPath + '.json'`; otherwise `DEFAULT_JSON_PATH`. Production
+(`new AccountsManager()` with no options) still resolves to `DEFAULT_JSON_PATH`, and `:memory:` adapters stay
+in-memory. Test suites now also set `CHESS_ACCOUNTS_JSON_FILE` under `os.tmpdir()` (defense in depth), and
+`test/accounts-isolation-selftest.js` pins all six input shapes plus the no-shared-state guarantee on both Node 20
+and Node ≥ 22.5.
+
 ## 9. POST-WAVE 3 — Gameplay correctness (branch `feat/g4-undo-request`, 2026-09-19)
 
 | Card | Owner | Commit | What landed | Tests |
