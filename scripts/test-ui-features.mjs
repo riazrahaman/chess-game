@@ -225,10 +225,73 @@ async function testUiFeatures() {
 
   // 5. Test Move Review and Narrative Report & Mistake Puzzles
   console.log('Testing Game Review, Narrative Report, and Why? button...');
+  //
+  // WHY THIS BLOCK IS DETERMINISTIC (B23, now a PRODUCT fix): the earlier
+  // bot-config section enables the bot for WHITE (human Black), so
+  // `botService.setBotConfig` claims White for the bot and
+  // `triggerBotMoveIfNeeded` (server.js:1812) schedules a White move on a
+  // 200-450 ms `setTimeout` (src/bot-service.js). The old
+  // `setBotConfig({enabled:false})` did `this.rooms.delete(roomId)` with NO
+  // clearTimeout, so a straggler timer still fired after `#new-game` reset the
+  // board, saw the fresh White-to-move position, and played a stray White move.
+  // That is a REAL user bug (disable the bot or hit New Game within ~450 ms of
+  // enabling it and the bot plays a stray move), not merely a test race.
+  // `src/bot-service.js` now stores the pending handle on the room config,
+  // clearTimeout()s it on disable/recolour, and guards the wake with a
+  // per-config generation/identity check — so the browser test only has to
+  // disable the bot and reset before the move; no straggler heuristic is needed.
+  const postMoveDisableReset = () => page.evaluate(async () => {
+    const q = (typeof getCurrentRoomId === 'function' && getCurrentRoomId() !== 'default') ? `?room=${encodeURIComponent(getCurrentRoomId())}` : '';
+    try {
+      await fetch('/api/bot' + q, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: false }) });
+    } catch (_) {}
+    await fetch('/api/reset' + q, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+  });
+  const readMoveState = () => page.evaluate(async () => {
+    const q = (typeof getCurrentRoomId === 'function' && getCurrentRoomId() !== 'default') ? `?room=${encodeURIComponent(getCurrentRoomId())}` : '';
+    try {
+      const res = await fetch('/api/state' + q, { cache: 'no-store' });
+      return res.ok ? await res.json() : null;
+    } catch (_) {
+      return null;
+    }
+  }).catch(() => null);
+  const isMoveFresh = (s) => s
+    && Array.isArray(s.history)
+    && s.history.length === 0
+    && !!s.board
+    && s.board.turn === 'white'
+    && s.gameOver !== true;
+  // (1) stop the bot (which now cancels its pending timer server-side) and reset.
+  await postMoveDisableReset();
+  // (2) Bounded Node-side poll (the B20 pattern: a real awaited page.evaluate
+  // fetch, NOT a waitForFunction with an async predicate) for the fresh start.
+  const moveFreshDeadline = Date.now() + 5000;
+  let moveFreshState = null;
+  for (;;) {
+    moveFreshState = await readMoveState();
+    if (isMoveFresh(moveFreshState)) break;
+    if (Date.now() >= moveFreshDeadline) {
+      throw new Error(`Move-review room never returned to the fresh start position (0 plies, White to move); /api/state=${JSON.stringify(moveFreshState)}`);
+    }
+    await page.waitForTimeout(50);
+  }
+  // (3) let the page's own live history settle to the fresh 0-ply board so the
+  // click path submits the move instead of queueing a premove against a stale turn.
+  await page.waitForFunction(() => window.getLivePly() === 0, undefined, { timeout: 5000, polling: 50 }).catch(async () => {
+    const ply = await page.evaluate(() => window.getLivePly()).catch(() => '(unavailable)');
+    throw new Error(`Page live history never settled to 0 before the move-review click, got ${ply}`);
+  });
   // Play a move: e2 -> e4
   await page.locator('#e2').click();
   await page.locator('#e4').click();
-  await page.waitForTimeout(500);
+  // (4) bounded proof the move actually registered (fresh 0 -> 1 ply) before the
+  // review buttons read a position. Synchronous predicate: Playwright does not
+  // await an async one.
+  await page.waitForFunction(() => window.getLivePly() === 1, undefined, { timeout: 5000, polling: 50 }).catch(async () => {
+    const ply = await page.evaluate(() => window.getLivePly()).catch(() => '(unavailable)');
+    throw new Error(`Expected 1 ply after the move-review e2-e4 click, got ${ply}`);
+  });
 
   // Click Game Review
   const reviewBtn = page.locator('#game-review-btn');
@@ -260,21 +323,126 @@ async function testUiFeatures() {
 
   // 6. Test History Scrubbing DOM Reconcile (No ghost duplicate pieces on vacated squares like Qxd4)
   console.log('Testing History Scrubbing DOM Reconcile & Ghost Piece prevention...');
-  // Reset and play moves up to 5... Qxd4
+  // Reset and play 10 moves up to 5... Qxd4.
+  //
+  // WHY THIS BLOCK IS DETERMINISTIC (B23): the earlier bot on/off gestures
+  // above (and a queued /api/bot update draining botConfigChain) can leave a
+  // seat claimed for a side. /api/reset does NOT release seats (only the GC
+  // collector collectRoom() calls seatAuthManager.resetSeats — server.js:422),
+  // so a stale claimed seat survives the reset. The old code then sent
+  // token-less moves; seat-auth.js validateMove returns 401 when a seat IS
+  // claimed for the side to move and no token was supplied, so the moves
+  // 401'd (and the first one could 400 illegal if the board wasn't yet at
+  // the fresh start position). The B22 bounded getLivePly wait then correctly
+  // reported "got 2" because most moves were rejected.
+  //
+  // Fix mirrors the proven G4 undo block just below: (0) clear any stale
+  // browser-side premove left by an earlier click section (a real Escape
+  // keydown -> clearPremove(), ui.js:662-668) — without this, renderBoard's
+  // premove flush fires submitMoveToReferee('e2e4') on the fresh White-to-move
+  // state, which re-claims White and lands a stray ply; (1) leaveSeat() the
+  // page's own seat; (2) reset the room; (3) Bounded Node-side poll
+  // (Date.now()+5000 deadline, 50 ms sleeps, a real awaited page.evaluate
+  // fetch('/api/state')) until /api/state shows the fresh start position
+  // (history.length===0 && board.turn==='white' && !gameOver) — NOT
+  // waitForFunction(async …) because Playwright does not await an async
+  // predicate (a returned Promise is always truthy); (4) claim BOTH seats
+  // out of band and send every move WITH the matching X-Seat-Token header
+  // (white half-moves with whiteToken, black half-moves with blackToken);
+  // (5) verify each move response ok and throw a descriptive error on any
+  // !ok so a silent 401/400 can't cascade into a confusing ghost failure.
+  // Then the B22 bounded getLivePly()===10 wait gates the scrub jumps.
+  const scrubRoomId = await page.evaluate(() => (typeof getCurrentRoomId === 'function' ? getCurrentRoomId() : 'default'));
+  // 1+2: clear any stale browser-side premove, leaveSeat + reset.
+  //
+  // An earlier section (the move-review block's #e2 -> #e4 click) can leave a
+  // premove queued in ui.js (premoveQueue): the first click selected the White
+  // e2 pawn while it was Black's turn, and the second click on e4 queued a
+  // premove because the piece colour (White) was not the side to move (Black).
+  // renderBoard's premove flush then fires when the fresh post-reset
+  // state arrives (White to move): it calls submitMoveToReferee('e2e4'), which
+  // auto-claims the seat (submitMoveToReferee -> claimSeat at ui.js:798-800)
+  // and lands a stray ply. That is exactly the race this block must not have —
+  // the page reclaims White out from under our out-of-band seat claims (409
+  // "Seat 'white' is currently occupied") and /api/state never shows a fresh
+  // 0-ply board. Clear it with the SAME path the UI uses: a real Escape
+  // keydown on a board square, which calls clearPremove() (ui.js:662-668).
+  // Read the premove markers back so a regression is visible, not silent.
+  const scrubPremoveCleared = await page.evaluate(() => {
+    const hadPremove = document.querySelectorAll('.premove-source, .premove-target').length > 0;
+    const square = document.querySelector('#board > div');
+    if (square) square.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    return hadPremove;
+  });
+  if (scrubPremoveCleared) console.log('  Cleared a stale premove left by an earlier test section before the scrub reset');
   await page.evaluate(async () => {
     if (window.leaveSeat) await window.leaveSeat();
-    // The page auto-routes to its own room (/game/<id>); target it, not 'default'.
     const q = (typeof getCurrentRoomId === 'function' && getCurrentRoomId() !== 'default') ? `?room=${encodeURIComponent(getCurrentRoomId())}` : '';
     await fetch('/api/reset' + q, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   });
-  await page.waitForTimeout(200);
-  const testMoves = ['d2d4', 'd7d5', 'g1f3', 'b8c6', 'c2c4', 'd5c4', 'd1a4', 'c8g4', 'f3e5', 'd8d4'];
-  for (const m of testMoves) {
-    await page.evaluate(async (move) => {
+  // 3: bounded poll for the fresh start position before sending any move.
+  const scrubResetDeadline = Date.now() + 5000;
+  let scrubResetState = null;
+  for (;;) {
+    scrubResetState = await page.evaluate(async () => {
       const q = (typeof getCurrentRoomId === 'function' && getCurrentRoomId() !== 'default') ? `?room=${encodeURIComponent(getCurrentRoomId())}` : '';
-      await fetch('/api/move' + q, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ move }) });
-    }, m);
+      try {
+        const res = await fetch('/api/state' + q, { cache: 'no-store' });
+        return res.ok ? await res.json() : null;
+      } catch (_) {
+        return null;
+      }
+    }).catch(() => null);
+    const fresh = scrubResetState
+      && Array.isArray(scrubResetState.history)
+      && scrubResetState.history.length === 0
+      && !!scrubResetState.board
+      && scrubResetState.board.turn === 'white'
+      && scrubResetState.gameOver !== true;
+    if (fresh) break;
+    if (Date.now() >= scrubResetDeadline) {
+      throw new Error(`Scrub room never reset to a fresh position (0 plies, White to move) before the scrub moves; /api/state=${JSON.stringify(scrubResetState)}`);
+    }
     await page.waitForTimeout(50);
+  }
+  // 4: claim both seats out of band so the token-less moves can't 401.
+  const scrubSeats = await page.evaluate(async (room) => {
+    const send = (role) => fetch('/api/seat/claim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role, room })
+    }).then(async (r) => ({ ok: r.ok, data: await r.json().catch(() => ({})) })).catch((e) => ({ ok: false, data: { error: String(e) } }));
+    const [w, b] = await Promise.all([send('white'), send('black')]);
+    return {
+      whiteToken: w.ok ? (w.data && w.data.token) || null : null,
+      blackToken: b.ok ? (b.data && b.data.token) || null : null,
+      whiteErr: w.ok ? null : JSON.stringify(w.data),
+      blackErr: b.ok ? null : JSON.stringify(b.data)
+    };
+  }, scrubRoomId);
+  if (!scrubSeats.whiteToken) throw new Error(`Could not claim the white seat for the scrub test: ${scrubSeats.whiteErr}`);
+  if (!scrubSeats.blackToken) throw new Error(`Could not claim the black seat for the scrub test: ${scrubSeats.blackErr}`);
+  const scrubWhiteToken = scrubSeats.whiteToken;
+  const scrubBlackToken = scrubSeats.blackToken;
+  // 5: send the 10 moves with the correct per-side token; verify each ok.
+  const testMoves = ['d2d4', 'd7d5', 'g1f3', 'b8c6', 'c2c4', 'd5c4', 'd1a4', 'c8g4', 'f3e5', 'd8d4'];
+  for (let i = 0; i < testMoves.length; i++) {
+    const move = testMoves[i];
+    const token = i % 2 === 0 ? scrubWhiteToken : scrubBlackToken;
+    const moveRes = await page.evaluate(async ({ move, token }) => {
+      const q = (typeof getCurrentRoomId === 'function' && getCurrentRoomId() !== 'default') ? `?room=${encodeURIComponent(getCurrentRoomId())}` : '';
+      const res = await fetch('/api/move' + q, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Seat-Token': token },
+        body: JSON.stringify({ move })
+      });
+      let data = null;
+      try { data = await res.json(); } catch (_) {}
+      return { status: res.status, ok: res.ok, data };
+    }, { move, token });
+    if (!moveRes.ok) {
+      throw new Error(`Scrub move ${i} (${move}) was rejected (status ${moveRes.status}): ${JSON.stringify(moveRes.data)}`);
+    }
   }
   // Bounded wait for all 10 plies to land in the page's live history before
   // scrubbing: the moves were sent via awaited direct fetch('/api/move') calls,
@@ -322,6 +490,19 @@ async function testUiFeatures() {
   if (ghostCheck.c8 !== null) throw new Error('Ghost black bishop remained on c8 after jumping to ply 10');
   if (ghostCheck.g4 !== 'black-b') throw new Error('Black bishop missing on g4 at ply 10');
   console.log('✔ Passed: History scrubbing correctly cleans vacated squares without ghost duplicate pieces');
+
+  // Release the two seats we claimed out of band: /api/reset does NOT release
+  // seats (only the GC collector does), so leaving them claimed would make the
+  // G4 undo block's window.claimSeat('black') 409 on an occupied seat.
+  await page.evaluate(async ({ room, whiteToken, blackToken }) => {
+    const release = (token) => fetch('/api/seat/release', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Seat-Token': token },
+      body: JSON.stringify({ room, token })
+    }).catch(() => {});
+    await release(whiteToken);
+    await release(blackToken);
+  }, { room: scrubRoomId, whiteToken: scrubWhiteToken, blackToken: scrubBlackToken });
 
   // 6b. Test G4 Undo-as-a-request banner (#undo-request-banner).
   //
