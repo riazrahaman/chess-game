@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    # Nightly browser gate (04:17 UTC) so Play/Analysis/Puzzles/Library/Insights/
+    # Study/undo-request regressions surface even on days with no push.
+    - cron: '17 4 * * *'
+  workflow_dispatch:
 
 jobs:
   linux:
@@ -32,3 +37,51 @@ jobs:
           node-version: 22
       - run: npm install
       - run: npm run test:unit
+
+  browser:
+    name: Browser (ubuntu-latest, node 22)
+    runs-on: ubuntu-latest
+    # Only run after the unit gate is green, so a broken referee/bot core does
+    # not burn Chromium download + journey time.
+    needs: [linux]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Install Chromium (Playwright)
+        run: npx playwright install --with-deps chromium
+      - name: Run browser journeys
+        # The scripts each spawn their own `node server.js` on 39281 (and kill it),
+        # and `test:browser` chains them with `&&` so they never run concurrently.
+        # All runtime state is redirected into the runner tmpdir so no repo-root
+        # .referee-* / *.db files are created.
+        env:
+          CHESS_PORT: 39281
+          CHESS_STATE_FILE: ${{ runner.temp }}/.referee-state.json
+          CHESS_JOURNAL_FILE: ${{ runner.temp }}/.referee-journal.jsonl
+          CHESS_DB_FILE: ${{ runner.temp }}/games.db
+          CHESS_JSON_ARCHIVE_FILE: ${{ runner.temp }}/.games-archive.json
+          CHESS_ACCOUNTS_DB_FILE: ${{ runner.temp }}/accounts.db
+          CHESS_ACCOUNTS_JSON_FILE: ${{ runner.temp }}/.accounts.json
+          CHESS_SOCIAL_DB_PATH: ${{ runner.temp }}/social.db
+          CHESS_SOCIAL_JSON_PATH: ${{ runner.temp }}/.social.json
+          CHESS_LEAGUES_DB_PATH: ${{ runner.temp }}/leagues.db
+          CHESS_LEAGUES_JSON_PATH: ${{ runner.temp }}/.leagues.json
+          CHESS_STUDY_DB_PATH: ${{ runner.temp }}/study.db
+          CHESS_STUDY_JSON_PATH: ${{ runner.temp }}/.study.json
+          CHESS_RATE_LIMIT_FILE: ${{ runner.temp }}/rate-limit.json
+          CHESS_RATE_LIMIT: 100000
+        run: npm run test:browser
+      - name: Upload browser test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-test-artifacts
+          path: |
+            test-results/
+            playwright-report/
+            blob-report/
+          if-no-files-found: ignore
+          retention-days: 7

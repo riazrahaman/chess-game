@@ -533,3 +533,36 @@ No commit / push / kanban change (builder was the only writer).
 ### Design trade-offs / honest notes
 - Defaults bound the cold worst case to ~60 searches (≈5 s budget → whichever comes first). A user with a long cold game gets the earliest positions' misses and an honest truncation label rather than a 30–60 s hang; a second request re-runs the still-uncached tail, but every completed eval is cached, so successive calls converge to complete.
 - `truncatedReason` is additive; nothing was removed or renamed from the response.
+
+---
+
+## 16. CI GATE — Run the Playwright journeys in CI (branch `ci/browser-gate`, 2026-09-20)
+
+| Task | Owner | Branch | Status | Summary | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| `ci-browser-gate` | builder | `ci/browser-gate` | DONE | `npm run test:browser` (`scripts/smoke-test.mjs && scripts/test-ui-features.mjs`) never ran in CI, so Play/Analysis/Puzzles/Library/Insights/Coordinates/Study/undo-request/auth-modal regressions could land while the unit suites stayed green. New `browser` job in `.github/workflows/ci.yml` (`Browser (ubuntu-latest, node 22)`) runs on `ubuntu-latest`/node 22, `needs: [linux]` so it waits on the unit gate, installs Chromium with `npx playwright install --with-deps chromium`, and runs `npm run test:browser` with **all** runtime state redirected into `${{ runner.temp }}` via the `CHESS_*` env vars (state/journal/games/accounts/social/leagues/study/rate-limit) plus `CHESS_PORT=39281` and `CHESS_RATE_LIMIT=100000`, so the scripts' self-spawned `node server.js` writes nothing into the repo. On failure it uploads `test-results/`, `playwright-report/`, `blob-report/` (`if-no-files-found: ignore`); `.gitignore` now covers those paths. Triggers: `push`/`pull_request` to `main` (as before), plus nightly `schedule` (`17 4 * * *`) and `workflow_dispatch`. | `npm run test:browser` locally with the same tmpdir env → exit 0, both scripts PASS, runner-tmpdir contains the state, repo-root `.referee-*` mtimes unchanged; workflow parses (`yaml.safe_load`); `npm run lint` exit 0; `about-selftest`/`reachability-selftest` exit 0 |
+
+### Why these triggers
+- **push/PR to `main`:** the task's goal is to *catch* regressions, not only report them nightly. The `browser` job is `needs: [linux]`, so it never runs when the core gate is already red — the marginal cost is ~2–4 min of an already-running workflow, and it runs once (not per matrix leg). A regression that unit tests miss is fixed on the PR rather than discovered a day later.
+- **nightly `schedule` + `workflow_dispatch`:** guards against external drift (e.g. a Playwright/Chromium or CDN change) and lets the gate be re-run on demand without an empty commit.
+
+### Reproduce locally
+```bash
+# from the repo root, with Playwright's Chromium installed (`npx playwright install chromium`)
+CB_TMP=$(mktemp -d)
+CHESS_PORT=39281 \
+CHESS_STATE_FILE="$CB_TMP/.referee-state.json" CHESS_JOURNAL_FILE="$CB_TMP/.referee-journal.jsonl" \
+CHESS_DB_FILE="$CB_TMP/games.db" CHESS_JSON_ARCHIVE_FILE="$CB_TMP/.games-archive.json" \
+CHESS_ACCOUNTS_DB_FILE="$CB_TMP/accounts.db" CHESS_ACCOUNTS_JSON_FILE="$CB_TMP/.accounts.json" \
+CHESS_SOCIAL_DB_PATH="$CB_TMP/social.db" CHESS_SOCIAL_JSON_PATH="$CB_TMP/.social.json" \
+CHESS_LEAGUES_DB_PATH="$CB_TMP/leagues.db" CHESS_LEAGUES_JSON_PATH="$CB_TMP/.leagues.json" \
+CHESS_STUDY_DB_PATH="$CB_TMP/study.db" CHESS_STUDY_JSON_PATH="$CB_TMP/.study.json" \
+CHESS_RATE_LIMIT_FILE="$CB_TMP/rate-limit.json" CHESS_RATE_LIMIT=100000 \
+npm run test:browser
+```
+The scripts spawn (and kill) their own server on 39281; run them sequentially — `test:browser` already chains them with `&&`. Do not run a second server-starting suite at the same time in the same checkout.
+
+### Honest notes
+- The artifacts directories (`test-results/`, `playwright-report/`) are only produced by Playwright's HTML/trace reporters, which these plain `chromium.launch()` scripts do **not** enable; the upload step is therefore a no-op today (`if-no-files-found: ignore`) and becomes useful the moment a reporter/trace is added. It is wired now to avoid another CI change later.
+- `CHESS_BOT` does **not** exist in the server or scripts; it was intentionally omitted (the scripts drive bot enable/disable through the UI and `/api/bot`).
+- CI itself was not executed locally (no GitHub runner); the job was validated by parsing the YAML and by running the exact `npm run test:browser` command with the exact env block against the real server on macOS. The Linux-specific pieces (`--with-deps`, headless Chromium without a display) are standard and the scripts launch `chromium.launch({ headless: true })` (smoke-test.mjs:142, test-ui-features.mjs:42).
