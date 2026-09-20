@@ -1330,8 +1330,37 @@ function archivedGamePositions(game) {
   }
 }
 
+/**
+ * Shared requester-aware resolver for a single archived game reached by id.
+ * Mirrors the LIST scoping in handleGetGamesEndpoint / routes-library:
+ *   - an OWNED game (owner_id set) is readable ONLY by the authenticated
+ *     account whose session.userId matches that owner;
+ *   - a different signed-in account may NOT read/import it;
+ *   - an anonymous requester may NOT read/import an account-owned game;
+ *   - an UNOWNED game is the guest scope: an anonymous requester MAY read
+ *     and import it (preserves the guest Study-import behaviour); a
+ *     signed-in account may NOT reach an unowned game by id (consistent
+ *     with GET /api/games, where signed-in users see only their own rows).
+ *
+ * Returns the game object on success, or null when the game does not exist
+ * OR is not visible to this requester. Both cases are outwardly identical
+ * (HTTP 404 'game not found') so the response never enumerates existence.
+ */
+function resolveArchivedGameForRequester(req, archive, authDeps, id) {
+  const store = archive || gameArchive;
+  const game = store.getGame && store.getGame(String(id));
+  if (!game) return null;
+  const ownerRaw = game.owner_id == null ? game.ownerId : game.owner_id;
+  const owner = ownerRaw == null ? null : String(ownerRaw);
+  const getAuth = (authDeps && authDeps.getAuthUser) || getAuthUser;
+  const session = getAuth(req);
+  const viewerId = session && session.userId ? String(session.userId) : null;
+  if (owner === null) return viewerId === null ? game : null;
+  return viewerId !== null && viewerId === owner ? game : null;
+}
+
 function handleGetGameEndpoint(req, res, id) {
-  const game = gameArchive.getGame(id);
+  const game = resolveArchivedGameForRequester(req, gameArchive, null, id);
   if (!game) {
     sendJsonError(res, 404, 'game not found');
     return;
@@ -1347,7 +1376,7 @@ function handleGetGameEndpoint(req, res, id) {
 }
 
 function handleGetGamePgnEndpoint(req, res, id) {
-  const game = gameArchive.getGame(id);
+  const game = resolveArchivedGameForRequester(req, gameArchive, null, id);
   if (!game) {
     sendJsonError(res, 404, 'game not found');
     return;
@@ -1360,6 +1389,8 @@ function handleGetGamePgnEndpoint(req, res, id) {
   }
   res.statusCode = 200;
   res.setHeader('Content-Type', 'application/x-chess-pgn; charset=utf-8');
+  // Use the archive id for the allowed-request filename; a rejected
+  // request never reaches this line so no id leaks via the filename.
   res.setHeader('Content-Disposition', `attachment; filename="${id}.pgn"`);
   res.end(pgn);
 }
@@ -1844,7 +1875,7 @@ function createServer() {
         handleGetGameEndpoint(req, res, decodeURIComponent(gameIdMatch[1]));
         return;
       }
-      if (require('./src/routes-review.js').handleReviewRoute(req, res, urlPath, { sendJson, sendJsonError, readJsonBody, gameArchive, referee })) return; // Wave 3 N1.3: /api/games/:id/missed-tactics, /api/review/missed-tactics
+      if (require('./src/routes-review.js').handleReviewRoute(req, res, urlPath, { sendJson, sendJsonError, readJsonBody, gameArchive, referee, getAuthUser, resolveArchivedGameForRequester })) return; // Wave 3 N1.3: /api/games/:id/missed-tactics, /api/review/missed-tactics
 
       if (require('./src/routes-openings.js').handleOpeningsRoute(req, res, urlPath, { sendJson, sendJsonError, readJsonBody })) return; // Wave 2 E3: /api/openings/*, /api/fen/validate
 
@@ -1853,7 +1884,7 @@ function createServer() {
       if (require('./src/routes-library.js').handleLibraryRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readBody, maxBodyBytes: MAX_BODY_BYTES, gameArchive })) return; // Wave 3: /api/library, /api/library/claim, /api/import/*
       if (RetentionRoutes.handleRetentionRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readJsonBody, gameArchive, referee, accountsManager })) return; // Wave 3 N2: /api/streak, /api/activity, /api/achievements
       if (require('./src/routes-insights.js').handleInsightsRoute(req, res, urlPath, { getAuthUser, sendJson, sendJsonError, readBody, maxBodyBytes: MAX_BODY_BYTES, gameArchive })) return; // Wave 3 N2.8/N3.15: /api/insights*, /api/league*
-      if (require('./src/routes-study.js').handleStudyRoute(req, res, urlPath, { getAuthUser, parseCookies, sendJson, sendJsonError, readBody, gameArchive })) return; // Wave 4 A2.2: /api/study/*
+      if (require('./src/routes-study.js').handleStudyRoute(req, res, urlPath, { getAuthUser, parseCookies, sendJson, sendJsonError, readBody, gameArchive, resolveArchivedGameForRequester })) return; // Wave 4 A2.2: /api/study/*
 
       sendJsonError(res, 404, 'not found');
       return;
@@ -1954,6 +1985,7 @@ module.exports = {
   isValidRoomId,
   seatAuthManager,
   gameArchive,
+  resolveArchivedGameForRequester,
   checkRateLimit,
   botService,
   BOT_LEVELS,

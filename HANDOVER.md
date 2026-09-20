@@ -929,3 +929,41 @@ cp package.json /tmp/pkg.bak && sed -i '' 's/"1.1.0"/"9.9.9"/' package.json
 # restart the server → {"ok":true,"version":"9.9.9"}; then:
 cp /tmp/pkg.bak package.json
 ```
+
+## 25. SECURITY — Direct-ID archived-game paths enforced the same requester scoping as the list (branch `fix-archived-game-idor`, 2026-09-20)
+
+Found by an external review handoff (baseline `55239e1`). The list path (`GET /api/games`, `server.js` `handleGetGamesEndpoint`) scopes by requester — signed-in users see only `owner_id = session.userId`, guests see only unowned rows — but FOUR direct-ID paths bypassed that scoping and served ANY archived game to ANY requester:
+
+| Path | Before |
+|---|---|
+| `GET /api/games/:id` (`handleGetGameEndpoint`) | raw `gameArchive.getGame(id)` → 200 to anyone |
+| `GET /api/games/:id/pgn` (`handleGetGamePgnEndpoint`) | same; PGN + `Content-Disposition` filename leaked |
+| `GET /api/games/:id/missed-tactics` (`src/routes-review.js`) | same, AND it started engine analysis before rejecting |
+| `POST /api/study {kind:'game', gameId}` (`src/routes-study.js` `buildGameChapter`) | same; imported another account's private game into the requester's chapters |
+
+### Policy (one shared resolver, non-enumerating)
+
+`resolveArchivedGameForRequester(req, archive, authDeps, id)` in `server.js`, injected into the review and study route hooks via `ctx`:
+
+- an **owned** game (`owner_id` set) is readable/importable ONLY by the signed-in account whose `session.userId` matches that owner;
+- a different signed-in account gets **404**; an anonymous requester gets **404**;
+- an **unowned** game is guest scope: anonymous MAY read and import it (preserves the existing guest Study-import test), a signed-in account may NOT reach an unowned game by id — consistent with `GET /api/games`, where signed-in users see only their own rows;
+- `owner_id`/`ownerId` is normalized in one place;
+- **missing and not-visible share the identical outward response** — HTTP 404 `'game not found'`, never 401/403 — so existence is not enumerable;
+- the PGN `Content-Disposition` filename is set only on an allowed request;
+- the missed-tactics route resolves BEFORE `respondMisses`, so a rejected request never starts analysis.
+
+### Changes
+
+- `server.js`: new resolver + the two `handleGetGame*Endpoint` call sites rewired; `resolveArchivedGameForRequester` exported and passed into the `routes-review` and `routes-study` hooks.
+- `src/routes-review.js`: `GET /api/games/:id/missed-tactics` uses `ctx.resolveArchivedGameForRequester` before any engine work.
+- `src/routes-study.js`: `buildGameChapter(body, ctx, req)` resolves requester-aware and returns `{notFound:true}`, which `handleStudyRoute` answers with **404** instead of the generic 400; rejected creates create NO chapter.
+- `test/study-chapters-selftest.js`: the missing-game expectation moved 400 → 404.
+- NEW `test/direct-id-authorization-selftest.js` (25 assertions, live HTTP): full matrix for the four operations (owner A / signed-in B / anonymous / unowned / missing id), plus "rejected missed-tactics starts NO analysis" and "rejected Study creates NO chapter" and scoped-list regressions. Runs natively and under `CHESS_ARCHIVE_FORCE_JSON=1`; wired into `test:unit` and `lint`; About unit-suite count 80 → 81.
+
+### Evidence
+
+- `node test/direct-id-authorization-selftest.js` → **25 passed, 0 failed** (2.1 s), natively and with `CHESS_ARCHIVE_FORCE_JSON=1`.
+- `node test/study-chapters-selftest.js` → 17 passed, 0 failed; `node test/about-selftest.js` → Passed: 13; `node test/t0-deadcode-selftest.js` → 27/0; `node test/reachability-selftest.js` → 49 (KNOWN_DARK 10); `node test/wave3-hygiene-selftest.js` → 87; `npm run lint` → 0.
+- The suite's own positive control proves the leak was real: before the resolver, signed-in B / anonymous got 200 on all three GET paths and 201 on Study import (all three private-fixture moves returned).
+

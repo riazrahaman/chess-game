@@ -390,11 +390,21 @@ function buildFenChapter(body) {
   };
 }
 
-function buildGameChapter(body, ctx) {
+function buildGameChapter(body, ctx, req) {
   const gameId = String(body.gameId || '').trim().slice(0, 120);
   if (!gameId) return { error: 'gameId is required' };
-  const game = archiveOf(ctx).getGame(gameId);
-  if (!game) return { error: 'game not found' };
+  // Requester-aware scoping, shared with the three GET /api/games/:id* paths.
+  // Missing and unauthorized share the same outward 404 'game not found' so
+  // neither existence nor ownership is enumerable. The caller (handleStudyRoute)
+  // turns a { notFound: true } result into HTTP 404 instead of the generic 400
+  // builder error.
+  let game = null;
+  if (ctx && typeof ctx.resolveArchivedGameForRequester === 'function' && req) {
+    game = ctx.resolveArchivedGameForRequester(req, archiveOf(ctx), ctx, gameId);
+  } else {
+    game = archiveOf(ctx).getGame(gameId);
+  }
+  if (!game) return { notFound: true };
   const startFenRaw = game.fen || extractFenHeader(game.pgn);
   let startFen = START_FEN;
   if (startFenRaw) {
@@ -491,7 +501,8 @@ function handleStudyRoute(req, res, urlPath, ctx) {
       let built;
       if (kind === 'pgn') built = buildPgnChapter(body);
       else if (kind === 'fen') built = buildFenChapter(body);
-      else built = buildGameChapter(body, ctx);
+      else built = buildGameChapter(body, ctx, req);
+      if (built.notFound) { sendJsonError(res, 404, 'game not found'); return; }
       if (built.error) { sendJsonError(res, 400, built.error); return; }
       const chapter = store.saveChapter({
         id: newId(),

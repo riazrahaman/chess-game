@@ -244,7 +244,7 @@ async function run() {
       assert.deepStrictEqual(ch.solutionSan, ['e4', 'e5', 'Nf3', 'Nc6', 'Bb5']);
       assert.strictEqual(ch.positions.length, 6);
       const missing = await guestA('POST', '/api/study', { kind: 'game', gameId: 'no-such-game' });
-      assert.strictEqual(missing.status, 400);
+      assert.strictEqual(missing.status, 404);
       assert.match(missing.body.error, /not found/i);
     });
 

@@ -223,7 +223,12 @@ function handleReviewRoute(req, res, urlPath, ctx) {
   const m = urlPath.match(/^\/api\/games\/([^/?#]+)\/missed-tactics$/);
   if (m && req.method === 'GET') {
     const id = decodeURIComponent(m[1]);
-    const game = ctx.gameArchive.getGame(id);
+    // Requester-aware scoping: resolve BEFORE any engine work starts so a
+    // rejected request can never kick off analysis. Missing and unauthorized
+    // share the same outward 404 'game not found' (no enumeration).
+    const game = typeof ctx.resolveArchivedGameForRequester === 'function'
+      ? ctx.resolveArchivedGameForRequester(req, ctx.gameArchive, ctx, id)
+      : ctx.gameArchive.getGame(id);
     if (!game) { ctx.sendJsonError(res, 404, 'game not found'); return true; }
     const uci = uciListFromGame(game);
     if (!uci) { ctx.sendJsonError(res, 422, 'game has no usable move list'); return true; }
