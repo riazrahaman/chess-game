@@ -136,7 +136,19 @@ async function testUiFeatures() {
   await levelSelect.selectOption('7');
   await colorSelect.selectOption('black');
   if (!await botToggle.isChecked()) await botToggle.click();
-  await page.waitForTimeout(500);
+
+  // The color change POSTs /api/bot and then swaps seats via leaveSeat() ->
+  // claimSeat() round-trips (src/ui.js sendBotConfigUpdateNow), all chained on
+  // botConfigChain. A fixed sleep races that chain on a loaded runner and reads
+  // the stale "Seated: Black" badge, so wait (bounded) for the real
+  // post-condition: the badge reflects the human is White.
+  await page.waitForFunction(() => {
+    const badge = document.getElementById('seat-badge');
+    return !!badge && (badge.textContent || '').includes('White');
+  }, undefined, { timeout: 5000, polling: 50 }).catch(async () => {
+    const badge = await page.locator('#seat-badge').textContent().catch(() => '(missing)');
+    throw new Error(`Seat badge never showed Playing White (got: ${badge})`);
+  });
 
   // Seat badge should show Playing White
   const seatBadgeText = await page.locator('#seat-badge').textContent();
@@ -145,9 +157,25 @@ async function testUiFeatures() {
     throw new Error(`Expected seat badge to show Playing White, got: ${seatBadgeText}`);
   }
 
-  // Click New Game
+  // Click New Game. #status is "Status: Ongoing" both before and after a reset,
+  // so a fixed sleep cannot prove the POST landed; wait (bounded) for the
+  // command pill to settle into success/error, then assert it did not error.
   await page.locator('#new-game').click();
-  await page.waitForTimeout(600);
+  await page.waitForFunction(() => {
+    const el = document.getElementById('command-status');
+    if (!el) return false;
+    const state = el.dataset.state;
+    return (state === 'success' || state === 'error') && (el.textContent || '').includes('Starting new game');
+  }, undefined, { timeout: 5000, polling: 50 }).catch(async () => {
+    const pill = await page.locator('#command-status').textContent().catch(() => '(missing)');
+    throw new Error(`New Game command never settled (command-status: ${pill})`);
+  });
+
+  const commandState = await page.locator('#command-status').getAttribute('data-state');
+  if (commandState === 'error') {
+    const commandText = await page.locator('#command-status').textContent();
+    throw new Error(`New Game failed: ${commandText}`);
+  }
 
   const statusText = await page.locator('#status').textContent();
   if (statusText && statusText.includes('Authentication required')) {
