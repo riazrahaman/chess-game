@@ -2859,7 +2859,10 @@ async function fetchBotConfig() {
     if (res.ok) {
       const data = await res.json();
       if (data && data.bot) {
-        updateBotUI(data.bot);
+        // Initial load: populate the controls from the server. Once the user
+        // has changed a control (botControlsTouched) the DOM wins, so a slow
+        // page-load fetch cannot clobber an already-made selection.
+        updateBotUI(data.bot, { applyControls: !botControlsTouched });
         if (data.bot.enabled && !currentSeatRole) {
           const humanColor = data.bot.color === 'black' ? 'white' : 'black';
           claimSeat(humanColor);
@@ -2869,25 +2872,28 @@ async function fetchBotConfig() {
   } catch (e) {}
 }
 
-function updateBotUI(botConfig) {
+// `applyControls` is the write-back policy for the user-editable fields
+// (#bot-toggle / #bot-level-select / #bot-color-select). It defaults to false
+// so a /api/bot RESPONSE never clobbers a newer in-flight user selection: the
+// DOM is the source of truth for the controls once the user has touched them.
+// Initial load (fetchBotConfig) passes true so the controls are populated from
+// the server on page load. The server stays authoritative for the bot status
+// badge and the seat state, which are always updated.
+function updateBotUI(botConfig, { applyControls = false } = {}) {
   if (!botConfig) return;
   const toggle = document.getElementById('bot-toggle');
   const levelSelect = document.getElementById('bot-level-select');
   const colorSelect = document.getElementById('bot-color-select');
   const badge = document.getElementById('bot-status-badge');
 
-  if (toggle && typeof botConfig.enabled === 'boolean' && document.activeElement !== toggle) {
+  if (applyControls && toggle && typeof botConfig.enabled === 'boolean') {
     toggle.checked = botConfig.enabled;
   }
-  if (levelSelect) {
-    if (botConfig && botConfig.level && document.activeElement !== levelSelect) {
-      levelSelect.value = String(botConfig.level);
-    }
+  if (applyControls && levelSelect && botConfig && botConfig.level) {
+    levelSelect.value = String(botConfig.level);
   }
-  if (colorSelect) {
-    if (botConfig && botConfig.color && document.activeElement !== colorSelect) {
-      colorSelect.value = botConfig.color;
-    }
+  if (applyControls && colorSelect && botConfig && botConfig.color) {
+    colorSelect.value = botConfig.color;
   }
   if (badge) {
     if (botConfig.enabled) {
@@ -2905,19 +2911,29 @@ function updateBotUI(botConfig) {
 // Bot config updates swap seats (bot + human); two in flight at once race each
 // other into 409 'seat occupied' replies, so they are serialised here.
 let botConfigChain = Promise.resolve();
+// Flips true the moment the user changes a bot control, so a late page-load
+// response cannot overwrite an intent expressed after the fetch started.
+let botControlsTouched = false;
 function sendBotConfigUpdate() {
-  botConfigChain = botConfigChain.then(() => sendBotConfigUpdateNow()).catch(() => {});
-  return botConfigChain;
-}
-
-async function sendBotConfigUpdateNow() {
+  botControlsTouched = true;
+  // Snapshot the user's intent SYNCHRONOUSLY, at gesture time. The queued
+  // sendBotConfigUpdateNow runs later (after earlier requests settle); if it
+  // re-read the DOM then, a newer selection would already be in the fields and
+  // the request would POST a stale colour, claiming the wrong human seat.
   const toggle = document.getElementById('bot-toggle');
   const levelSelect = document.getElementById('bot-level-select');
   const colorSelect = document.getElementById('bot-color-select');
+  const snapshot = {
+    enabled: toggle ? toggle.checked : false,
+    level: levelSelect ? parseInt(levelSelect.value, 10) : 3,
+    color: colorSelect ? colorSelect.value : 'black'
+  };
+  botConfigChain = botConfigChain.then(() => sendBotConfigUpdateNow(snapshot)).catch(() => {});
+  return botConfigChain;
+}
 
-  const enabled = toggle ? toggle.checked : false;
-  const level = levelSelect ? parseInt(levelSelect.value, 10) : 3;
-  const color = colorSelect ? colorSelect.value : 'black';
+async function sendBotConfigUpdateNow(snapshot) {
+  const { enabled, level, color } = snapshot;
 
   try {
     const res = await fetch(withRoomParam('/api/bot'), {
@@ -2927,6 +2943,9 @@ async function sendBotConfigUpdateNow() {
     });
     if (res.ok) {
       const data = await res.json();
+      // Do NOT write the response back into the user-editable controls: a slow
+      // response for an older request would clobber the newer selection. The
+      // badge and seat state (below) are still server-authoritative.
       updateBotUI(data);
       if (enabled) {
         const humanColor = color === 'black' ? 'white' : 'black';
