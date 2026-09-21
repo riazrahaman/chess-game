@@ -79,25 +79,36 @@ function getPremoveQueue() {
   return premoveQueue;
 }
 
-// Phase 3: Room-scoped routing and referee integration (/game/:roomId)
+// Phase 3: Room-scoped routing and referee integration.
+// The address bar normally stays at the site root; the personal room is not
+// carried in the URL but resolved from storage (see initRoomRouting). An
+// explicit /game/<room> path or ?room= link still takes precedence.
 function getCurrentRoomId() {
+  const valid = (room) => typeof room === 'string' && /^[a-zA-Z0-9_-]+$/.test(room);
   if (typeof window !== 'undefined' && window.location) {
     if (window.location.pathname) {
       const match = window.location.pathname.match(/\/game\/([^/]+)/);
       if (match && match[1]) {
-        return decodeURIComponent(match[1]);
+        try {
+          const room = decodeURIComponent(match[1]);
+          if (valid(room)) return room;
+        } catch (_) {}
       }
     }
     if (window.location.search) {
       try {
         const params = new URLSearchParams(window.location.search);
         const room = params.get('room');
-        if (room && /^[a-zA-Z0-9_-]+$/.test(room)) {
-          return room;
-        }
+        if (valid(room)) return room;
       } catch (_) {}
     }
   }
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const stored = window.localStorage.getItem('chess_personal_room');
+      if (valid(stored)) return stored;
+    }
+  } catch (_) {}
   return 'default';
 }
 
@@ -3750,6 +3761,9 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.setZenMode = setZenMode;
 }
 
+// The personal room is resolved from localStorage and passed to the API as
+// ?room=<id> (withRoomParam); the address bar deliberately stays at the root so
+// a plain visit does not expose or rewrite to /game/<id>.
 function initRoomRouting() {
   if (typeof window === 'undefined' || !window.location) return;
   const pathname = window.location.pathname || '';
@@ -3772,11 +3786,6 @@ function initRoomRouting() {
         if (window.localStorage) window.localStorage.setItem('chess_personal_room', personalRoom);
       } catch (_) {}
     }
-    try {
-      if (window.history && typeof window.history.replaceState === 'function') {
-        window.history.replaceState(null, '', '/game/' + encodeURIComponent(personalRoom) + (window.location.search || '') + (window.location.hash || ''));
-      }
-    } catch (_) {}
   }
 }
 
@@ -3796,8 +3805,10 @@ const copyRoomButton = document.getElementById('copy-room-link');
 if (copyRoomButton) {
   copyRoomButton.onclick = () => {
     const roomId = getCurrentRoomId();
+    // ?room= takes precedence over a recipient's own stored room, so a shared
+    // link joins the sender's room without exposing it as a path segment.
     const url = typeof window !== 'undefined' && window.location
-      ? (roomId === 'default' ? window.location.origin + '/' : window.location.origin + '/game/' + encodeURIComponent(roomId))
+      ? (roomId === 'default' ? window.location.origin + '/' : window.location.origin + '/?room=' + encodeURIComponent(roomId))
       : '';
     if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(url).then(() => {

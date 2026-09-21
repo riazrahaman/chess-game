@@ -161,8 +161,15 @@
     const parsed = parseHash(hash);
     if (!parsed) {
       // No route yet: pages can pick their landing view (ui.js sets 'play' for
-      // /game/<room> URLs so shared links open on the board).
-      if (!currentId) show(initialPath.startsWith('/game/') ? 'play' : 'home', {});
+      // /game/<room> URLs so shared links open on the board). A ?room= share
+      // link also opens on the board; a bare root still lands on Home.
+      let hasRoomParam = false;
+      try {
+        if (window.location && window.location.search) {
+          hasRoomParam = new URLSearchParams(window.location.search).has('room');
+        }
+      } catch (_) {}
+      if (!currentId) show((initialPath.startsWith('/game/') || hasRoomParam) ? 'play' : 'home', {});
       return; // in-page anchor (#workspace etc.): leave the current view alone
     }
     show(parsed.id, parsed.params);
@@ -199,7 +206,8 @@
       if (currentId !== id) {
         try {
           if (window.history && typeof window.history.pushState === 'function') {
-            window.history.pushState({ viewId: id, params }, '', window.location.pathname);
+            // Keep the query string (?room= share links) across in-memory navigation.
+            window.history.pushState({ viewId: id, params }, '', window.location.pathname + (window.location.search || ''));
           }
         } catch (_) {}
       }
