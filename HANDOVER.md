@@ -235,8 +235,8 @@ Shell.onChange(({ id, params }) => {});         // route listener
   `compete`, `me`. Unregistered views show a placeholder; registering a `mount()` later takes over the section.
 - `index.html` has `<base href="/">`, so never write `href="#/x"` expecting same-document navigation from
   code — use `Shell.navigate()`; the shell delegates clicks on `a[href^="#"]` for markup.
-- A plain visit lands on Home; `/game/<room>` links land on Play. Play params: `#/play?bot=1` enables the bot,
-  `#/play?invite=1` copies the room link.
+- A plain visit lands on Home; `/game/<room>` links and `?room=` share links land on Play. Play params:
+  `#/play?bot=1` enables the bot, `#/play?invite=1` copies the room link.
 - Every new client module: `ALLOWED_FILES` (server.js) + `PRECACHE_ASSETS` (service-worker.js) + `<script>` in
   index.html before `ui.js`, and it must have a call site or `test/reachability-selftest.js` fails. Wiring a
   formerly-dark module = delete it from `KNOWN_DARK` there (the list may only shrink).
@@ -466,7 +466,7 @@ No commit / push / kanban change (builder was the only writer).
    - In-page anchors (e.g. `#workspace`) do not start with `#/` and are left to native browser scrolling.
    - On boot, `route()` reads `window.location.hash || initialHash` to respect deep links, displays the view, and cleanly strips the hash via `history.replaceState`.
 2. **`src/ui.js`**:
-   - `initRoomRouting()` preserves initial hash during the `/` → `/game/<room>` redirect so `shell.js` boot can read it before stripping.
+   - `initRoomRouting()` mints/persists the private room in `localStorage.chess_personal_room` but no longer rewrites the URL (a plain visit keeps the root; the room is resolved from storage). `getCurrentRoomId()` precedence is path `/game/<room>` → `?room=` → stored → `default`; `Shell.navigate()` preserves `window.location.search` so a `?room=` share link survives in-app navigation.
    - One-shot parameter cleanups (`params.bot`, `params.invite`) use `window.location.pathname + (window.location.search || '')` instead of forcing `#/play`.
 3. **Audit & Safety**:
    - Gate 4 invariant: zero calls to `makeMove(` or `createInitialBoard(`.
@@ -1022,3 +1022,30 @@ The harness's `window` mock in `test/gate4-selftest.js` was exactly `{ matchMedi
 - After: `node test/p1-premove-selftest.js` → **Passed: 5, Failed: 0, exit 0**.
 - Mutation proof (scratch copy `test/.p1mut-tmp.js` with the mock reverted, deleted after): the same `TypeError: window.addEventListener is not a function`, **exit 1**; the repo file (byte-identical, `cmp`) passes 5/0.
 - `node test/about-selftest.js` → Passed: 13 (expected count 83); `node test/t0-deadcode-selftest.js` → 27/0; `node test/reachability-selftest.js` → 49 (KNOWN_DARK 10); `node test/wave3-hygiene-selftest.js` → 87; `npm run lint` → exit 0; `npm run test:unit` → exit 0, 0 `^FAIL:`, 83 distinct suites.
+
+## 28. FIX — the root URL no longer rewrites to `/game/<personal-room>`; the private room is resolved from storage (branch `fix/root-url-personal-room`, 2026-09-21)
+
+| | |
+|---|---|
+| Task | `fix-root-url-personal-room` (high) |
+| Branch | `fix/root-url-personal-room` |
+| Status | DONE |
+
+### Defect
+
+A plain visit to `https://chess.riazrahaman.com` had its address bar rewritten to `https://chess.riazrahaman.com/game/game-<id>`. `src/ui.js` `initRoomRouting()` minted a random room, stored it in `localStorage.chess_personal_room`, then `history.replaceState()`'d the path to `/game/<id>` — every visitor saw a room path they never asked for, and the manifest `start_url: "/"` never stayed `/` for an installed PWA.
+
+### Exact edits
+
+- `src/ui.js` — `initRoomRouting()` still mints/validates/persists the personal room but no longer calls `replaceState`, so the URL stays at the root. `getCurrentRoomId()` precedence is now `path /game/<room>` → `?room=` → stored `chess_personal_room` → `'default'`, every step validated (`/^[a-zA-Z0-9_-]+$/`, storage wrapped in try/catch). `withRoomParam()` therefore scopes every API/SSE call to the private room even though the URL does not carry it. `Copy Room Link` emits `origin + '/?room=' + id` for a personal room (a recipient's `?room=` wins over their own stored room, so sharing still joins the sender's board).
+- `src/shell.js` — `route()` lands a `?room=` share link (and `/game/<room>`) on **play**; a bare `/` still lands on **home** (plain-visit landing unchanged). `Shell.navigate()`'s `pushState` now keeps `window.location.search`, so a `?room=` link survives in-app navigation instead of being dropped one click after opening. `stripHash()` already preserved the query.
+- `src/ui-analysis.js` — `roomId()` prefers `window.getCurrentRoomId()` when present, falling back to its own path/query parse, so Analysis follows the same room.
+- `service-worker.js` — `CACHE_NAME` `chess-ui-v5` → `chess-ui-v6` (shell/ui bytes changed; a pinned cache-first name would otherwise serve returning users the stale shell).
+- `test/static-url-navigation-selftest.js` — extended from 8 to 16 tests (root stays `/` with no `/game/` replaceState, room mint preserved, storage fallback, `withRoomParam` scoping, `?room=` wins, landing views, and navigate-keeps-`?room=`); the 8 originals are byte-identical.
+
+### Evidence
+
+- Live Chromium probe: bare `/` → pathname `/`, view **home**, `getCurrentRoomId()` returns the seeded `game-mine`; `/?room=xyz` → view **play**, room `xyz`, and after `Shell.navigate('library')`/`('play')` the URL still holds `?room=xyz` and the room is still `xyz`; `/game/game-room1` → play/`game-room1`; Copy Room Link → `http://…/?room=game-mine`.
+- Mutation proof: pushState reverted to pathname-only → the keep-query test FAILs (15/1, exit 1); `?room=` landing reverted → 14/2, exit 1; restored 16/0.
+- Gates: `static-url-navigation` 16/0; `reachability` 49 (KNOWN_DARK 10); `t0-deadcode` 27/0; `wave3-hygiene` 87; `p3-multiroom` 58/0; `about` 13; `npm run lint` 0; `npm run test:unit` exit 0, 0 `^FAIL:`, 83 suites; `npm run test:browser` exit 0 with both sentinels. Live archives byte-identical.
+- Known non-blocking edge: shell.js treats a `?room=` link as a share link by presence (`has('room')`) without validating the value, so `/?room=` with an empty value lands on play but resolves to the stored/`default` room — cosmetic.

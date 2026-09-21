@@ -52,7 +52,7 @@ test('Gate 4: src/shell.js and src/ui.js make no calls to makeMove or createInit
 });
 
 // Helper to create a mocked DOM environment for shell.js
-function createMockEnv(initialUrl, initialHash) {
+function createMockEnv(initialUrl, initialHash, opts) {
   let currentUrl = initialUrl || 'https://chess.riazrahaman.com/game/game-test123';
   let currentHash = initialHash || '';
   const listeners = { click: [], hashchange: [], DOMContentLoaded: [] };
@@ -182,31 +182,77 @@ function createMockEnv(initialUrl, initialHash) {
     set hash(val) { currentHash = val; }
   };
 
+  function applyHistoryUrl(url) {
+    if (!url) return;
+    if (url.startsWith('/')) {
+      const withoutHash = url.split('#')[0];
+      const qIdx = withoutHash.indexOf('?');
+      parsedUrl.pathname = qIdx === -1 ? withoutHash : withoutHash.slice(0, qIdx);
+      parsedUrl.search = qIdx === -1 ? '' : withoutHash.slice(qIdx);
+    }
+    const hashIdx = url.indexOf('#');
+    currentHash = hashIdx !== -1 ? url.slice(hashIdx) : '';
+  }
+
   const replaceStateCalls = [];
+  const pushStateCalls = [];
   const history = {
     replaceState(state, title, url) {
       replaceStateCalls.push({ state, title, url });
-      if (url) {
-        if (url.startsWith('/')) {
-          parsedUrl.pathname = url.split('#')[0].split('?')[0];
-        }
-        const hashIdx = url.indexOf('#');
-        currentHash = hashIdx !== -1 ? url.slice(hashIdx) : '';
-      }
+      applyHistoryUrl(url);
+    },
+    pushState(state, title, url) {
+      pushStateCalls.push({ state, title, url });
+      applyHistoryUrl(url);
     }
+  };
+
+  const localStorageStore = new Map(Object.entries((opts && opts.localStorage) || {}));
+  const localStorage = {
+    getItem(key) { return localStorageStore.has(key) ? localStorageStore.get(key) : null; },
+    setItem(key, value) { localStorageStore.set(key, String(value)); },
+    removeItem(key) { localStorageStore.delete(key); }
   };
 
   const window = {
     document,
     location,
     history,
+    localStorage,
     addEventListener(evt, fn) {
       listeners[evt] = listeners[evt] || [];
       listeners[evt].push(fn);
     }
   };
 
-  return { window, document, location, history, replaceStateCalls, elements, listeners, shellNav };
+  return { window, document, location, history, localStorage, localStorageStore, replaceStateCalls, pushStateCalls, elements, listeners, shellNav };
+}
+
+// Loads src/ui.js into a fresh vm context and returns the context plus the mock
+// env. ui.js drives /api/* through fetch and an EventSource at load time, so the
+// context stubs both; localStorage seeds the stored personal room.
+function loadUiEnv(initialUrl, opts) {
+  const env = createMockEnv(initialUrl, '', opts);
+  env.window.navigator = { clipboard: { writeText: async () => {} } };
+  const context = {
+    window: env.window,
+    document: env.document,
+    navigator: env.window.navigator,
+    URLSearchParams,
+    setTimeout: () => 1,
+    clearTimeout: () => {},
+    setInterval: () => 1,
+    clearInterval: () => {},
+    fetch: () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }),
+    EventSource: function MockEventSource() {
+      this.addEventListener = () => {};
+      this.close = () => {};
+    },
+    console: { log() {}, warn() {}, error() {} }
+  };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(ROOT, 'src', 'ui.js'), 'utf8'), context);
+  return { context, env };
 }
 
 // 2. Initial page load on /game/<room> without hash lands on Play with static URL
@@ -385,6 +431,161 @@ test('ui.js initRoomRouting does not append #/route hash into URL', () => {
     'ui.js must not append window.location.hash in initRoomRouting');
   assert(!uiSrc.includes("window.location.search + '#/play'"),
     'ui.js must not force #/play hash on one-shot cleanup');
+});
+
+// 9. (a) A plain root visit must not rewrite the URL to /game/<room>.
+test('ui.js initRoomRouting leaves a plain root visit at / with no /game/ replaceState', () => {
+  const { env } = loadUiEnv('https://chess.riazrahaman.com/', {
+    localStorage: { chess_personal_room: 'game-existing1' }
+  });
+
+  const gameRewrites = env.replaceStateCalls.filter(c => typeof c.url === 'string' && c.url.startsWith('/game/'));
+  assert(gameRewrites.length === 0,
+    `root visit must not replaceState to /game/...; got ${JSON.stringify(env.replaceStateCalls)}`);
+  assert(env.location.pathname === '/', `pathname must stay '/', got ${env.location.pathname}`);
+  assert(env.localStorageStore.get('chess_personal_room') === 'game-existing1', 'stored personal room preserved');
+});
+
+// 10. (a-mint) A first-ever root visit still mints a personal room into storage.
+test('ui.js initRoomRouting mints and persists a personal room on a first bare root visit', () => {
+  const { env } = loadUiEnv('https://chess.riazrahaman.com/', { localStorage: {} });
+  const minted = env.localStorageStore.get('chess_personal_room');
+  assert(minted && /^[a-zA-Z0-9_-]+$/.test(minted), `expected a minted personal room, got ${minted}`);
+  const gameRewrites = env.replaceStateCalls.filter(c => typeof c.url === 'string' && c.url.startsWith('/game/'));
+  assert(gameRewrites.length === 0, 'minting must not rewrite the URL to /game/...');
+});
+
+// 11. (b) getCurrentRoomId on a bare / uses the stored personal room, else 'default'.
+test('ui.js getCurrentRoomId resolves the stored personal room on a bare root, else default', () => {
+  const withRoom = loadUiEnv('https://chess.riazrahaman.com/', {
+    localStorage: { chess_personal_room: 'game-personal9' }
+  });
+  assert(withRoom.context.window.getCurrentRoomId() === 'game-personal9',
+    `expected stored room game-personal9, got ${withRoom.context.window.getCurrentRoomId()}`);
+
+  // A bare root mints a room at load; clear it to isolate the no-stored-room
+  // fallback in getCurrentRoomId itself.
+  const withoutRoom = loadUiEnv('https://chess.riazrahaman.com/', { localStorage: {} });
+  withoutRoom.env.localStorageStore.delete('chess_personal_room');
+  assert(withoutRoom.context.window.getCurrentRoomId() === 'default',
+    `expected default with no stored room, got ${withoutRoom.context.window.getCurrentRoomId()}`);
+});
+
+// 12. (c) withRoomParam scopes API calls to the personal room, or leaves them bare.
+test('ui.js withRoomParam appends ?room=<personal> and leaves default urls untouched', () => {
+  const withRoom = loadUiEnv('https://chess.riazrahaman.com/', {
+    localStorage: { chess_personal_room: 'game-personal9' }
+  });
+  assert(withRoom.context.window.withRoomParam('/api/state') === '/api/state?room=game-personal9',
+    `expected /api/state?room=game-personal9, got ${withRoom.context.window.withRoomParam('/api/state')}`);
+
+  const withoutRoom = loadUiEnv('https://chess.riazrahaman.com/', { localStorage: {} });
+  withoutRoom.env.localStorageStore.delete('chess_personal_room');
+  assert(withoutRoom.context.window.withRoomParam('/api/state') === '/api/state',
+    `expected bare /api/state for default, got ${withoutRoom.context.window.withRoomParam('/api/state')}`);
+});
+
+// 13. (d) shell.js lands on home for a bare root regardless of stored room;
+// /game/<room> still lands on play. This pins the preserved landing behavior:
+// the card only changes the URL, not which view a plain visit shows.
+test('shell.js lands on home for a bare root (stored room or not), play for /game/<room>', () => {
+  const shellCode = fs.readFileSync(path.join(ROOT, 'src', 'shell.js'), 'utf8');
+
+  const rootWithRoom = createMockEnv('https://chess.riazrahaman.com/', '', {
+    localStorage: { chess_personal_room: 'game-existing1' }
+  });
+  vm.runInNewContext(shellCode, { window: rootWithRoom.window, document: rootWithRoom.document, console });
+  assert(rootWithRoom.window.Shell.current() === 'home',
+    `expected home for a bare root even with a stored room, got ${rootWithRoom.window.Shell.current()}`);
+  assert(rootWithRoom.location.pathname === '/', 'root pathname must remain /');
+
+  const rootWithoutRoom = createMockEnv('https://chess.riazrahaman.com/', '', { localStorage: {} });
+  vm.runInNewContext(shellCode, { window: rootWithoutRoom.window, document: rootWithoutRoom.document, console });
+  assert(rootWithoutRoom.window.Shell.current() === 'home',
+    `expected home with no stored room, got ${rootWithoutRoom.window.Shell.current()}`);
+
+  const gameRoom = createMockEnv('https://chess.riazrahaman.com/game/game-room1', '', {
+    localStorage: { chess_personal_room: 'game-existing1' }
+  });
+  vm.runInNewContext(shellCode, { window: gameRoom.window, document: gameRoom.document, console });
+  assert(gameRoom.window.Shell.current() === 'play',
+    `expected play for /game/<room>, got ${gameRoom.window.Shell.current()}`);
+});
+
+// 14. (e) An explicit ?room= link still wins over any stored personal room.
+test('ui.js getCurrentRoomId lets an explicit ?room= win over the stored room', () => {
+  const { context } = loadUiEnv('https://chess.riazrahaman.com/?room=xyz', {
+    localStorage: { chess_personal_room: 'game-existing1' }
+  });
+  assert(context.window.getCurrentRoomId() === 'xyz',
+    `expected ?room=xyz to win, got ${context.window.getCurrentRoomId()}`);
+});
+
+// 15. (f) A ?room= share link lands on the board; a bare root still lands on home.
+test('shell.js lands on play for /?room=xyz, home for a bare root, play for /game/<room>', () => {
+  const shellCode = fs.readFileSync(path.join(ROOT, 'src', 'shell.js'), 'utf8');
+
+  const share = createMockEnv('https://chess.riazrahaman.com/?room=xyz', '', {
+    localStorage: { chess_personal_room: 'game-mine' }
+  });
+  vm.runInNewContext(shellCode, { window: share.window, document: share.document, console, URLSearchParams });
+  assert(share.window.Shell.current() === 'play',
+    `expected play for /?room=xyz, got ${share.window.Shell.current()}`);
+
+  const root = createMockEnv('https://chess.riazrahaman.com/', '', {
+    localStorage: { chess_personal_room: 'game-mine' }
+  });
+  vm.runInNewContext(shellCode, { window: root.window, document: root.document, console, URLSearchParams });
+  assert(root.window.Shell.current() === 'home',
+    `expected home for a bare root, got ${root.window.Shell.current()}`);
+
+  const gamePath = createMockEnv('https://chess.riazrahaman.com/game/game-room1', '');
+  vm.runInNewContext(shellCode, { window: gamePath.window, document: gamePath.document, console, URLSearchParams });
+  assert(gamePath.window.Shell.current() === 'play',
+    `expected play for /game/<room>, got ${gamePath.window.Shell.current()}`);
+});
+
+// 16. (g) In-app navigation on a /?room= page must not erase the query string.
+test('Shell.navigate keeps ?room=xyz in the URL and the room resolves to xyz afterwards', () => {
+  const shellCode = fs.readFileSync(path.join(ROOT, 'src', 'shell.js'), 'utf8');
+  const env = createMockEnv('https://chess.riazrahaman.com/?room=xyz', '', {
+    localStorage: { chess_personal_room: 'game-mine' }
+  });
+  env.window.navigator = {};
+  vm.runInNewContext(shellCode, { window: env.window, document: env.document, console, URLSearchParams });
+
+  const Shell = env.window.Shell;
+  assert(Shell.current() === 'play', 'share link boots on play');
+  // Boot already landed on play, so navigate to a sibling view: the first real
+  // in-memory navigation is what used to drop the query string.
+  Shell.registerView({ id: 'library', title: 'Library' });
+  Shell.navigate('library', {});
+
+  assert(env.pushStateCalls.length > 0, 'navigate should push a history entry');
+  const pushed = env.pushStateCalls[env.pushStateCalls.length - 1].url;
+  assert(typeof pushed === 'string' && pushed.includes('room=xyz'),
+    `pushState url must keep room=xyz, got ${pushed}`);
+  assert(env.location.search === '?room=xyz', `location.search must stay ?room=xyz, got ${env.location.search}`);
+
+  // (h) The strongest integration check: after navigating, ui.js still resolves
+  // the shared room xyz rather than the recipient's own stored game-mine.
+  const uiContext = {
+    window: env.window,
+    document: env.document,
+    navigator: env.window.navigator,
+    URLSearchParams,
+    setTimeout: () => 1,
+    clearTimeout: () => {},
+    setInterval: () => 1,
+    clearInterval: () => {},
+    fetch: () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }),
+    EventSource: function MockEventSource() { this.addEventListener = () => {}; this.close = () => {}; },
+    console: { log() {}, warn() {}, error() {} }
+  };
+  vm.createContext(uiContext);
+  vm.runInContext(fs.readFileSync(path.join(ROOT, 'src', 'ui.js'), 'utf8'), uiContext);
+  assert(uiContext.window.getCurrentRoomId() === 'xyz',
+    `expected xyz after navigate, got ${uiContext.window.getCurrentRoomId()}`);
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed\n`);

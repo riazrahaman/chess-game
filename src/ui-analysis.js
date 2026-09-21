@@ -88,7 +88,11 @@
   }
   function roomId() {
     try {
-      if (typeof getCurrentRoomId === 'function') return getCurrentRoomId(); // ui.js global
+      // Prefer ui.js's resolver so Analysis follows the same personal room as
+      // the rest of the app (which is no longer carried in the URL path).
+      if (typeof window !== 'undefined' && typeof window.getCurrentRoomId === 'function') {
+        return window.getCurrentRoomId();
+      }
     } catch (_) { /* fall through */ }
     const m = window.location.pathname.match(/\/game\/([^/]+)/);
     if (m) return decodeURIComponent(m[1]);

@@ -100,8 +100,10 @@ Client (`index.html` loads ~43 plain scripts, `shell.js` before `ui.js`):
   white-perspective and carry `depth`, `engine`, `mate`, `multipv`.
 - `service-worker.js` — precaches the shell; **never** serves `/api/*` from cache.
 
-Auto-rooms: a plain visit is rewritten to `/game/<personal-room>` (`ui.js`), each room has its own referee,
-seats, bot, and state files. Anything that talks to the API from a page must pass `?room=` /
+Auto-rooms: a plain visit keeps the root URL but a private room id is minted into
+`localStorage.chess_personal_room` (`ui.js`) and resolved by `getCurrentRoomId()` (path `/game/<room>` →
+`?room=` → stored → `default`), so the address bar never shows `/game/<personal-room>`. Each room has its own
+referee, seats, bot, and state files. Anything that talks to the API from a page must pass `?room=` /
 `getCurrentRoomId()`; the default room is not the page's room.
 
 ## Definition of Done (enforced)
