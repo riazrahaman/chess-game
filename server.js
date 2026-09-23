@@ -851,6 +851,107 @@ function decodeJwtPayload(jwtString) {
   }
 }
 
+function decodeJwtHeader(jwtString) {
+  if (typeof jwtString !== 'string') return null;
+  const parts = jwtString.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    const headerJson = Buffer.from(parts[0], 'base64url').toString('utf8');
+    return JSON.parse(headerJson);
+  } catch (_) {
+    return null;
+  }
+}
+
+// Google Identity Services sign ID tokens with RS256. The signature MUST be
+// verified against Google's published JWKS — decoding the payload alone is not
+// authentication (anyone can craft a payload with the public client id/audience).
+const GOOGLE_ISSUERS = ['accounts.google.com', 'https://accounts.google.com'];
+const GOOGLE_JWKS_TTL_MS = 6 * 60 * 60 * 1000;
+let googleJwksCache = { keys: [], fetchedAt: 0 };
+
+function getGoogleJwksUrl() {
+  return process.env.CHESS_GOOGLE_JWKS_URL || 'https://www.googleapis.com/oauth2/v3/certs';
+}
+
+async function fetchGoogleJwks(force) {
+  const now = Date.now();
+  if (!force && googleJwksCache.keys.length && (now - googleJwksCache.fetchedAt) < GOOGLE_JWKS_TTL_MS) {
+    return googleJwksCache.keys;
+  }
+  if (typeof fetch !== 'function') {
+    throw new Error('fetch unavailable for JWKS retrieval');
+  }
+  const res = await fetch(getGoogleJwksUrl(), { headers: { Accept: 'application/json' } });
+  if (!res || !res.ok) {
+    throw new Error('jwks fetch failed: ' + (res ? res.status : 'no-response'));
+  }
+  const data = await res.json();
+  const keys = Array.isArray(data && data.keys) ? data.keys : [];
+  googleJwksCache = { keys, fetchedAt: now };
+  return keys;
+}
+
+function verifyJwtSignatureRs256(jwtString, jwk) {
+  const parts = String(jwtString).split('.');
+  if (parts.length !== 3) return false;
+  try {
+    const publicKey = crypto.createPublicKey({ key: jwk, format: 'jwk' });
+    const signingInput = Buffer.from(`${parts[0]}.${parts[1]}`);
+    const signature = Buffer.from(parts[2], 'base64url');
+    return crypto.verify('sha256', signingInput, publicKey, signature);
+  } catch (_) {
+    return false;
+  }
+}
+
+// Resolve the token issuer to a verified payload, or a rejection reason.
+// Fails closed: an unverifiable signature, issuer, expiry or audience is a rejection.
+async function verifyGoogleIdToken(jwtString) {
+  const parts = String(jwtString == null ? '' : jwtString).split('.');
+  if (parts.length !== 3) return { ok: false, reason: 'invalid google credential token' };
+
+  const header = decodeJwtHeader(jwtString);
+  if (!header || header.alg !== 'RS256' || !header.kid) {
+    return { ok: false, reason: 'unsupported google token algorithm' };
+  }
+
+  const payload = decodeJwtPayload(jwtString);
+  if (!payload || !payload.sub) {
+    return { ok: false, reason: 'invalid google credential token' };
+  }
+
+  let keys;
+  try {
+    keys = await fetchGoogleJwks(false);
+  } catch (_) {
+    return { ok: false, reason: 'unable to verify google token' };
+  }
+
+  let jwk = keys.find(k => k && k.kid === header.kid);
+  if (!jwk) {
+    // The signing key may have rotated since the last cache fill — refetch once.
+    try { keys = await fetchGoogleJwks(true); } catch (_) {}
+    jwk = keys.find(k => k && k.kid === header.kid);
+  }
+  if (!jwk) return { ok: false, reason: 'google signing key not found' };
+
+  if (!verifyJwtSignatureRs256(jwtString, jwk)) {
+    return { ok: false, reason: 'invalid google token signature' };
+  }
+
+  if (GOOGLE_ISSUERS.indexOf(payload.iss) === -1) {
+    return { ok: false, reason: 'invalid token issuer' };
+  }
+  if (payload.exp && payload.exp * 1000 < Date.now() - 60000) {
+    return { ok: false, reason: 'google credential token expired' };
+  }
+  if (process.env.GOOGLE_CLIENT_ID && payload.aud !== process.env.GOOGLE_CLIENT_ID) {
+    return { ok: false, reason: 'invalid token audience' };
+  }
+  return { ok: true, payload };
+}
+
 function applySecurityHeaders(req, res) {
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Frame-Options', 'DENY');
@@ -1452,7 +1553,7 @@ function createServer() {
         sendJson(res, 200, {
           ok: true,
           googleClientId: process.env.GOOGLE_CLIENT_ID || null,
-          demoAuthEnabled: process.env.ALLOW_DEMO_AUTH !== '0'
+          demoAuthEnabled: process.env.ALLOW_DEMO_AUTH === '1'
         });
         return;
       }
@@ -1463,9 +1564,9 @@ function createServer() {
             sendJsonError(res, 400, 'invalid request body');
             return;
           }
-          // Direct / demo Google sign-in is available by default when
-          // GOOGLE_CLIENT_ID is unset, or can be forced off with ALLOW_DEMO_AUTH=0.
-          if (body.demoUser && process.env.ALLOW_DEMO_AUTH !== '0') {
+          // Credential-free demo sign-in is opt-in: it only works when
+          // ALLOW_DEMO_AUTH=1 is explicitly set (dev/demo deployments only).
+          if (body.demoUser && process.env.ALLOW_DEMO_AUTH === '1') {
             const email = String(body.demoUser.email || 'player@gmail.com');
             const name = String(body.demoUser.name || email.split('@')[0] || 'Google Player');
             const user = accountsManager.createOrFindGoogleUser({
@@ -1483,28 +1584,23 @@ function createServer() {
             sendJsonError(res, 400, 'credential is required');
             return;
           }
-          const payload = decodeJwtPayload(body.credential);
-          if (!payload || !payload.sub) {
-            sendJsonError(res, 400, 'invalid google credential token');
-            return;
-          }
-          if (payload.exp && payload.exp * 1000 < Date.now() - 60000) {
-            sendJsonError(res, 401, 'google credential token expired');
-            return;
-          }
-          if (process.env.GOOGLE_CLIENT_ID && payload.aud !== process.env.GOOGLE_CLIENT_ID) {
-            sendJsonError(res, 401, 'invalid token audience');
-            return;
-          }
-          const user = accountsManager.createOrFindGoogleUser({
-            googleId: payload.sub,
-            email: payload.email,
-            name: payload.name,
-            picture: payload.picture
-          });
-          const session = accountsManager.createSession(user);
-          setSessionCookie(res, session.token);
-          sendJson(res, 200, { ok: true, user, token: session.token });
+          verifyGoogleIdToken(body.credential).then(verification => {
+            if (!verification.ok) {
+              const badSig = /signature|issuer|algorithm|signing key/.test(verification.reason);
+              sendJsonError(res, badSig ? 401 : 400, verification.reason);
+              return;
+            }
+            const payload = verification.payload;
+            const user = accountsManager.createOrFindGoogleUser({
+              googleId: payload.sub,
+              email: payload.email,
+              name: payload.name,
+              picture: payload.picture
+            });
+            const session = accountsManager.createSession(user);
+            setSessionCookie(res, session.token);
+            sendJson(res, 200, { ok: true, user, token: session.token });
+          }).catch(err => sendJsonError(res, 400, err.message));
         }).catch(err => sendJsonError(res, 400, err.message));
         return;
       }
@@ -2005,6 +2101,14 @@ module.exports = {
   Accounts,
   ratingHook,
   SocialRoutes,
+  // Google Identity token verification (RS256 over Google JWKS)
+  verifyGoogleIdToken,
+  decodeJwtPayload,
+  decodeJwtHeader,
+  verifyJwtSignatureRs256,
+  fetchGoogleJwks,
+  setGoogleJwksForTest: (keys) => { googleJwksCache = { keys: keys || [], fetchedAt: Date.now() }; },
+  clearGoogleJwks: () => { googleJwksCache = { keys: [], fetchedAt: 0 }; },
   // Wave 3 room GC
   gcRooms,
   listRooms: () => listRooms().map(publicRoom),

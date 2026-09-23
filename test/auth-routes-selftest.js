@@ -3,6 +3,7 @@
 
 const assert = require('assert');
 const http = require('http');
+const crypto = require('crypto');
 const serverModule = require('../server.js');
 
 let passed = 0;
@@ -153,14 +154,12 @@ async function run() {
       assert.strictEqual(meAfter.body.authenticated, false);
     });
 
-    await test('POST /api/auth/google parses valid JWT credential and establishes session', async () => {
-      // Construct sample valid Google JWT
+    await test('POST /api/auth/google REJECTS an unsigned/forged JWT credential', async () => {
       const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
       const payload = Buffer.from(JSON.stringify({
-        sub: 'google-uid-998877',
-        email: 'grandmaster@example.com',
-        name: 'Magnus Player',
-        picture: 'https://lh3.googleusercontent.com/a/magnus.jpg',
+        sub: 'forged-sub',
+        email: 'forged@evil.com',
+        name: 'Forged',
         exp: Math.floor(Date.now() / 1000) + 3600
       })).toString('base64url');
       const signature = Buffer.from('mock-sig').toString('base64url');
@@ -172,31 +171,146 @@ async function run() {
         headers: { 'Content-Type': 'application/json' }
       }, { credential });
 
-      assert.strictEqual(res.status, 200);
-      assert.strictEqual(res.body.ok, true);
-      assert.strictEqual(res.body.user.email, 'grandmaster@example.com');
-      assert.strictEqual(res.body.user.authProvider, 'google');
-      assert(res.body.token);
+      assert.strictEqual(res.status, 401);
+      assert.strictEqual(res.body.ok, false);
     });
 
-    await test('POST /api/auth/google with demoUser establishes Google session', async () => {
+    await test('POST /api/auth/google accepts a valid RS256 token signed by a trusted JWKS key', async () => {
+      const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+      const jwk = publicKey.export({ format: 'jwk' });
+      jwk.kid = 'test-key-1';
+      jwk.alg = 'RS256';
+      jwk.use = 'sig';
+      serverModule.setGoogleJwksForTest([jwk]);
+
+      const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT', kid: 'test-key-1' })).toString('base64url');
+      const payload = Buffer.from(JSON.stringify({
+        sub: 'google-verified-sub-1',
+        email: 'verified@example.com',
+        name: 'Verified User',
+        iss: 'https://accounts.google.com',
+        aud: process.env.GOOGLE_CLIENT_ID || 'test-client-id',
+        exp: Math.floor(Date.now() / 1000) + 3600
+      })).toString('base64url');
+      const signingInput = `${header}.${payload}`;
+      const signature = crypto.sign('sha256', Buffer.from(signingInput), privateKey).toString('base64url');
+      const credential = `${signingInput}.${signature}`;
+
       const res = await request(server, {
         path: '/api/auth/google',
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
-      }, {
-        demoUser: {
-          name: 'Riaz Rahaman',
-          email: 'rahaman.riaz@gmail.com'
-        }
-      });
+      }, { credential });
 
       assert.strictEqual(res.status, 200);
       assert.strictEqual(res.body.ok, true);
-      assert.strictEqual(res.body.user.email, 'rahaman.riaz@gmail.com');
-      assert.strictEqual(res.body.user.username, 'Riaz Rahaman');
+      assert.strictEqual(res.body.user.email, 'verified@example.com');
       assert.strictEqual(res.body.user.authProvider, 'google');
       assert(res.body.token);
+    });
+
+    await test('POST /api/auth/google rejects a valid signature from an untrusted key', async () => {
+      const trusted = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+      const trustedJwk = trusted.publicKey.export({ format: 'jwk' });
+      trustedJwk.kid = 'trusted-kid';
+      serverModule.setGoogleJwksForTest([trustedJwk]);
+
+      const attacker = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+      const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT', kid: 'trusted-kid' })).toString('base64url');
+      const payload = Buffer.from(JSON.stringify({
+        sub: 'attacker-sub',
+        email: 'attacker@evil.com',
+        iss: 'https://accounts.google.com',
+        exp: Math.floor(Date.now() / 1000) + 3600
+      })).toString('base64url');
+      const signingInput = `${header}.${payload}`;
+      const signature = crypto.sign('sha256', Buffer.from(signingInput), attacker.privateKey).toString('base64url');
+
+      const res = await request(server, {
+        path: '/api/auth/google',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }, { credential: `${signingInput}.${signature}` });
+
+      assert.strictEqual(res.status, 401);
+      assert.strictEqual(res.body.ok, false);
+    });
+
+    await test('POST /api/auth/google rejects a correctly signed token with a non-Google issuer', async () => {
+      const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+      const jwk = publicKey.export({ format: 'jwk' });
+      jwk.kid = 'issuer-test-kid';
+      serverModule.setGoogleJwksForTest([jwk]);
+
+      const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT', kid: 'issuer-test-kid' })).toString('base64url');
+      const payload = Buffer.from(JSON.stringify({
+        sub: 'issuer-sub',
+        email: 'issuer@evil.com',
+        iss: 'https://evil.example.com',
+        exp: Math.floor(Date.now() / 1000) + 3600
+      })).toString('base64url');
+      const signingInput = `${header}.${payload}`;
+      const signature = crypto.sign('sha256', Buffer.from(signingInput), privateKey).toString('base64url');
+
+      const res = await request(server, {
+        path: '/api/auth/google',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      }, { credential: `${signingInput}.${signature}` });
+
+      assert.strictEqual(res.status, 401);
+      assert.strictEqual(res.body.ok, false);
+    });
+
+    await test('POST /api/auth/google with demoUser establishes Google session when ALLOW_DEMO_AUTH=1', async () => {
+      const prev = process.env.ALLOW_DEMO_AUTH;
+      process.env.ALLOW_DEMO_AUTH = '1';
+      try {
+        // Config reflects the opt-in flag
+        const cfg = await request(server, { path: '/api/auth/config' });
+        assert.strictEqual(cfg.body.demoAuthEnabled, true);
+
+        const res = await request(server, {
+          path: '/api/auth/google',
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        }, {
+          demoUser: {
+            name: 'Riaz Rahaman',
+            email: 'rahaman.riaz@gmail.com'
+          }
+        });
+
+        assert.strictEqual(res.status, 200);
+        assert.strictEqual(res.body.ok, true);
+        assert.strictEqual(res.body.user.email, 'rahaman.riaz@gmail.com');
+        assert.strictEqual(res.body.user.username, 'Riaz Rahaman');
+        assert.strictEqual(res.body.user.authProvider, 'google');
+        assert(res.body.token);
+      } finally {
+        if (prev === undefined) delete process.env.ALLOW_DEMO_AUTH;
+        else process.env.ALLOW_DEMO_AUTH = prev;
+      }
+    });
+
+    await test('POST /api/auth/google demoUser is DISABLED when ALLOW_DEMO_AUTH is unset', async () => {
+      const prev = process.env.ALLOW_DEMO_AUTH;
+      delete process.env.ALLOW_DEMO_AUTH;
+      try {
+        const cfg = await request(server, { path: '/api/auth/config' });
+        assert.strictEqual(cfg.body.demoAuthEnabled, false);
+
+        const res = await request(server, {
+          path: '/api/auth/google',
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        }, { demoUser: { name: 'Backdoor', email: 'backdoor@evil.com' } });
+
+        assert.strictEqual(res.status, 400);
+        assert.strictEqual(res.body.ok, false);
+      } finally {
+        if (prev !== undefined) process.env.ALLOW_DEMO_AUTH = prev;
+      }
     });
 
     await test('GET /api/profile returns profile stats', async () => {
