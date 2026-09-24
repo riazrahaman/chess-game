@@ -53,7 +53,7 @@ and gitignored. The puzzle sample is imported into SQLite on the first puzzle re
 ## Testing
 
 ```bash
-npm run check          # lint + every unit suite (~7 min; includes a 200-game differential test vs chess.js)
+npm run check          # lint + every unit suite (~5 min; includes a 200-game differential test vs chess.js)
 npm run test:browser   # Playwright smoke + UI-feature suites (start the server on :39281 first)
 node test/<name>-selftest.js   # any single suite — each is a standalone Node script
 ```
@@ -79,6 +79,7 @@ docs/                     design, architecture, evolution, roadmap, kanban manif
 ## Documentation
 
 - [CLAUDE.md](CLAUDE.md) — invariants, conventions and Definition of Done (read this before changing code)
+- [CHANGELOG.md](CHANGELOG.md) — release history
 - [docs/06-world-class-roadmap.md](docs/06-world-class-roadmap.md) — audited state, bug table, phased roadmap
 - [HANDOVER.md](HANDOVER.md) — per-wave status tables and open follow-ups
 - [docs/01-design.md](docs/01-design.md) · [02-tech-stack](docs/02-tech-stack.md) · [03-evolution](docs/03-evolution-journey.md) · [04-code-flow](docs/04-code-flow+diagrams.md) · [05-file-inventory](docs/05-file-inventory.md)

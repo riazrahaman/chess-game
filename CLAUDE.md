@@ -15,7 +15,7 @@ server-side (bots). Deployed on Railway at https://chess.riazrahaman.com from `m
 npm install
 node server.js                        # http://127.0.0.1:39281  (CHESS_PORT=… or PORT=… to override)
 
-npm run check                         # lint + all 79 unit suites (~7 min; the differential suite replays 200 games)
+npm run check                         # lint + all 83 unit suites (~5 min; the differential suite replays 200 games)
 npm run lint                          # node --check over server, client, and test files
 npm run test:unit                     # every wired *-selftest.js, serially
 npm run test:browser                  # Playwright: scripts/smoke-test.mjs + scripts/test-ui-features.mjs
