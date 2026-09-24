@@ -2,7 +2,7 @@
 
 A full chess site built in vanilla JavaScript on an authoritative Node.js referee. No build step, no
 framework, no bundler. A vendored **Stockfish 19** (lite single-threaded WASM, GPL-3.0) powers analysis in the
-browser and the bots on the server. Live at https://chess-game-0zax.onrender.com.
+browser and the bots on the server. Live at https://chess.riazrahaman.com.
 
 ## What you can do
 

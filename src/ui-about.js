@@ -502,7 +502,7 @@
           <p class="about-intro">Play, study, and improve in a quiet chess space designed around one clear principle: the board you see always comes from the same source of truth.</p>
           <div class="about-actions">
             <button class="about-action about-action-primary" type="button" data-about-action="play">Start a game</button>
-            <a class="about-action" href="https://chess-game-0zax.onrender.com" target="_blank" rel="noopener">Open live site</a>
+            <a class="about-action" href="https://chess.riazrahaman.com" target="_blank" rel="noopener">Open live site</a>
           </div>
           <p class="about-version" id="about-version" aria-label="Application version"></p>
         </header>
@@ -641,7 +641,7 @@
           <h2 class="about-footer-title">Ready when you are.</h2>
           <div class="about-actions">
             <button class="about-action about-action-primary" type="button" data-about-action="play">Start a game</button>
-            <a class="about-action" href="https://chess-game-0zax.onrender.com" target="_blank" rel="noopener">Open live site</a>
+            <a class="about-action" href="https://chess.riazrahaman.com" target="_blank" rel="noopener">Open live site</a>
           </div>
           <p class="about-footer-note">Local-first · no build step · zero telemetry · Stockfish 19 lite (GPL-3.0)</p>
         </footer>

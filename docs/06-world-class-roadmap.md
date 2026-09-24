@@ -136,7 +136,7 @@ strength — reads the same PST number. Verified 2026 integration path:
 **Phase E1b — server-side engine for `bot-service.js`, reports and the eval cache (X3).** — **in progress (Wave 1, branch `feat/wave1-real-engine`)** — Option A chosen: same vendored WASM under Node (`src/engine-server.js`, Worker B).
 - Option A: same `stockfish` npm under Node in a `worker_thread`, one per active bot room, UCI over messages.
 - Note on `@lichess-org/stockfish-web` (alternative small-WASM + separate `.nnue` route): npm says AGPL-3.0-or-later while GitHub metadata says GPL-3.0 — **unresolved; treat as AGPL** until clarified.
-- Option B (strongest): native Stockfish 19 binary via `child_process.spawn` — on Render, vendor a Linux x86-64 binary or build in Docker; check `avx2/bmi2` on the dyno. Running server-side has no GPL distribution obligation.
+- Option B (strongest): native Stockfish 19 binary via `child_process.spawn` — in the deployment container, vendor a Linux x86-64 binary or build in Docker; check `avx2/bmi2` on the host. Running server-side has no GPL distribution obligation.
 
 **Phase E1c — lichess external-engine protocol** (`POST /api/external-engine`, provider long-polls `/work`,
 client streams NDJSON from `/analyse`). License-avoidant: users point their own engine at your analysis

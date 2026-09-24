@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A vanilla-JS chess site with an authoritative Node.js referee backend. No build step, no framework, no
 bundler — `server.js` serves plain `<script>` files from an allowlist. A vendored Stockfish 19 (lite,
 single-threaded WASM, GPL-3.0, `vendor/stockfish/`) runs both in a browser Web Worker (analysis) and
-server-side (bots). Deployed on Render at https://chess-game-0zax.onrender.com from `main`.
+server-side (bots). Deployed on Railway at https://chess.riazrahaman.com from `main`.
 
 ## Commands
 
@@ -135,5 +135,5 @@ modules are listed in `KNOWN_DARK`. Full list: `HANDOVER.md` §8.
   sourced feature deltas. Update its status markers when you land an item.
 - `HANDOVER.md` — per-wave status tables (§5 Wave 0, §6 Wave 1, §7 Wave 2 incl. the shell view contract, §8 Wave 3)
   and open follow-ups. `docs/kanban-tasks.json` + `scripts/kanban-sync.mjs` mirror the plan to the kanban board. Work is done on feature branches, merged to `main` only after `npm run check` and both
-  browser scripts pass, then pushed (Render deploys `main`).
+  browser scripts pass, then pushed (Railway deploys `main`).
 - `RECOMMENDATIONS.md` is the historical roadmap; its "Done" marks predate the audit and are not reliable.

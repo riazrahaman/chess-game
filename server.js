@@ -719,12 +719,10 @@ function isOriginAllowed(origin, req) {
       return true;
     }
 
-    // 4. Domains: riazrahaman.com, onrender.com, railway.app
+    // 4. Domains: riazrahaman.com, railway.app
     if (
       hostname === 'riazrahaman.com' ||
       hostname.endsWith('.riazrahaman.com') ||
-      hostname === 'onrender.com' ||
-      hostname.endsWith('.onrender.com') ||
       hostname === 'railway.app' ||
       hostname.endsWith('.railway.app') ||
       hostname.endsWith('.up.railway.app')

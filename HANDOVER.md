@@ -13,7 +13,7 @@ This document records the operational state of the Chess Game project, including
 ---
 
 ## 2. KANBAN STATUS (100% of All Tasks DONE)
-- Kanban board: `https://agent-kanban-board.onrender.com` (code: `../agent-kanban-board`). Mutations need `KANBAN_AUTH_TOKEN` (Render-generated, not in any repo); until it is exported in the working session, task tracking lives in the status tables in this file (§5 Wave 0, §6 Wave 1). When the token is available: project `chess-game`, one card per roadmap item id (B1…, E1a…), role headers `X-Agent-Role: builder|reviewer|tester`, lifecycle BACKLOG→BUILDING→IN_REVIEW→IN_TEST→DONE.
+- Kanban board: `https://agent-kanban.riazrahaman.com/api` (project `chess`). Mutations need the API token (stored in `.opencode/config.json`, not in any repo); until it is exported in the working session, task tracking lives in the status tables in this file (§5 Wave 0, §6 Wave 1). When the token is available: project `chess`, one card per roadmap item id (B1…, E1a…), role headers `X-Agent-Role: builder|reviewer|tester`, lifecycle BACKLOG→BUILDING→IN_REVIEW→IN_TEST→DONE.
 - All tasks have traversed the complete autonomous lifecycle (`BUILDING` → `IN_REVIEW` → `IN_TEST` → `DONE`):
   1. `chess-t0-seat-auth-heartbeat` (T0.2 & T0.3): **DONE**
      - Enforced caller authorization on `/api/reset`, `/api/undo`, `/api/draw`, and `/api/resign` via `validateMutation` in `SeatAuthManager`.
@@ -166,7 +166,7 @@ worktree workers with strict file ownership (A: `src/ui.js` + `index.html`; B: `
 | B5 `showUiError` clobbers `#status` | DONE | 4f1892a | Auto-dismissing pill in `#command-status`; `#status` untouched. |
 | B6 600 ms poll forever | DONE | 5b38dfc | 15 s liveness while SSE open, 600 ms when down, exp. backoff cap 10 s on failure. 1 poll / 20 s measured with SSE. |
 | B10 phantom `stockfish.*` allowlist + dead ui fallbacks | DONE | dcf8033, e78d409, 6f4f7a2 | Allowlist entries removed; `p2-stockfish-selftest` now asserts absence; dead `boardToFen`/`RulesEngine` branches removed. |
-| B11 `ui-auth.js` 404 (not in ALLOWED_FILES/precache) | DONE | 2c30698, 5533297 | Allowlisted + precached. Follow-up: `accounts.js` (Node-only) removed from `index.html`/allowlist/precache; `demoUser` login gated behind `ALLOW_DEMO_AUTH=1` (was a credential-free session for any email on the public Render deploy). |
+| B11 `ui-auth.js` 404 (not in ALLOWED_FILES/precache) | DONE | 2c30698, 5533297 | Allowlisted + precached. Follow-up: `accounts.js` (Node-only) removed from `index.html`/allowlist/precache; `demoUser` login gated behind `ALLOW_DEMO_AUTH=1` (was a credential-free session for any email on the public deploy). |
 | D1 gzip/brotli · D2 cache headers + ETag/304 · D3 precache worker | DONE | 498e2d1, 539c7cc, 45b6383 | `ui.js` 118 KB → 30 KB gzip / 26 KB br; static `public, max-age=0, must-revalidate` + weak ETag + 304; `/api/*`, `index.html`, SW stay `no-store`; `stockfish-worker.js` precached. |
 | `reachability-selftest.js` (§7 DoD guard) + wiring | DONE | 8400e06, a5b27f7, 9bc2006 | 25 assertions: every `<script src>`/Worker exists + allowlisted + precached; every `src/*.js` loaded, required, or in `KNOWN_DARK` (30, may only shrink); call-site check for loaded modules. Wired into `test:unit` and `lint`. |
 | B7 selftest residue files | DONE | 4757c9d | 5 suites now write under `os.tmpdir()` via `CHESS_STATE_FILE` and rm on exit. 597 residue files deleted from repo root (live default-room files kept). |
